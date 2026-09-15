@@ -32,8 +32,14 @@ import {
   syncBatchTransactions,
   saveToLocalStorage,
   clearAllDemoData,
+  STORAGE_KEYS,
 } from './services/financeService';
-import { signOutUser } from './services/supabase';
+import {
+  signOutUser,
+  isSupabaseConfigured,
+  supabase,
+  getUserProfile,
+} from './services/supabase';
 
 // Formatação Monetária Segura (em Centavos)
 const formatMoney = (cents = 0) => {
@@ -192,26 +198,64 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('financas_session');
-      return saved ? JSON.parse(saved) : {
-        id: 'user-1',
-        name: 'Rafael',
-        email: 'rafael@familia.com',
-        role: 'admin',
-        memberKey: 'user-1',
-      };
+      return saved ? JSON.parse(saved) : null;
     } catch {
-      return {
-        id: 'user-1',
-        name: 'Rafael',
-        email: 'rafael@familia.com',
-        role: 'admin',
-        memberKey: 'user-1',
-      };
+      return null;
     }
   });
 
-  // Carregamento inicial de dados (Supabase ou LocalStorage)
+  // Restaurar sessão do Supabase Auth caso exista
   useEffect(() => {
+    if (isSupabaseConfigured() && supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          getUserProfile(session.user.id).then((profile) => {
+            const role =
+              profile?.role ||
+              session.user.user_metadata?.role ||
+              (session.user.email?.includes('anadebora') ? 'member' : 'admin');
+            const memberKey =
+              profile?.member_key ||
+              session.user.user_metadata?.memberKey ||
+              (role === 'admin' ? 'user-1' : 'user-2');
+            const userName =
+              profile?.name ||
+              session.user.user_metadata?.name ||
+              (memberKey === 'user-1' ? 'Rafael' : 'Ana Débora');
+            const userObj = {
+              id: session.user.id,
+              email: session.user.email,
+              name: userName,
+              role,
+              memberKey,
+            };
+            setCurrentUser(userObj);
+            saveToLocalStorage('financas_session', userObj);
+          });
+        }
+      });
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!session) {
+          setCurrentUser(null);
+          try {
+            localStorage.removeItem('financas_session');
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      return () => subscription.unsubscribe();
+    }
+  }, []);
+
+  // Carregamento inicial de dados (executado quando há usuário logado)
+  useEffect(() => {
+    if (!currentUser) return;
+
     loadInitialAppData({
       accounts: INITIAL_ACCOUNTS,
       cards: INITIAL_CARDS,
@@ -228,7 +272,7 @@ export default function App() {
         if (res.scenarios) setScenarios(res.scenarios);
       }
     });
-  }, []);
+  }, [currentUser]);
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
@@ -244,14 +288,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await signOutUser();
-    const guestUser = {
-      id: 'guest',
-      name: 'Visitante',
-      email: '',
-      role: 'admin',
-      memberKey: 'user-1',
-    };
-    setCurrentUser(guestUser);
+    setCurrentUser(null);
     try {
       localStorage.removeItem('financas_session');
     } catch (e) {
@@ -852,14 +889,54 @@ export default function App() {
     }
   };
 
+  const handleDeleteAccount = (acc) => {
+    const tiedCount = transactions.filter((t) => t.accountId === acc.id).length;
+    const warning =
+      tiedCount > 0
+        ? `\n\nAtenção: Esta conta possui ${tiedCount} lançamento(s) associado(s). Eles ficarão sem conta vinculada.`
+        : '';
+    if (confirm(`Deseja realmente EXCLUIR DEFINITIVAMENTE a conta "${acc.name}"?${warning}`)) {
+      const updatedAccounts = accounts.filter((a) => a.id !== acc.id);
+      setAccounts(updatedAccounts);
+      saveToLocalStorage(STORAGE_KEYS.accounts, updatedAccounts);
+      syncItem('accounts', acc, true);
+
+      if (tiedCount > 0) {
+        const updatedTxs = transactions.map((t) => (t.accountId === acc.id ? { ...t, accountId: null } : t));
+        setTransactions(updatedTxs);
+        saveToLocalStorage(STORAGE_KEYS.transactions, updatedTxs);
+      }
+    }
+  };
+
   const toggleArchiveAccount = (id) => {
     const target = accounts.find((a) => a.id === id);
     if (!target) return;
     const updatedAcc = { ...target, archived: !target.archived };
     const updated = accounts.map((a) => (a.id === id ? updatedAcc : a));
     setAccounts(updated);
-    saveToLocalStorage('financas_accounts_v1', updated);
+    saveToLocalStorage(STORAGE_KEYS.accounts, updated);
     syncItem('accounts', updatedAcc);
+  };
+
+  const handleDeleteCard = (card) => {
+    const tiedCount = transactions.filter((t) => t.cardId === card.id).length;
+    const warning =
+      tiedCount > 0
+        ? `\n\nAtenção: Este cartão possui ${tiedCount} lançamento(s) associado(s). Eles ficarão sem cartão vinculado.`
+        : '';
+    if (confirm(`Deseja realmente EXCLUIR DEFINITIVAMENTE o cartão "${card.name}"?${warning}`)) {
+      const updatedCards = cards.filter((c) => c.id !== card.id);
+      setCards(updatedCards);
+      saveToLocalStorage(STORAGE_KEYS.cards, updatedCards);
+      syncItem('cards', card, true);
+
+      if (tiedCount > 0) {
+        const updatedTxs = transactions.map((t) => (t.cardId === card.id ? { ...t, cardId: null } : t));
+        setTransactions(updatedTxs);
+        saveToLocalStorage(STORAGE_KEYS.transactions, updatedTxs);
+      }
+    }
   };
 
   const toggleArchiveCard = (id) => {
@@ -868,8 +945,28 @@ export default function App() {
     const updatedCard = { ...target, archived: !target.archived };
     const updated = cards.map((c) => (c.id === id ? updatedCard : c));
     setCards(updated);
-    saveToLocalStorage('financas_cards_v1', updated);
+    saveToLocalStorage(STORAGE_KEYS.cards, updated);
     syncItem('cards', updatedCard);
+  };
+
+  const handleDeleteCategory = (cat) => {
+    const tiedCount = transactions.filter((t) => t.categoryId === cat.id).length;
+    const warning =
+      tiedCount > 0
+        ? `\n\nAtenção: Esta categoria possui ${tiedCount} lançamento(s) associado(s). Eles ficarão sem categoria vinculada.`
+        : '';
+    if (confirm(`Deseja realmente EXCLUIR DEFINITIVAMENTE a categoria "${cat.name}"?${warning}`)) {
+      const updatedCats = categories.filter((c) => c.id !== cat.id);
+      setCategories(updatedCats);
+      saveToLocalStorage(STORAGE_KEYS.categories, updatedCats);
+      syncItem('categories', cat, true);
+
+      if (tiedCount > 0) {
+        const updatedTxs = transactions.map((t) => (t.categoryId === cat.id ? { ...t, categoryId: null } : t));
+        setTransactions(updatedTxs);
+        saveToLocalStorage(STORAGE_KEYS.transactions, updatedTxs);
+      }
+    }
   };
 
   const toggleArchiveCategory = (id) => {
@@ -878,8 +975,17 @@ export default function App() {
     const updatedCat = { ...target, archived: !target.archived };
     const updated = categories.map((c) => (c.id === id ? updatedCat : c));
     setCategories(updated);
-    saveToLocalStorage('financas_categories_v1', updated);
+    saveToLocalStorage(STORAGE_KEYS.categories, updated);
     syncItem('categories', updatedCat);
+  };
+
+  const handleDeleteScenario = (scen) => {
+    if (confirm(`Deseja realmente excluir o cenário "${scen.title}"?`)) {
+      const updated = scenarios.filter((s) => s.id !== scen.id);
+      setScenarios(updated);
+      saveToLocalStorage(STORAGE_KEYS.scenarios, updated);
+      syncItem('scenarios', scen, true);
+    }
   };
 
   const toggleStatusPaid = (tx) => {
@@ -1056,6 +1162,16 @@ export default function App() {
       return matchSearch && matchType && matchStatus;
     });
   }, [allDisplayTransactions, searchTerm, filterType, filterStatus]);
+
+  if (!currentUser) {
+    return (
+      <AuthModal
+        isOpen={true}
+        isMandatory={true}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased font-sans">
@@ -1828,9 +1944,17 @@ export default function App() {
                         <button
                           onClick={() => toggleArchiveAccount(acc.id)}
                           className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                          title="Arquivar"
+                          title={acc.archived ? 'Desarquivar' : 'Arquivar'}
                         >
                           <Archive className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAccount(acc)}
+                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          title="Excluir Definitivamente"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
@@ -1894,9 +2018,17 @@ export default function App() {
                         <button
                           onClick={() => toggleArchiveCard(card.id)}
                           className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                          title="Arquivar"
+                          title={card.archived ? 'Desarquivar' : 'Arquivar'}
                         >
                           <Archive className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCard(card)}
+                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          title="Excluir Definitivamente"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
@@ -2065,15 +2197,25 @@ export default function App() {
                   <div className="flex items-center space-x-1">
                     <button
                       onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: cat })}
-                      className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg"
+                      className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg transition"
+                      title="Editar"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => toggleArchiveCategory(cat.id)}
-                      className="p-1.5 text-slate-500 hover:text-amber-600 rounded-lg"
+                      className="p-1.5 text-slate-500 hover:text-amber-600 rounded-lg transition"
+                      title={cat.archived ? 'Desarquivar' : 'Arquivar'}
                     >
                       <Archive className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCategory(cat)}
+                      className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                      title="Excluir Definitivamente"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -2248,11 +2390,7 @@ export default function App() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              if (confirm(`Deseja excluir o cenário "${scen.title}"?`)) {
-                                setScenarios((prev) => prev.filter((s) => s.id !== scen.id));
-                              }
-                            }}
+                            onClick={() => handleDeleteScenario(scen)}
                             className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
                             title="Excluir Cenário"
                           >

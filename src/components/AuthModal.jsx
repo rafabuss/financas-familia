@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { signInWithPassword, signUpUser, isSupabaseConfigured } from '../services/supabase';
 
-export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
+export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory = false }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,7 +49,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
               role,
               memberKey: selectedMember,
             });
-            onClose();
+            if (onClose) onClose();
           }
         }
       } else {
@@ -70,7 +70,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
             role,
             memberKey,
           });
-          onClose();
+          if (onClose) onClose();
         }
       }
     } catch (err) {
@@ -89,21 +89,29 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       role: isRafael ? 'admin' : 'member',
       memberKey,
     });
-    onClose();
+    if (onClose) onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
+        isMandatory
+          ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950'
+          : 'bg-slate-950/75 backdrop-blur-sm'
+      } animate-in fade-in overflow-y-auto`}
+    >
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto">
         {/* Topo do Modal */}
         <div className="bg-slate-900 text-white p-6 relative">
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
-            title="Fechar"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {!isMandatory && onClose && (
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
           <div className="flex items-center space-x-2 text-blue-400 mb-1">
             <Shield className="w-5 h-5" />
             <span className="text-xs font-bold uppercase tracking-wider">Acesso Seguro & Familiar</span>
@@ -236,37 +244,39 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
               {isSignUp ? 'Já tem conta? Fazer Login' : 'Primeiro acesso? Criar conta'}
             </button>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-slate-400 hover:text-slate-600"
-            >
-              Usar Modo Local
-            </button>
+            {!isMandatory && onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-slate-400 hover:text-slate-600 font-medium"
+              >
+                Fechar
+              </button>
+            )}
           </div>
         </form>
 
-        {/* Atalho Rápido de Demonstração */}
+        {/* Atalho Rápido de Acesso */}
         <div className="p-4 bg-slate-50 border-t border-slate-100">
           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
-            Simulação de Acesso Rápido:
+            {isCloud ? 'Ou acesse em Modo Local (Demonstração / Teste):' : 'Acesso Local / Demonstração:'}
           </span>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => handleQuickDemoLogin('user-1')}
-              className="px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-300 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center space-x-1 transition"
+              className="px-3 py-2 bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition shadow-sm"
             >
-              <Sparkles className="w-3 h-3 text-blue-600" />
-              <span>Entrar como Rafael (Admin)</span>
+              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+              <span>Rafael (Admin)</span>
             </button>
             <button
               type="button"
               onClick={() => handleQuickDemoLogin('user-2')}
-              className="px-3 py-1.5 bg-white border border-slate-200 hover:border-purple-300 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center space-x-1 transition"
+              className="px-3 py-2 bg-white border border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition shadow-sm"
             >
-              <Sparkles className="w-3 h-3 text-purple-600" />
-              <span>Entrar como Ana Débora</span>
+              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+              <span>Ana Débora</span>
             </button>
           </div>
         </div>

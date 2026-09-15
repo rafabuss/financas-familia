@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   accounts: 'financas_accounts_v1',
   cards: 'financas_cards_v1',
   categories: 'financas_categories_v1',

@@ -648,10 +648,23 @@ export default function App() {
     };
   }, [visibleTransactions, dashboardMonth, categories]);
 
-  // Próximos Vencimentos & Compromissos para o Dashboard (Ordem cronológica crescente a partir de hoje)
+  // Lançamentos em atraso (comprometidos com data anterior a hoje)
+  const overdueTransactions = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return visibleTransactions.filter(
+      (tx) => tx.status === 'COMPROMETIDO' && tx.date && tx.date < todayStr
+    );
+  }, [visibleTransactions]);
+
+  const overdueExpensesTotalCents = useMemo(() => {
+    return overdueTransactions
+      .filter((tx) => tx.type === 'EXPENSE')
+      .reduce((acc, tx) => acc + tx.amountCents, 0);
+  }, [overdueTransactions]);
+
+  // Próximos Vencimentos & Compromissos para o Dashboard (Ordem cronológica com atrasos prioritários no topo)
   const upcomingCommitments = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    const todayTime = new Date(todayStr + 'T12:00:00').getTime();
 
     // Filtra transações não canceladas: vencimentos futuros ou pendentes/atrasados
     const pendingOrUpcoming = visibleTransactions.filter((tx) => {
@@ -660,23 +673,16 @@ export default function App() {
       return tx.status === 'COMPROMETIDO';
     });
 
-    // Ordenação cronológica a partir de hoje:
-    // Compromissos futuros/de hoje em diante: do mais imediato ao mais distante (hoje, amanhã, próximo mês...)
-    // Parcelas de 2031 ficam lá no final da fila!
+    // Ordenação: contas em atraso no topo (da mais antiga para a mais recente),
+    // seguidas pelos compromissos a partir de hoje em ordem cronológica crescente.
     pendingOrUpcoming.sort((a, b) => {
-      const timeA = new Date(a.date + 'T12:00:00').getTime();
-      const timeB = new Date(b.date + 'T12:00:00').getTime();
+      const isOverdueA = a.status === 'COMPROMETIDO' && a.date < todayStr;
+      const isOverdueB = b.status === 'COMPROMETIDO' && b.date < todayStr;
 
-      const isUpcomingA = timeA >= todayTime;
-      const isUpcomingB = timeB >= todayTime;
+      if (isOverdueA && !isOverdueB) return -1;
+      if (!isOverdueA && isOverdueB) return 1;
 
-      if (isUpcomingA && isUpcomingB) {
-        return timeA - timeB;
-      }
-      if (isUpcomingA && !isUpcomingB) return -1;
-      if (!isUpcomingA && isUpcomingB) return 1;
-
-      return timeB - timeA;
+      return (a.date || '').localeCompare(b.date || '');
     });
 
     return pendingOrUpcoming.slice(0, 6);
@@ -1366,15 +1372,20 @@ export default function App() {
 
   // Filtragem e Ordenação de Lançamentos na tabela (incluindo simulações hipotéticas ativas)
   const filteredTransactions = useMemo(() => {
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayTime = new Date(todayDate + 'T12:00:00').getTime();
+
     const list = allDisplayTransactions.filter((t) => {
       const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchType = filterType === 'ALL' || t.type === filterType;
-      const matchStatus = filterStatus === 'ALL' || t.status === filterStatus;
+      const matchStatus =
+        filterStatus === 'ALL'
+          ? true
+          : filterStatus === 'OVERDUE'
+          ? !t.isHypothetical && t.status === 'COMPROMETIDO' && t.date && t.date < todayDate
+          : t.status === filterStatus;
       return matchSearch && matchType && matchStatus;
     });
-
-    const todayDate = new Date().toISOString().slice(0, 10);
-    const todayTime = new Date(todayDate + 'T12:00:00').getTime();
 
     return list.sort((a, b) => {
       if (txSort.field === 'date') {
@@ -1720,6 +1731,36 @@ export default function App() {
               </div>
             </div>
 
+            {/* Alerta de Contas em Atraso */}
+            {overdueTransactions.length > 0 && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-rose-900">
+                      Atenção: {overdueTransactions.length} {overdueTransactions.length === 1 ? 'conta em atraso' : 'contas em atraso'}
+                    </h4>
+                    <p className="text-xs text-rose-700 mt-0.5">
+                      Total pendente de <span className="font-bold">{formatMoney(overdueExpensesTotalCents)}</span> com vencimento anterior à data de hoje.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterStatus('OVERDUE');
+                    setActiveTab('transactions');
+                  }}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition whitespace-nowrap shadow-xs flex items-center space-x-1.5 self-end sm:self-auto"
+                >
+                  <span>Ver contas em atraso</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* 4 Cards de Métricas Principais (Identidade Visual da Imagem) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -1842,36 +1883,54 @@ export default function App() {
                   {upcomingCommitments.length === 0 ? (
                     <p className="text-xs text-slate-400 py-6 text-center">Nenhum vencimento pendente para os próximos dias.</p>
                   ) : (
-                    upcomingCommitments.map((tx) => (
-                      <div key={tx.id} className="py-3 flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <p className="font-semibold text-sm text-slate-900">{tx.description}</p>
-                            <span
-                              className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                                tx.scope === 'PERSONAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
-                              }`}
-                            >
-                              {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
-                            </span>
+                    upcomingCommitments.map((tx) => {
+                      const isOverdue = tx.status === 'COMPROMETIDO' && tx.date && tx.date < new Date().toISOString().slice(0, 10);
+                      return (
+                        <div
+                          key={tx.id}
+                          className={`py-3 flex items-center justify-between transition-colors ${
+                            isOverdue ? 'bg-rose-50/70 -mx-3 px-3 rounded-xl border border-rose-200/60 my-1' : ''
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <p className="font-semibold text-sm text-slate-900">{tx.description}</p>
+                              <span
+                                className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                                  tx.scope === 'PERSONAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
+                              </span>
+                              {isOverdue && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200 flex items-center space-x-1">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
+                                  <span>Em Atraso</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
+                              <span className={isOverdue ? 'text-rose-600 font-semibold' : ''}>{formatDateBR(tx.date)}</span>
+                              <span>•</span>
+                              <span
+                                className={`font-semibold ${
+                                  tx.status === 'REALIZADO'
+                                    ? 'text-emerald-600'
+                                    : isOverdue
+                                    ? 'text-rose-600'
+                                    : 'text-blue-600'
+                                }`}
+                              >
+                                ● {isOverdue ? 'EM ATRASO' : tx.status}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
-                            <span>{formatDateBR(tx.date)}</span>
-                            <span>•</span>
-                            <span
-                              className={`font-semibold ${
-                                tx.status === 'REALIZADO' ? 'text-emerald-600' : 'text-blue-600'
-                              }`}
-                            >
-                              ● {tx.status}
-                            </span>
+                          <div className={`font-bold text-sm ${tx.type === 'INCOME' ? 'text-emerald-600' : isOverdue ? 'text-rose-600' : 'text-slate-900'}`}>
+                            {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
                           </div>
                         </div>
-                        <div className={`font-bold text-sm ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                          {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -1949,6 +2008,7 @@ export default function App() {
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
                   <option value="ALL">Todas as Situações</option>
+                  <option value="OVERDUE">🚨 Em Atraso {overdueTransactions.length > 0 ? `(${overdueTransactions.length})` : ''}</option>
                   <option value="REALIZADO">Realizado</option>
                   <option value="COMPROMETIDO">Comprometido</option>
                   <option value="PREVISTO">Previsto</option>
@@ -2131,6 +2191,7 @@ export default function App() {
                         const cat = categories.find((c) => c.id === tx.categoryId);
                         const acc = accounts.find((a) => a.id === tx.accountId);
                         const card = cards.find((c) => c.id === tx.cardId);
+                        const isOverdue = !tx.isHypothetical && tx.status === 'COMPROMETIDO' && tx.date && tx.date < new Date().toISOString().slice(0, 10);
 
                         return (
                           <tr
@@ -2138,13 +2199,23 @@ export default function App() {
                             className={`transition-colors ${
                               tx.isHypothetical
                                 ? 'bg-purple-50/20 hover:bg-purple-50/40 border-l-2 border-purple-500'
+                                : isOverdue
+                                ? 'bg-rose-50/50 hover:bg-rose-50/80 border-l-4 border-rose-500'
                                 : 'hover:bg-slate-50'
                             }`}
                           >
-                            <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{formatDateBR(tx.date)}</td>
+                            <td className={`py-3 px-4 whitespace-nowrap ${isOverdue ? 'text-rose-600 font-semibold' : 'text-slate-600'}`}>
+                              {formatDateBR(tx.date)}
+                            </td>
                             <td className="py-3 px-4 font-medium text-slate-900">
                               <div className="flex items-center space-x-2">
                                 <span>{tx.description}</span>
+                                {isOverdue && (
+                                  <span className="text-[10px] bg-rose-100 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded font-bold flex items-center space-x-1" title="Lançamento com vencimento em atraso">
+                                    <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
+                                    <span>Em Atraso</span>
+                                  </span>
+                                )}
                                 {tx.installmentCount && (
                                   <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold">
                                     {tx.installmentNumber}/{tx.installmentCount}
@@ -2197,17 +2268,26 @@ export default function App() {
                                   className={`text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center space-x-1 transition ${
                                     tx.status === 'REALIZADO'
                                       ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                      : isOverdue
+                                      ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300'
                                       : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
                                   }`}
+                                  title={isOverdue ? 'Conta em atraso! Clique para marcar como Realizado' : 'Clique para alternar situação'}
                                 >
-                                  {tx.status === 'REALIZADO' ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                                  <span>{tx.status}</span>
+                                  {tx.status === 'REALIZADO' ? (
+                                    <CheckCircle2 className="w-3 h-3" />
+                                  ) : isOverdue ? (
+                                    <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                  ) : (
+                                    <Clock className="w-3 h-3" />
+                                  )}
+                                  <span>{isOverdue ? 'EM ATRASO' : tx.status}</span>
                                 </button>
                               )}
                             </td>
                             <td
                               className={`py-3 px-4 text-right font-bold whitespace-nowrap ${
-                                tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'
+                                tx.type === 'INCOME' ? 'text-emerald-600' : isOverdue ? 'text-rose-600' : 'text-slate-900'
                               }`}
                             >
                               {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
@@ -2854,14 +2934,15 @@ export default function App() {
                     const startMonth = now.getMonth();
                     const currentYearMonth = `${startYear}-${String(startMonth + 1).padStart(2, '0')}`;
 
-                    // Despesas e receitas habituais base (sem parcelamentos futuros embutidos)
+                    // Despesas e receitas habituais base do mês atual (sem parcelamentos futuros embutidos)
                     const baseIncomesCents = visibleTransactions
                       .filter(
                         (t) =>
                           t.type === 'INCOME' &&
                           t.status !== 'CANCELADO' &&
-                          (!t.installmentGroupId || t.installmentNumber === 1) &&
-                          (t.isRecurring || (t.date && t.date.startsWith(currentYearMonth)))
+                          !t.installmentGroupId &&
+                          t.date &&
+                          t.date.startsWith(currentYearMonth)
                       )
                       .reduce((acc, t) => acc + t.amountCents, 0);
 
@@ -2871,7 +2952,8 @@ export default function App() {
                           t.type === 'EXPENSE' &&
                           t.status !== 'CANCELADO' &&
                           !t.installmentGroupId &&
-                          (t.isRecurring || (t.date && t.date.startsWith(currentYearMonth)))
+                          t.date &&
+                          t.date.startsWith(currentYearMonth)
                       )
                       .reduce((acc, t) => acc + t.amountCents, 0);
 

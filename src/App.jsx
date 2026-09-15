@@ -31,6 +31,7 @@ import {
   syncItem,
   syncBatchTransactions,
   saveToLocalStorage,
+  clearAllDemoData,
 } from './services/financeService';
 import { signOutUser } from './services/supabase';
 
@@ -255,6 +256,16 @@ export default function App() {
       localStorage.removeItem('financas_session');
     } catch (e) {
       console.warn(e);
+    }
+  };
+
+  const handleClearDemoData = async () => {
+    if (confirm('Deseja realmente limpar todos os lançamentos e simulações fictícias de exemplo e começar com seus dados reais?')) {
+      const res = await clearAllDemoData(accounts);
+      setTransactions([]);
+      setScenarios([]);
+      setAccounts(res.accounts);
+      alert('Dados de exemplo limpos com sucesso! Agora você já pode cadastrar suas contas e lançamentos reais.');
     }
   };
 
@@ -1198,6 +1209,29 @@ export default function App() {
               </div>
             )}
 
+            {/* Banner para Limpar Dados de Demonstração */}
+            {transactions.length > 0 && transactions.some((t) => t.id.startsWith('tx-') && !t.id.startsWith('tx-imp-')) && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-center space-x-3">
+                  <span className="text-2xl">✨</span>
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-900">Começar com seus dados reais?</h4>
+                    <p className="text-xs text-slate-600">
+                      Os dados atuais são exemplos de demonstração. Você pode limpá-los agora com um clique para iniciar suas finanças do zero.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearDemoData}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold whitespace-nowrap shadow-sm transition active:scale-95 flex items-center justify-center space-x-1.5 self-start sm:self-auto"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Limpar Dados de Exemplo</span>
+                </button>
+              </div>
+            )}
+
             {/* 4 Cards de Métricas Principais (Identidade Visual da Imagem) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -1429,6 +1463,18 @@ export default function App() {
                   <option value="HIPOTETICO">Hipotético</option>
                 </select>
 
+                {transactions.some((t) => t.id.startsWith('tx-') && !t.id.startsWith('tx-imp-')) && (
+                  <button
+                    type="button"
+                    onClick={handleClearDemoData}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 transition ml-auto"
+                    title="Excluir lançamentos fictícios de exemplo"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span className="hidden sm:inline">Limpar Exemplos</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1436,7 +1482,9 @@ export default function App() {
                     setEditScope('single');
                     setModalState({ isOpen: true, type: 'transaction', mode: 'create', data: null, scenarioIdToConvert: null });
                   }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 ml-auto"
+                  className={`bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 ${
+                    transactions.some((t) => t.id.startsWith('tx-') && !t.id.startsWith('tx-imp-')) ? '' : 'ml-auto'
+                  }`}
                 >
                   <Plus className="w-4 h-4" />
                   <span>Novo</span>
@@ -2445,6 +2493,23 @@ export default function App() {
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>Baixar CSV</span>
+                </button>
+              </div>
+
+              <div className="p-4 border border-rose-100 bg-rose-50/60 rounded-xl flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-sm text-rose-900">Limpar Dados de Exemplo</h4>
+                  <p className="text-xs text-rose-600">
+                    Remove os lançamentos fictícios para que você inicie do zero com suas informações reais.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearDemoData}
+                  className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Limpar Agora</span>
                 </button>
               </div>
             </div>

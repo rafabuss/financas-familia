@@ -198,6 +198,18 @@ export const loadInitialAppData = async (defaults) => {
           console.warn('Aviso no seed inicial do Supabase:', e);
         }
 
+        const isInitialized = localStorage.getItem('financas_initialized') === 'true';
+        if (isInitialized) {
+          return {
+            isCloud: true,
+            accounts: (accRes.data || []).map(accountToClient),
+            cards: (cardRes.data || []).map(cardToClient),
+            categories: (catRes.data || []).map(categoryToClient),
+            transactions: [],
+            scenarios: [],
+          };
+        }
+
         return {
           isCloud: true,
           accounts: defaults.accounts,
@@ -213,10 +225,15 @@ export const loadInitialAppData = async (defaults) => {
   }
 
   // Fallback para LocalStorage
+  const isInitialized = localStorage.getItem('financas_initialized') === 'true';
   const getLocal = (key, fallback) => {
     try {
       const stored = localStorage.getItem(key);
-      return stored ? JSON.parse(stored) : fallback;
+      if (stored !== null) return JSON.parse(stored);
+      if (isInitialized && (key === STORAGE_KEYS.transactions || key === STORAGE_KEYS.scenarios)) {
+        return [];
+      }
+      return fallback;
     } catch {
       return fallback;
     }
@@ -227,8 +244,41 @@ export const loadInitialAppData = async (defaults) => {
     accounts: getLocal(STORAGE_KEYS.accounts, defaults.accounts),
     cards: getLocal(STORAGE_KEYS.cards, defaults.cards),
     categories: getLocal(STORAGE_KEYS.categories, defaults.categories),
-    transactions: getLocal(STORAGE_KEYS.transactions, defaults.transactions),
-    scenarios: getLocal(STORAGE_KEYS.scenarios, defaults.scenarios),
+    transactions: getLocal(STORAGE_KEYS.transactions, isInitialized ? [] : defaults.transactions),
+    scenarios: getLocal(STORAGE_KEYS.scenarios, isInitialized ? [] : defaults.scenarios),
+  };
+};
+
+export const clearAllDemoData = async (currentAccounts = []) => {
+  const isCloud = isSupabaseConfigured() && supabase;
+  
+  if (isCloud) {
+    try {
+      await Promise.all([
+        supabase.from('transactions').delete().neq('id', '__none__'),
+        supabase.from('scenarios').delete().neq('id', '__none__'),
+      ]);
+      if (currentAccounts.length) {
+        for (const a of currentAccounts) {
+          await supabase.from('accounts').update({ initial_balance_cents: 0 }).eq('id', a.id);
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao limpar Supabase:', e);
+    }
+  }
+
+  const zeroedAccounts = currentAccounts.map((a) => ({ ...a, initialBalanceCents: 0 }));
+
+  localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify([]));
+  localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify([]));
+  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(zeroedAccounts));
+  localStorage.setItem('financas_initialized', 'true');
+
+  return {
+    transactions: [],
+    scenarios: [],
+    accounts: zeroedAccounts,
   };
 };
 

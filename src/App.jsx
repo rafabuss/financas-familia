@@ -26,7 +26,9 @@ import {
   LogOut,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import AuthModal from './components/AuthModal';
 import {
@@ -34,7 +36,6 @@ import {
   syncItem,
   syncBatchTransactions,
   saveToLocalStorage,
-  clearAllDemoData,
   clearDemoDataOnly,
   resetEntireSystem,
   loadDemoPresentationData,
@@ -272,13 +273,32 @@ export default function App() {
   // Ordenação de Lançamentos (padrão: data mais próxima da data atual)
   const [txSort, setTxSort] = useState({ field: 'date', direction: 'closest' }); // 'closest' | 'asc' | 'desc'
 
-  // Ordenação em outras abas
-  const [invoiceSort, setInvoiceSort] = useState({ field: 'date', direction: 'closest' });
-  const [scenarioSort, setScenarioSort] = useState({ field: 'date', direction: 'closest' });
+  // Ordenação de Projeções
   const [projectionSort, setProjectionSort] = useState({ field: 'month', direction: 'asc' });
 
   // Horizonte de Projeções (12, 24 ou 36 meses)
   const [projectionHorizon, setProjectionHorizon] = useState(12);
+
+  // Mês de Referência para o Dashboard (padrão: mês atual 'YYYY-MM')
+  const [dashboardMonth, setDashboardMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const currentActualMonth = useMemo(() => new Date().toISOString().slice(0, 7), []);
+
+  const formatMonthLabel = (yearMonthStr) => {
+    try {
+      const [y, m] = yearMonthStr.split('-');
+      const d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+      return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    } catch {
+      return yearMonthStr;
+    }
+  };
+
+  const changeDashboardMonth = (offset) => {
+    const [y, m] = dashboardMonth.split('-').map(Number);
+    const nextDate = new Date(y, m - 1 + offset, 1);
+    const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+    setDashboardMonth(nextStr);
+  };
 
   // Controles dos Gráficos
   const [chartIncludeScenarios, setChartIncludeScenarios] = useState(true);
@@ -521,28 +541,38 @@ export default function App() {
         if (diffA !== diffB) return diffA - diffB;
         return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
       });
+      // Limite comprometido total (soma de todas as parcelas ativas)
       const committed = cardTxs.reduce((acc, t) => acc + (t.type === 'EXPENSE' ? t.amountCents : 0), 0);
+      // Fatura do mês selecionado: apenas despesas com vencimento no mês do dashboard
+      const currentMonthExpenses = cardTxs
+        .filter((t) => t.type === 'EXPENSE' && t.date && t.date.startsWith(dashboardMonth))
+        .reduce((acc, t) => acc + t.amountCents, 0);
+
       map[card.id] = {
         card,
         items: cardTxs,
-        invoiceTotalCents: committed,
+        invoiceTotalCents: currentMonthExpenses,
         committedCents: committed,
         availableCents: Math.max(0, card.limitCents - committed),
       };
     });
     return map;
-  }, [cards, visibleTransactions]);
+  }, [cards, visibleTransactions, dashboardMonth]);
 
   // Retrocompatibilidade para cardStats
   const cardStats = cardInvoices;
 
-  // Totais do Mês Atual
+  // Totais do Mês Selecionado (Dashboard)
   const monthSummary = useMemo(() => {
     let income = 0;
     let expense = 0;
     let committed = 0;
 
     visibleTransactions.forEach((tx) => {
+      // Filtrar estritamente pelo mês de referência (ex: '2026-09') e ignorar cancelados
+      if (tx.status === 'CANCELADO') return;
+      if (!tx.date || !tx.date.startsWith(dashboardMonth)) return;
+
       if (tx.type === 'INCOME') {
         income += tx.amountCents;
       } else {
@@ -562,7 +592,75 @@ export default function App() {
       totalBankBalance,
       totalCardsAvailable,
     };
-  }, [visibleTransactions, accountBalances, cardStats]);
+  }, [visibleTransactions, accountBalances, cardStats, dashboardMonth]);
+
+  // Maiores Gastos por Categoria no Mês do Dashboard
+  const dashboardCategoryChartData = useMemo(() => {
+    const expenseMap = {};
+    let totalExpensesCents = 0;
+
+    visibleTransactions.forEach((tx) => {
+      if (tx.status === 'CANCELADO') return;
+      if (!tx.date || !tx.date.startsWith(dashboardMonth)) return;
+      if (tx.type !== 'EXPENSE') return;
+
+      expenseMap[tx.categoryId] = (expenseMap[tx.categoryId] || 0) + tx.amountCents;
+      totalExpensesCents += tx.amountCents;
+    });
+
+    const expensesList = Object.entries(expenseMap)
+      .map(([catId, amountCents]) => {
+        const cat = categories.find((c) => c.id === catId);
+        const percentage = totalExpensesCents > 0 ? ((amountCents / totalExpensesCents) * 100).toFixed(1) : 0;
+        return {
+          catId,
+          name: cat?.name || 'Geral',
+          color: cat?.color || '#ef4444',
+          amountCents,
+          percentage: parseFloat(percentage),
+        };
+      })
+      .sort((a, b) => b.amountCents - a.amountCents);
+
+    return {
+      expensesList,
+      totalExpensesCents,
+    };
+  }, [visibleTransactions, dashboardMonth, categories]);
+
+  // Próximos Vencimentos & Compromissos para o Dashboard (Ordem cronológica crescente a partir de hoje)
+  const upcomingCommitments = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayTime = new Date(todayStr + 'T12:00:00').getTime();
+
+    // Filtra transações não canceladas: vencimentos futuros ou pendentes/atrasados
+    const pendingOrUpcoming = visibleTransactions.filter((tx) => {
+      if (tx.status === 'CANCELADO') return false;
+      if (tx.date >= todayStr) return true;
+      return tx.status === 'COMPROMETIDO';
+    });
+
+    // Ordenação cronológica a partir de hoje:
+    // Compromissos futuros/de hoje em diante: do mais imediato ao mais distante (hoje, amanhã, próximo mês...)
+    // Parcelas de 2031 ficam lá no final da fila!
+    pendingOrUpcoming.sort((a, b) => {
+      const timeA = new Date(a.date + 'T12:00:00').getTime();
+      const timeB = new Date(b.date + 'T12:00:00').getTime();
+
+      const isUpcomingA = timeA >= todayTime;
+      const isUpcomingB = timeB >= todayTime;
+
+      if (isUpcomingA && isUpcomingB) {
+        return timeA - timeB;
+      }
+      if (isUpcomingA && !isUpcomingB) return -1;
+      if (!isUpcomingA && isUpcomingB) return 1;
+
+      return timeB - timeA;
+    });
+
+    return pendingOrUpcoming.slice(0, 6);
+  }, [visibleTransactions]);
 
   // Impacto mensal consolidado dos cenários ATIVOS
   const activeScenariosMonthlyNet = useMemo(() => {
@@ -1517,6 +1615,58 @@ export default function App() {
               </div>
             )}
 
+            {/* Seletor de Mês de Referência do Dashboard */}
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Mês de Referência:</span>
+                    <span className="text-base font-bold text-slate-900 capitalize">{formatMonthLabel(dashboardMonth)}</span>
+                    {dashboardMonth === currentActualMonth ? (
+                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                        Mês Atual
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDashboardMonth(currentActualMonth)}
+                        className="text-[10px] font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 px-2.5 py-0.5 rounded-full transition"
+                      >
+                        Voltar para Mês Atual
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Os totais de receitas, despesas e faturas abaixo refletem apenas os lançamentos e parcelas deste mês.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => changeDashboardMonth(-1)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition flex items-center space-x-1 text-xs font-semibold shadow-xs"
+                  title="Mês Anterior"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Anterior</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeDashboardMonth(1)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition flex items-center space-x-1 text-xs font-semibold shadow-xs"
+                  title="Próximo Mês"
+                >
+                  <span>Próximo</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
             {/* 4 Cards de Métricas Principais (Identidade Visual da Imagem) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -1534,7 +1684,7 @@ export default function App() {
                   <ArrowUpRight className="w-5 h-5 text-emerald-500" />
                 </div>
                 <div className="text-2xl font-bold text-emerald-600">{formatMoney(monthSummary.income)}</div>
-                <div className="text-xs text-slate-400 mt-2">Previsto + Realizado</div>
+                <div className="text-xs text-slate-400 mt-2">Previsto + Realizado ({formatMonthLabel(dashboardMonth)})</div>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -1543,7 +1693,7 @@ export default function App() {
                   <ArrowDownRight className="w-5 h-5 text-rose-500" />
                 </div>
                 <div className="text-2xl font-bold text-rose-600">{formatMoney(monthSummary.expense)}</div>
-                <div className="text-xs text-slate-400 mt-2">Fixas, Cartões & Parcelas</div>
+                <div className="text-xs text-slate-400 mt-2">Fixas, Cartões & Parcelas ({formatMonthLabel(dashboardMonth)})</div>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -1591,20 +1741,20 @@ export default function App() {
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
                     <PieChart className="w-4 h-4 text-blue-600" />
-                    <span>Maiores Gastos por Categoria</span>
+                    <span>Maiores Gastos por Categoria ({formatMonthLabel(dashboardMonth)})</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Onde o orçamento da visão atual está concentrado</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Onde o orçamento deste mês está concentrado</p>
                 </div>
                 <button onClick={() => setActiveTab('charts')} className="text-xs font-semibold text-blue-600 hover:underline">
                   Ver Análise Completa
                 </button>
               </div>
 
-              {categoryChartData.expensesList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-3 text-center">Nenhuma despesa para exibir na visão atual.</p>
+              {dashboardCategoryChartData.expensesList.length === 0 ? (
+                <p className="text-xs text-slate-400 py-3 text-center">Nenhuma despesa para exibir no mês de {formatMonthLabel(dashboardMonth)}.</p>
               ) : (
                 <div className="space-y-3">
-                  {categoryChartData.expensesList.slice(0, 3).map((item) => (
+                  {dashboardCategoryChartData.expensesList.slice(0, 3).map((item) => (
                     <div key={item.catId} className="space-y-1">
                       <div className="flex justify-between text-xs font-semibold">
                         <span className="text-slate-700 flex items-center space-x-1.5">
@@ -1636,36 +1786,40 @@ export default function App() {
                   </button>
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {visibleTransactions.slice(0, 5).map((tx) => (
-                    <div key={tx.id} className="py-3 flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <p className="font-semibold text-sm text-slate-900">{tx.description}</p>
-                          <span
-                            className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                              tx.scope === 'PERSONAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
-                          </span>
+                  {upcomingCommitments.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-6 text-center">Nenhum vencimento pendente para os próximos dias.</p>
+                  ) : (
+                    upcomingCommitments.map((tx) => (
+                      <div key={tx.id} className="py-3 flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <p className="font-semibold text-sm text-slate-900">{tx.description}</p>
+                            <span
+                              className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                                tx.scope === 'PERSONAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
+                            <span>{tx.date}</span>
+                            <span>•</span>
+                            <span
+                              className={`font-semibold ${
+                                tx.status === 'REALIZADO' ? 'text-emerald-600' : 'text-blue-600'
+                              }`}
+                            >
+                              ● {tx.status}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
-                          <span>{tx.date}</span>
-                          <span>•</span>
-                          <span
-                            className={`font-semibold ${
-                              tx.status === 'REALIZADO' ? 'text-emerald-600' : 'text-blue-600'
-                            }`}
-                          >
-                            ● {tx.status}
-                          </span>
+                        <div className={`font-bold text-sm ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'}`}>
+                          {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
                         </div>
                       </div>
-                      <div className={`font-bold text-sm ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                        {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -2636,21 +2790,114 @@ export default function App() {
                   {(() => {
                     let runningBalance = monthSummary.totalBankBalance;
                     const rows = [];
-                    for (let idx = 0; idx < projectionHorizon; idx++) {
-                      const date = new Date(2026, 8 + idx, 1);
-                      const label = date.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+                    const now = new Date();
+                    const startYear = now.getFullYear();
+                    const startMonth = now.getMonth();
+                    const currentYearMonth = `${startYear}-${String(startMonth + 1).padStart(2, '0')}`;
 
+                    // Despesas e receitas habituais base (sem parcelamentos futuros embutidos)
+                    const baseIncomesCents = visibleTransactions
+                      .filter(
+                        (t) =>
+                          t.type === 'INCOME' &&
+                          t.status !== 'CANCELADO' &&
+                          (!t.installmentGroupId || t.installmentNumber === 1) &&
+                          (t.isRecurring || (t.date && t.date.startsWith(currentYearMonth)))
+                      )
+                      .reduce((acc, t) => acc + t.amountCents, 0);
+
+                    const baseExpensesCents = visibleTransactions
+                      .filter(
+                        (t) =>
+                          t.type === 'EXPENSE' &&
+                          t.status !== 'CANCELADO' &&
+                          !t.installmentGroupId &&
+                          (t.isRecurring || (t.date && t.date.startsWith(currentYearMonth)))
+                      )
+                      .reduce((acc, t) => acc + t.amountCents, 0);
+
+                    for (let idx = 0; idx < projectionHorizon; idx++) {
+                      const targetDate = new Date(startYear, startMonth + idx, 1);
+                      const monthKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+                      const label = targetDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+
+                      // Impacto dos cenários ativos para este mês
                       let scenInc = 0;
                       let scenExp = 0;
-                      scenarios.filter((s) => s.active).forEach((s) => {
-                        if (idx < (s.months || 12)) {
-                          if (s.monthlyImpactCents > 0) scenInc += s.monthlyImpactCents;
-                          else scenExp += Math.abs(s.monthlyImpactCents);
-                        }
-                      });
+                      scenarios
+                        .filter((s) => s.active)
+                        .forEach((s) => {
+                          if (idx < (s.months || 12)) {
+                            if (s.monthlyImpactCents > 0) scenInc += s.monthlyImpactCents;
+                            else scenExp += Math.abs(s.monthlyImpactCents);
+                          }
+                        });
 
-                      const totalIncome = monthSummary.income + scenInc;
-                      const totalExpense = monthSummary.expense + scenExp;
+                      let totalIncome = 0;
+                      let totalExpense = 0;
+
+                      if (idx === 0) {
+                        // Mês atual: soma exata de todos os lançamentos ativos deste mês
+                        const currentTxs = visibleTransactions.filter(
+                          (t) => t.status !== 'CANCELADO' && t.date && t.date.startsWith(monthKey)
+                        );
+                        totalIncome = currentTxs.filter((t) => t.type === 'INCOME').reduce((a, t) => a + t.amountCents, 0) + scenInc;
+                        totalExpense = currentTxs.filter((t) => t.type === 'EXPENSE').reduce((a, t) => a + t.amountCents, 0) + scenExp;
+                      } else {
+                        // Meses futuros:
+                        // 1. Parcelas programadas que vencem especificamente neste mês
+                        const monthInstallmentExpense = visibleTransactions
+                          .filter(
+                            (t) =>
+                              t.status !== 'CANCELADO' &&
+                              t.type === 'EXPENSE' &&
+                              t.installmentGroupId &&
+                              t.date &&
+                              t.date.startsWith(monthKey)
+                          )
+                          .reduce((a, t) => a + t.amountCents, 0);
+
+                        const monthInstallmentIncome = visibleTransactions
+                          .filter(
+                            (t) =>
+                              t.status !== 'CANCELADO' &&
+                              t.type === 'INCOME' &&
+                              t.installmentGroupId &&
+                              t.date &&
+                              t.date.startsWith(monthKey)
+                          )
+                          .reduce((a, t) => a + t.amountCents, 0);
+
+                        // 2. Lançamentos pontuais já agendados para este mês futuro
+                        const scheduledExpense = visibleTransactions
+                          .filter(
+                            (t) =>
+                              t.status !== 'CANCELADO' &&
+                              t.type === 'EXPENSE' &&
+                              !t.installmentGroupId &&
+                              t.date &&
+                              t.date.startsWith(monthKey)
+                          )
+                          .reduce((a, t) => a + t.amountCents, 0);
+
+                        const scheduledIncome = visibleTransactions
+                          .filter(
+                            (t) =>
+                              t.status !== 'CANCELADO' &&
+                              t.type === 'INCOME' &&
+                              !t.installmentGroupId &&
+                              t.date &&
+                              t.date.startsWith(monthKey)
+                          )
+                          .reduce((a, t) => a + t.amountCents, 0);
+
+                        const finalBaseExpense = Math.max(baseExpensesCents, scheduledExpense);
+                        const finalBaseIncome = Math.max(baseIncomesCents, scheduledIncome);
+
+                        totalIncome = finalBaseIncome + monthInstallmentIncome + scenInc;
+                        totalExpense = finalBaseExpense + monthInstallmentExpense + scenExp;
+                      }
+
                       const netMonth = totalIncome - totalExpense;
                       runningBalance += netMonth;
                       const isHealthy = runningBalance >= 0;

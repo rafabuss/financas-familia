@@ -63,6 +63,22 @@ const formatMoney = (cents = 0) => {
   });
 };
 
+// Formatação de Data Segura no padrão brasileiro (dd/mm/aaaa) sem deslocamento de fuso horário
+const formatDateBR = (dateStr) => {
+  if (!dateStr) return '';
+  if (typeof dateStr !== 'string') return String(dateStr);
+  const clean = dateStr.trim().slice(0, 10);
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(clean)) return clean;
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    const [y, m, d] = parts;
+    if (y && m && d && y.length === 4) {
+      return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+    }
+  }
+  return dateStr;
+};
+
 // Usuários da Família e Visões
 const FAMILY_MEMBERS = [
   { id: 'user-all', name: '👑 Visão Admin (Toda a Família)', isFamily: true },
@@ -318,6 +334,8 @@ export default function App() {
   const [installmentValueMode, setInstallmentValueMode] = useState('TOTAL'); // 'TOTAL' | 'INSTALLMENT'
   const [formAmount, setFormAmount] = useState('');
   const [formInstallments, setFormInstallments] = useState(1);
+  const [formIsRecurring, setFormIsRecurring] = useState(false);
+  const [formRecurringMonths, setFormRecurringMonths] = useState(12);
 
   // Estado do Modal de Confirmação de Exclusão
   const [deleteModalState, setDeleteModalState] = useState({
@@ -343,6 +361,8 @@ export default function App() {
     setFormAmount(data?.amountCents ? (data.amountCents / 100).toFixed(2) : '');
     setFormInstallments(data?.installments || 1);
     setInstallmentValueMode('TOTAL');
+    setFormIsRecurring(Boolean(data?.isRecurring || data?.recurrenceRuleId));
+    setFormRecurringMonths(12);
     setModalState({
       isOpen: true,
       type: 'transaction',
@@ -959,6 +979,39 @@ export default function App() {
         setTransactions(updated);
         saveToLocalStorage('financas_transactions_v1', updated);
         syncBatchTransactions(newTxs);
+      } else if (isRecurring) {
+        // Lançamento com repetição mensal (Recorrência) gerado para o horizonte escolhido (ex: 12, 24 ou 36 meses)
+        const recurringHorizon = parseInt(fd.get('recurringHorizon') || '12', 10);
+        const ruleId = `rec-${Date.now()}`;
+        const baseDate = new Date(fd.get('date') + 'T12:00:00');
+        const newTxs = [];
+
+        for (let i = 0; i < recurringHorizon; i++) {
+          const recDate = new Date(baseDate);
+          recDate.setMonth(baseDate.getMonth() + i);
+
+          newTxs.push({
+            id: `tx-${Date.now()}-${i + 1}`,
+            description: fd.get('description'),
+            amountCents: amount,
+            type: fd.get('type'),
+            // O 1º mês recebe o status selecionado pelo usuário; os meses futuros nascem como COMPROMETIDO
+            status: i === 0 ? (fd.get('status') || 'COMPROMETIDO') : 'COMPROMETIDO',
+            date: recDate.toISOString().slice(0, 10),
+            categoryId: fd.get('categoryId'),
+            scope,
+            ownerId,
+            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+            isRecurring: true,
+            recurrenceRuleId: ruleId,
+          });
+        }
+
+        const updated = [...transactions, ...newTxs];
+        setTransactions(updated);
+        saveToLocalStorage('financas_transactions_v1', updated);
+        syncBatchTransactions(newTxs);
       } else {
         const newTx = {
           id: `tx-${Date.now()}`,
@@ -972,8 +1025,8 @@ export default function App() {
           ownerId,
           accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
           cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-          isRecurring,
-          recurrenceRuleId: isRecurring ? `rec-${Date.now()}` : null,
+          isRecurring: false,
+          recurrenceRuleId: null,
         };
         const updated = [...transactions, newTx];
         setTransactions(updated);
@@ -1177,7 +1230,7 @@ export default function App() {
         'ID,Descricao,Valor_Centavos,Tipo,Status,Data,Escopo,Responsavel,Categoria_ID,Conta_ID,Cartao_ID',
         ...transactions.map(
           (t) =>
-            `"${t.id}","${t.description}",${t.amountCents},"${t.type}","${t.status}","${t.date}","${t.scope}","${t.ownerId}","${t.categoryId}","${t.accountId || ''}","${t.cardId || ''}"`
+            `"${t.id}","${t.description}",${t.amountCents},"${t.type}","${t.status}","${formatDateBR(t.date)}","${t.scope}","${t.ownerId}","${t.categoryId}","${t.accountId || ''}","${t.cardId || ''}"`
         ),
       ];
       blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -1803,7 +1856,7 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
-                            <span>{tx.date}</span>
+                            <span>{formatDateBR(tx.date)}</span>
                             <span>•</span>
                             <span
                               className={`font-semibold ${
@@ -2088,13 +2141,19 @@ export default function App() {
                                 : 'hover:bg-slate-50'
                             }`}
                           >
-                            <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{tx.date}</td>
+                            <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{formatDateBR(tx.date)}</td>
                             <td className="py-3 px-4 font-medium text-slate-900">
                               <div className="flex items-center space-x-2">
                                 <span>{tx.description}</span>
                                 {tx.installmentCount && (
                                   <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold">
                                     {tx.installmentNumber}/{tx.installmentCount}
+                                  </span>
+                                )}
+                                {!tx.installmentCount && (tx.recurrenceRuleId || tx.isRecurring) && (
+                                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold flex items-center space-x-1" title="Lançamento com repetição mensal recorrente">
+                                    <RefreshCw className="w-2.5 h-2.5" />
+                                    <span>Recorrente</span>
                                   </span>
                                 )}
                               </div>
@@ -2572,7 +2631,7 @@ export default function App() {
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-xs text-slate-400 block mt-0.5">Vencimento: {item.date}</span>
+                                  <span className="text-xs text-slate-400 block mt-0.5">Vencimento: {formatDateBR(item.date)}</span>
                                 </div>
                                 <div className="flex items-center space-x-3">
                                   <span className="font-bold text-sm text-slate-900">{formatMoney(item.amountCents)}</span>
@@ -3211,7 +3270,7 @@ export default function App() {
                         />
                         <div>
                           <p className="font-semibold text-slate-900">{item.description}</p>
-                          <span className="text-xs text-slate-400">{item.date}</span>
+                          <span className="text-xs text-slate-400">{formatDateBR(item.date)}</span>
                         </div>
                       </div>
 
@@ -4071,18 +4130,45 @@ export default function App() {
                       </div>
                     )}
 
-                    <div className="flex items-center space-x-2 pt-2 border-t border-slate-200">
-                      <input
-                        type="checkbox"
-                        name="isRecurring"
-                        id="isRecurring"
-                        defaultChecked={modalState.data?.isRecurring || false}
-                        className="rounded text-blue-600"
-                      />
-                      <label htmlFor="isRecurring" className="text-xs font-medium text-slate-700">
-                        Repetir mensalmente (Recorrência)
-                      </label>
-                    </div>
+                    {formInstallments === 1 && modalState.mode === 'create' && (
+                      <div className="pt-2 border-t border-slate-200 space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            name="isRecurring"
+                            id="isRecurring"
+                            checked={formIsRecurring}
+                            onChange={(e) => setFormIsRecurring(e.target.checked)}
+                            className="rounded text-blue-600 focus:ring-blue-500"
+                          />
+                          <label htmlFor="isRecurring" className="text-xs font-semibold text-slate-800 flex items-center space-x-1.5 cursor-pointer select-none">
+                            <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Repetir mensalmente (Despesa / Receita Recorrente)</span>
+                          </label>
+                        </div>
+
+                        {formIsRecurring && (
+                          <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-blue-950">Horizonte de repetição:</span>
+                              <select
+                                name="recurringHorizon"
+                                value={formRecurringMonths}
+                                onChange={(e) => setFormRecurringMonths(parseInt(e.target.value, 10))}
+                                className="border border-blue-300 rounded-lg px-2.5 py-1 text-xs font-bold bg-white text-blue-900 shadow-2xs"
+                              >
+                                <option value="12">12 meses (1 ano)</option>
+                                <option value="24">24 meses (2 anos)</option>
+                                <option value="36">36 meses (3 anos)</option>
+                              </select>
+                            </div>
+                            <p className="text-[11px] text-blue-700 leading-tight">
+                              Gera as repetições mensais para planejar contas fixas (ex: luz, água, aluguel). Você poderá editar ou excluir lançamentos individuais ou futuros em cascata a qualquer momento.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -4159,7 +4245,7 @@ export default function App() {
                     <div>
                       <h4 className="font-semibold text-sm text-slate-800">{tx.description}</h4>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Data: {new Date(tx.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                        Data: {formatDateBR(tx.date)}
                       </p>
                     </div>
                     <span className={`text-sm font-bold ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'}`}>

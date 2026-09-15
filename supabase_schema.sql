@@ -141,8 +141,11 @@ ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scenarios ENABLE ROW LEVEL SECURITY;
 
--- Políticas para usuários autenticados (Família)
-CREATE POLICY "Permitir acesso completo aos perfis para autenticados"
+-- Políticas para perfis
+CREATE POLICY "Permitir leitura de perfis para todos"
+  ON public.profiles FOR SELECT USING (true);
+
+CREATE POLICY "Permitir inserção e atualização de perfis para autenticados"
   ON public.profiles FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 CREATE POLICY "Permitir acesso completo às contas para autenticados"
@@ -159,3 +162,29 @@ CREATE POLICY "Permitir acesso completo às transações para autenticados"
 
 CREATE POLICY "Permitir acesso completo aos cenários para autenticados"
   ON public.scenarios FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Trigger para sincronização automática de novo usuário do Supabase Auth para a tabela profiles
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, name, role, member_key)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'name', 'Membro'),
+    COALESCE(NEW.raw_user_meta_data->>'role', 'member'),
+    COALESCE(NEW.raw_user_meta_data->>'memberKey', 'user-1')
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    role = EXCLUDED.role,
+    member_key = EXCLUDED.member_key;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+

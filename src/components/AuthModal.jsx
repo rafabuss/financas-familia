@@ -9,7 +9,7 @@ import {
   Sparkles,
   CheckCircle2
 } from 'lucide-react';
-import { signInWithPassword, signUpUser, isSupabaseConfigured } from '../services/supabase';
+import { signInWithPassword, signUpUser, isSupabaseConfigured, getRegisteredMembers } from '../services/supabase';
 
 export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory = false }) {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -20,6 +20,23 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [registeredStatus, setRegisteredStatus] = useState({
+    isRafaelRegistered: false,
+    isAnaRegistered: false,
+    registeredEmails: [],
+  });
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    getRegisteredMembers().then((res) => {
+      setRegisteredStatus(res);
+      if (res.isRafaelRegistered && !res.isAnaRegistered) {
+        setSelectedMember('user-2');
+      } else if (!res.isRafaelRegistered) {
+        setSelectedMember('user-1');
+      }
+    });
+  }, [isOpen, isSignUp]);
 
   if (!isOpen) return null;
 
@@ -33,6 +50,17 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
 
     try {
       if (isSignUp) {
+        if (selectedMember === 'user-1' && registeredStatus.isRafaelRegistered) {
+          setErrorMsg('O perfil de Rafael já está cadastrado. Por favor, entre usando a aba de Login.');
+          setLoading(false);
+          return;
+        }
+        if (selectedMember === 'user-2' && registeredStatus.isAnaRegistered) {
+          setErrorMsg('O perfil de Ana Débora já está cadastrado. Por favor, entre usando a aba de Login.');
+          setLoading(false);
+          return;
+        }
+
         const role = selectedMember === 'user-1' ? 'admin' : 'member';
         const defaultName = name || (selectedMember === 'user-1' ? 'Rafael' : 'Ana Débora');
         const { data, error } = await signUpUser(email, password, defaultName, role, selectedMember);
@@ -194,32 +222,62 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
           {isSignUp && (
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
               <label className="block text-xs font-bold text-slate-700">Identificação Familiar & Perfil</label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setSelectedMember('user-1')}
-                  className={`p-2.5 rounded-lg border text-left transition ${
-                    selectedMember === 'user-1'
-                      ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold shadow-sm'
-                      : 'border-slate-200 bg-white text-slate-600'
-                  }`}
-                >
-                  <div>Rafael</div>
-                  <span className="text-[10px] text-blue-600 uppercase font-semibold">Administrador</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMember('user-2')}
-                  className={`p-2.5 rounded-lg border text-left transition ${
-                    selectedMember === 'user-2'
-                      ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold shadow-sm'
-                      : 'border-slate-200 bg-white text-slate-600'
-                  }`}
-                >
-                  <div>Ana Débora</div>
-                  <span className="text-[10px] text-purple-600 uppercase font-semibold">Membro Família</span>
-                </button>
-              </div>
+              {registeredStatus.isRafaelRegistered && registeredStatus.isAnaRegistered ? (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 space-y-2">
+                  <p className="font-semibold">Os perfis de Rafael e Ana Débora já estão cadastrados!</p>
+                  <p className="text-[11px] text-blue-600">
+                    Se você já possui uma senha, mude para a aba de Login abaixo para acessar.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    disabled={registeredStatus.isRafaelRegistered}
+                    onClick={() => setSelectedMember('user-1')}
+                    className={`p-2.5 rounded-lg border text-left transition ${
+                      registeredStatus.isRafaelRegistered
+                        ? 'opacity-60 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400'
+                        : selectedMember === 'user-1'
+                        ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">Rafael</span>
+                      {registeredStatus.isRafaelRegistered && (
+                        <span className="text-[9px] text-emerald-600 font-bold">✓ Cadastrado</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-blue-600 uppercase font-semibold">
+                      {registeredStatus.isRafaelRegistered ? 'Faça login' : 'Administrador'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={registeredStatus.isAnaRegistered}
+                    onClick={() => setSelectedMember('user-2')}
+                    className={`p-2.5 rounded-lg border text-left transition ${
+                      registeredStatus.isAnaRegistered
+                        ? 'opacity-60 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400'
+                        : selectedMember === 'user-2'
+                        ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">Ana Débora</span>
+                      {registeredStatus.isAnaRegistered && (
+                        <span className="text-[9px] text-emerald-600 font-bold">✓ Cadastrada</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-purple-600 uppercase font-semibold">
+                      {registeredStatus.isAnaRegistered ? 'Faça login' : 'Membro Família'}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

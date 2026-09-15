@@ -49,11 +49,12 @@ const formatMoney = (cents = 0) => {
   });
 };
 
-// Usuários da Família
+// Usuários da Família e Visões
 const FAMILY_MEMBERS = [
-  { id: 'user-all', name: 'Visão Geral (Família)', isFamily: true },
-  { id: 'user-1', name: 'Rafael (Pessoal)', isFamily: false },
-  { id: 'user-2', name: 'Ana Débora (Pessoal)', isFamily: false },
+  { id: 'user-all', name: '👑 Visão Admin (Toda a Família)', isFamily: true },
+  { id: 'family-shared', name: '🏠 Gastos Compartilhados (Família)', isFamily: true },
+  { id: 'user-1', name: '👤 Rafael (Apenas Pessoal / Membro)', isFamily: false },
+  { id: 'user-2', name: '👤 Ana Débora (Apenas Pessoal / Membro)', isFamily: false },
 ];
 
 // Dados Iniciais Fictícios
@@ -337,14 +338,25 @@ export default function App() {
     scenarioIdToConvert: null,
   });
 
-  // Lançamentos Visíveis de acordo com a Visão selecionada (Família x Pessoal)
+  // Lançamentos Visíveis de acordo com a Visão selecionada (Admin x Família x Membro)
   const visibleTransactions = useMemo(() => {
     return transactions.filter((t) => {
       if (currentMemberId === 'user-all') {
-        // Na visão da família, exibe os lançamentos familiares
+        // Na Visão Admin (Toda a Família): exibe absolutamente TUDO (familiar + pessoal de todos)
+        return true;
+      }
+      if (currentMemberId === 'family-shared') {
+        // Apenas lançamentos de escopo familiar compartilhado
         return t.scope === 'FAMILY';
       }
-      // Na visão pessoal do usuário: exibe o que é dele (pessoal) E o que é familiar
+      if (currentMemberId === 'user-1') {
+        // Apenas lançamentos pessoais do membro Rafael
+        return t.ownerId === 'user-1';
+      }
+      if (currentMemberId === 'user-2') {
+        // Apenas lançamentos pessoais da membra Ana Débora
+        return t.ownerId === 'user-2';
+      }
       return t.scope === 'FAMILY' || t.ownerId === currentMemberId;
     });
   }, [transactions, currentMemberId]);
@@ -372,7 +384,8 @@ export default function App() {
   // Contas filtradas pelo titular selecionado
   const visibleAccounts = useMemo(() => {
     return accounts.filter((acc) => {
-      if (currentMemberId === 'user-all') return acc.ownerId === 'user-all' || !acc.ownerId;
+      if (currentMemberId === 'user-all') return true; // Admin vê todas as contas
+      if (currentMemberId === 'family-shared') return acc.ownerId === 'user-all' || !acc.ownerId;
       return acc.ownerId === 'user-all' || acc.ownerId === currentMemberId;
     });
   }, [accounts, currentMemberId]);
@@ -380,7 +393,8 @@ export default function App() {
   // Cartões filtrados pelo titular selecionado
   const visibleCards = useMemo(() => {
     return cards.filter((c) => {
-      if (currentMemberId === 'user-all') return c.ownerId === 'user-all' || !c.ownerId;
+      if (currentMemberId === 'user-all') return true; // Admin vê todos os cartões
+      if (currentMemberId === 'family-shared') return c.ownerId === 'user-all' || !c.ownerId;
       return c.ownerId === 'user-all' || c.ownerId === currentMemberId;
     });
   }, [cards, currentMemberId]);
@@ -1208,35 +1222,26 @@ export default function App() {
               </div>
             )}
 
-            {/* Perfil do Usuário Logado & Login */}
-            <div className="flex items-center space-x-1.5 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 shadow-sm">
-              <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-[10px]">
+            {/* Perfil do Usuário Logado */}
+            <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 shadow-sm">
+              <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
                 {currentUser?.name?.[0] || 'U'}
               </div>
               <div className="hidden sm:block text-left leading-tight">
-                <div className="text-xs font-bold text-white leading-none">{currentUser?.name || 'Visitante'}</div>
+                <div className="text-xs font-bold text-white leading-none">{currentUser?.name}</div>
                 <span className="text-[9px] uppercase font-bold text-blue-400">
-                  {currentUser?.role === 'admin' ? 'Admin' : 'Membro'}
+                  {currentUser?.role === 'admin' ? 'Administrador' : 'Membro'}
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => setIsAuthModalOpen(true)}
-                className="text-[11px] text-slate-300 hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-700 transition font-medium"
-                title="Login / Alternar Usuário"
+                onClick={handleLogout}
+                className="text-slate-400 hover:text-rose-400 hover:bg-slate-700 p-1 rounded transition flex items-center space-x-1 ml-1"
+                title="Sair da conta"
               >
-                Login
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-medium hidden md:inline">Sair</span>
               </button>
-              {currentUser?.email && (
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="text-slate-400 hover:text-rose-400 p-0.5 rounded transition"
-                  title="Sair"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
 
             {/* Seletor de Visão (Filtrado pelo Perfil do Usuário) */}
@@ -1249,7 +1254,7 @@ export default function App() {
               >
                 {FAMILY_MEMBERS.filter((m) => {
                   if (currentUser?.role === 'admin') return true;
-                  return m.id === 'user-all' || m.id === currentUser?.memberKey;
+                  return m.id === 'family-shared' || m.id === currentUser?.memberKey;
                 }).map((m) => (
                   <option key={m.id} value={m.id} className="bg-slate-900 text-white">
                     {m.name}

@@ -28,8 +28,11 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  FileText,
+  Check
 } from 'lucide-react';
+import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
 import {
   loadInitialAppData,
@@ -323,6 +326,9 @@ export default function App() {
   // Controles da Importação de Faturas
   const [importSelectedCard, setImportSelectedCard] = useState('card-1');
   const [importPreviewData, setImportPreviewData] = useState(null);
+  const [importMetadata, setImportMetadata] = useState(null);
+  const [isImportLoading, setIsImportLoading] = useState(false);
+  const [importFilterTab, setImportFilterTab] = useState('ALL'); // 'ALL' | 'SELECTED' | 'DUPLICATES'
 
   // Controle de Campos Condicionais do Modal (Conta vs Cartão)
   const [modalSourceType, setModalSourceType] = useState('ACCOUNT');
@@ -687,6 +693,20 @@ export default function App() {
 
     return pendingOrUpcoming.slice(0, 6);
   }, [visibleTransactions]);
+
+  // Resumo de dados da importação de fatura em conferência
+  const importSummary = useMemo(() => {
+    if (!importPreviewData) return { selectedCount: 0, selectedTotalCents: 0, duplicateCount: 0, unselectedCount: 0 };
+    const selected = importPreviewData.filter((i) => i.selected);
+    const duplicates = importPreviewData.filter((i) => i.isDuplicate);
+    const selectedTotalCents = selected.reduce((acc, i) => acc + i.amountCents, 0);
+    return {
+      selectedCount: selected.length,
+      selectedTotalCents,
+      duplicateCount: duplicates.length,
+      unselectedCount: importPreviewData.length - selected.length,
+    };
+  }, [importPreviewData]);
 
   // Impacto mensal consolidado dos cenários ATIVOS
   const activeScenariosMonthlyNet = useMemo(() => {
@@ -1251,36 +1271,70 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Handlers para Importação de Faturas e Extratos
-  const handleSimulatePdfImport = () => {
-    const sampleItems = [
-      { id: `imp-${Date.now()}-1`, description: 'Netflix & Spotify', amountCents: 7990, date: new Date().toISOString().slice(0, 10), categoryId: 'cat-7' },
-      { id: `imp-${Date.now()}-2`, description: 'Posto Ipiranga Combustível', amountCents: 21050, date: new Date().toISOString().slice(0, 10), categoryId: 'cat-8' },
-      { id: `imp-${Date.now()}-3`, description: 'Farmácia Panvel Medicamentos', amountCents: 14520, date: new Date().toISOString().slice(0, 10), categoryId: 'cat-6' },
-      { id: `imp-${Date.now()}-4`, description: 'Almoço Restaurante SC-401', amountCents: 18500, date: new Date().toISOString().slice(0, 10), categoryId: 'cat-7' },
-    ];
-
-    const analyzed = sampleItems.map((item) => {
-      const isDuplicate = transactions.some(
-        (t) =>
-          t.cardId === importSelectedCard &&
-          t.amountCents === item.amountCents &&
-          t.description.toLowerCase().trim() === item.description.toLowerCase().trim()
-      );
-      return { ...item, isDuplicate, selected: !isDuplicate };
-    });
-
-    setImportPreviewData(analyzed);
-  };
-
-  const handleFileUpload = (e) => {
+  // Handlers para Importação Real de Faturas e Extratos (PDF, CSV, TXT)
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const text = evt.target.result;
+    setIsImportLoading(true);
+
+    try {
+      const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+
+      if (isPdf) {
+        const arrayBuffer = await file.arrayBuffer();
+        const parsed = await parseInvoicePdf(new Uint8Array(arrayBuffer), categories, FAMILY_MEMBERS);
+
+        if (!parsed.items || parsed.items.length === 0) {
+          alert('Não foi possível identificar lançamentos de compras nesta fatura em PDF. Verifique se o arquivo não está corrompido ou protegido por senha.');
+          setIsImportLoading(false);
+          return;
+        }
+
+        // Tenta associar automaticamente o cartão correto pelo final (ex: 8557) ou nome
+        let targetCardId = importSelectedCard;
+        if (parsed.cardLast4) {
+          const matchedCard = cards.find(
+            (c) =>
+              (c.name && c.name.includes(parsed.cardLast4)) ||
+              (c.bank && c.bank.toLowerCase().includes('itau')) ||
+              (c.name && c.name.toLowerCase().includes('itau'))
+          );
+          if (matchedCard) {
+            targetCardId = matchedCard.id;
+            setImportSelectedCard(matchedCard.id);
+          }
+        }
+
+        // Verificação inteligente de duplicidade contra os lançamentos já existentes
+        const analyzed = parsed.items.map((item) => {
+          const isDuplicate = transactions.some(
+            (t) =>
+              t.cardId === targetCardId &&
+              t.amountCents === item.amountCents &&
+              (t.date === item.date ||
+                t.description.toLowerCase().trim() === item.description.toLowerCase().trim())
+          );
+          return {
+            ...item,
+            isDuplicate,
+            selected: !isDuplicate,
+          };
+        });
+
+        setImportMetadata({
+          fileName: file.name,
+          cardholder: parsed.cardholder,
+          cardLast4: parsed.cardLast4,
+          dueDate: parsed.dueDate,
+          closingDate: parsed.closingDate,
+          totalInvoiceCents: parsed.totalInvoiceCents,
+          isReconciled: parsed.isReconciled,
+        });
+        setImportPreviewData(analyzed);
+      } else {
+        // Leitura de CSV / TXT
+        const text = await file.text();
         const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
         const parsedItems = [];
 
@@ -1303,19 +1357,27 @@ export default function App() {
             const amountCents = Math.round(valNum * 100);
 
             if (amountCents > 0) {
+              const isoDate = datePart.includes('/') ? datePart.split('/').reverse().join('-') : datePart;
               parsedItems.push({
-                id: `imp-file-${Date.now()}-${idx}`,
+                id: `imp-file-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
                 description: descPart,
                 amountCents,
-                date: datePart.includes('/') ? datePart.split('/').reverse().join('-') : datePart,
+                date: isoDate,
+                dateDisplay: formatDateBR(isoDate),
                 categoryId: categories[0]?.id || 'cat-1',
+                scope: 'FAMILY',
+                ownerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
+                installmentNumber: null,
+                installmentCount: null,
+                selected: true,
               });
             }
           }
         });
 
         if (parsedItems.length === 0) {
-          alert('Não foi possível identificar lançamentos no arquivo. Use o formato Data; Descrição; Valor (CSV) ou clique em Simular Leitura.');
+          alert('Não foi possível identificar lançamentos no arquivo. Use o formato Data; Descrição; Valor (CSV) ou envie uma fatura PDF.');
+          setIsImportLoading(false);
           return;
         }
 
@@ -1329,12 +1391,42 @@ export default function App() {
           return { ...item, isDuplicate, selected: !isDuplicate };
         });
 
+        setImportMetadata({
+          fileName: file.name,
+          cardholder: '',
+          cardLast4: '',
+          dueDate: '',
+          closingDate: '',
+          totalInvoiceCents: analyzed.reduce((a, b) => a + b.amountCents, 0),
+          isReconciled: true,
+        });
         setImportPreviewData(analyzed);
-      } catch {
-        alert('Erro ao processar arquivo.');
       }
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      console.error('Erro na leitura da fatura:', err);
+      alert('Ocorreu um erro ao ler o arquivo. Certifique-se de que é uma fatura PDF ou arquivo CSV válido.');
+    } finally {
+      setIsImportLoading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  // Atualização em tempo real de campos de um item proposto na importação
+  const handleUpdateImportItem = (id, fields) => {
+    setImportPreviewData((prev) =>
+      prev ? prev.map((item) => (item.id === id ? { ...item, ...fields } : item)) : prev
+    );
+  };
+
+  // Seleção e deseleção em massa
+  const handleSelectAllImport = (select) => {
+    setImportPreviewData((prev) => (prev ? prev.map((i) => ({ ...i, selected: select })) : prev));
+  };
+
+  const handleDeselectDuplicates = () => {
+    setImportPreviewData((prev) =>
+      prev ? prev.map((i) => ({ ...i, selected: i.isDuplicate ? false : i.selected })) : prev
+    );
   };
 
   const handleConfirmImport = () => {
@@ -1346,7 +1438,7 @@ export default function App() {
     }
 
     const newTxs = toImport.map((item, idx) => ({
-      id: `tx-imp-${Date.now()}-${idx}`,
+      id: `tx-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
       description: item.description,
       amountCents: item.amountCents,
       type: 'EXPENSE',
@@ -1354,8 +1446,14 @@ export default function App() {
       date: item.date,
       cardId: importSelectedCard,
       categoryId: item.categoryId || categories[0]?.id,
-      scope: 'FAMILY',
-      ownerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
+      scope: item.scope || 'FAMILY',
+      ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
+      installmentNumber: item.installmentNumber || null,
+      installmentCount: item.installmentCount || null,
+      installmentGroupId:
+        item.installmentCount && item.installmentCount > 1
+          ? `group-imp-${Date.now()}-${idx}`
+          : null,
     }));
 
     setTransactions((prev) => {
@@ -1367,6 +1465,7 @@ export default function App() {
 
     alert(`${toImport.length} lançamento(s) importado(s) e vinculado(s) à fatura com sucesso!`);
     setImportPreviewData(null);
+    setImportMetadata(null);
     setActiveTab('faturas');
   };
 
@@ -3253,120 +3352,454 @@ export default function App() {
 
         {/* ===================== ABA: IMPORTAÇÃO DE FATURAS E EXTRATOS ===================== */}
         {activeTab === 'import' && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm max-w-3xl mx-auto space-y-6">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Importação de Faturas & Extratos</h2>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Faça upload de extratos bancários ou faturas de cartão (PDF, CSV, TXT). O sistema detecta duplicidades e permite revisar cada item antes de salvar.
-              </p>
-            </div>
+          <div className="space-y-6 max-w-6xl mx-auto">
+            {!importPreviewData ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm max-w-3xl mx-auto space-y-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center space-x-2">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                    <span>Importação de Faturas em PDF & Extratos</span>
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                    Envie a fatura original do seu cartão de crédito (PDF do Itaú, Nubank ou extrato bancário CSV).
+                    O leitor inteligente extrai todas as compras, parcelamentos e datas para você aprovar item por item.
+                  </p>
+                </div>
 
-            <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-8 text-center space-y-4 bg-slate-50/50 transition">
-              <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-                <UploadCloud className="w-8 h-8" />
-              </div>
+                <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-8 sm:p-12 text-center space-y-5 bg-slate-50/60 transition group">
+                  <div className="w-16 h-16 bg-blue-100/70 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner group-hover:scale-105 transition">
+                    <UploadCloud className="w-8 h-8" />
+                  </div>
 
-              <div>
-                <h3 className="font-bold text-base text-slate-900">Arraste seu arquivo ou escolha uma opção abaixo</h3>
-                <p className="text-xs text-slate-400 mt-1">Suporta arquivos CSV/TXT ou simulação direta de leitura de fatura</p>
-              </div>
-
-              <div className="max-w-xs mx-auto text-left">
-                <label className="block text-xs font-semibold text-slate-600 mb-1 text-center">Vincular a qual cartão:</label>
-                <select
-                  value={importSelectedCard}
-                  onChange={(e) => setImportSelectedCard(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {cards.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.bank})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleSimulatePdfImport}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-6 py-2.5 rounded-xl shadow-sm transition active:scale-95 flex items-center justify-center space-x-2"
-                >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Simular Leitura de Fatura PDF</span>
-                </button>
-
-                <label className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm px-6 py-2.5 rounded-xl cursor-pointer transition active:scale-95 flex items-center justify-center space-x-2 border border-slate-300">
-                  <UploadCloud className="w-4 h-4" />
-                  <span>Carregar Arquivo (CSV/TXT)</span>
-                  <input
-                    type="file"
-                    accept=".csv,.txt,.ofx"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-            </div>
-
-            {importPreviewData && (
-              <div className="space-y-4 pt-4 border-t border-slate-200">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div>
-                    <h3 className="font-bold text-base text-slate-900">Conferência dos Lançamentos</h3>
-                    <p className="text-xs text-slate-500">
-                      {importPreviewData.filter((i) => i.selected).length} de {importPreviewData.length} selecionados para importação.
+                    <h3 className="font-bold text-base text-slate-900">Selecione sua fatura PDF ou extrato CSV</h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Compatível com faturas PDF do Itaú (Black, Platinum, Visa/Mastercard) e arquivos bancários (.pdf, .csv, .txt)
                     </p>
                   </div>
-                  <div className="flex items-center space-x-2">
+
+                  <div className="max-w-xs mx-auto text-left">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1 text-center">
+                      Cartão de destino padrão:
+                    </label>
+                    <select
+                      value={importSelectedCard}
+                      onChange={(e) => setImportSelectedCard(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                    >
+                      {cards.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.bank})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                    <label className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-8 py-3 rounded-xl cursor-pointer transition active:scale-95 flex items-center justify-center space-x-2 shadow-sm">
+                      <FileText className="w-4 h-4" />
+                      <span>Selecionar Fatura (PDF / CSV)</span>
+                      <input
+                        type="file"
+                        accept=".pdf,.csv,.txt,.ofx"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        disabled={isImportLoading}
+                      />
+                    </label>
+                  </div>
+
+                  {isImportLoading && (
+                    <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-blue-800 text-xs font-semibold flex items-center justify-center space-x-2 animate-pulse">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Lendo e analisando fatura com inteligência de conciliação...</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* TELA DE CONFERÊNCIA E APROVAÇÃO ITEM POR ITEM */
+              <div className="space-y-6">
+                {/* Cabeçalho com Metadados da Fatura e Indicadores de Conciliação */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-bold uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md">
+                          Fatura Identificada
+                        </span>
+                        {importMetadata?.fileName && (
+                          <span className="text-xs text-slate-500 font-mono truncate max-w-xs">
+                            {importMetadata.fileName}
+                          </span>
+                        )}
+                      </div>
+                      <h2 className="text-xl font-bold text-slate-900 mt-1">Conferência & Aprovação de Lançamentos</h2>
+                      <div className="flex flex-wrap items-center gap-y-1 gap-x-3 text-xs text-slate-500 mt-1">
+                        {importMetadata?.cardholder && <span>Titular: <strong className="text-slate-700">{importMetadata.cardholder}</strong></span>}
+                        {importMetadata?.cardLast4 && <span>• Cartão Final: <strong className="text-slate-700">{importMetadata.cardLast4}</strong></span>}
+                        {importMetadata?.dueDate && <span>• Vencimento: <strong className="text-slate-700">{importMetadata.dueDate}</strong></span>}
+                        {importMetadata?.closingDate && <span>• Fechamento: <strong className="text-slate-700">{importMetadata.closingDate}</strong></span>}
+                      </div>
+                    </div>
+
+                    {/* Seletor de Cartão de Destino */}
+                    <div className="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                      <label className="text-xs font-bold text-slate-600 whitespace-nowrap">Cartão de Destino:</label>
+                      <select
+                        value={importSelectedCard}
+                        onChange={(e) => setImportSelectedCard(e.target.value)}
+                        className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {cards.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.bank})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Cards de Métricas e Status de Conciliação */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex flex-col justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Lido na Fatura (PDF)</span>
+                      <div className="text-xl font-bold text-slate-900 mt-1">
+                        {formatMoney(importMetadata?.totalInvoiceCents || 0)}
+                      </div>
+                      <span className="text-[11px] text-slate-500 mt-0.5">Valor estampado no extrato oficial</span>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/50 flex flex-col justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">Total Selecionado para Gravar</span>
+                      <div className="text-xl font-bold text-blue-700 mt-1">
+                        {formatMoney(importSummary.selectedTotalCents)}
+                      </div>
+                      <span className="text-[11px] text-blue-600/80 mt-0.5">
+                        {importSummary.selectedCount} de {importPreviewData.length} compras aprovadas
+                      </span>
+                    </div>
+
+                    <div
+                      className={`p-4 rounded-xl border flex flex-col justify-between ${
+                        importSummary.selectedTotalCents === (importMetadata?.totalInvoiceCents || 0)
+                          ? 'border-emerald-200 bg-emerald-50/60 text-emerald-900'
+                          : 'border-amber-200 bg-amber-50/60 text-amber-900'
+                      }`}
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wider">Status da Conciliação</span>
+                      <div className="text-sm font-bold flex items-center space-x-1.5 mt-1">
+                        {importSummary.selectedTotalCents === (importMetadata?.totalInvoiceCents || 0) ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            <span className="text-emerald-700">100% Conciliado com a Fatura</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4 text-amber-600" />
+                            <span className="text-amber-700">
+                              Diferença: {formatMoney(Math.abs(importSummary.selectedTotalCents - (importMetadata?.totalInvoiceCents || 0)))}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <span className="text-[11px] opacity-80 mt-0.5">
+                        {importSummary.selectedTotalCents === (importMetadata?.totalInvoiceCents || 0)
+                          ? 'A soma exata dos itens aprovados bate com o total da fatura.'
+                          : 'Revise os itens desmarcados ou despesas extras.'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Barra de Ações em Massa e Filtros */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAllImport(true)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition"
+                      >
+                        Aprovar Todos ({importPreviewData.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAllImport(false)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition"
+                      >
+                        Desmarcar Todos
+                      </button>
+                      {importSummary.duplicateCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeselectDuplicates}
+                          className="px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-800 transition flex items-center space-x-1"
+                        >
+                          <AlertTriangle className="w-3 h-3 text-amber-600" />
+                          <span>Desmarcar Duplicidades ({importSummary.duplicateCount})</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
+                      <button
+                        type="button"
+                        onClick={() => setImportFilterTab('ALL')}
+                        className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'}`}
+                      >
+                        Todos ({importPreviewData.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImportFilterTab('SELECTED')}
+                        className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'SELECTED' ? 'bg-white text-emerald-700 shadow-xs' : 'hover:text-slate-900'}`}
+                      >
+                        Aprovados ({importSummary.selectedCount})
+                      </button>
+                      {importSummary.duplicateCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setImportFilterTab('DUPLICATES')}
+                          className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'DUPLICATES' ? 'bg-white text-amber-700 shadow-xs' : 'hover:text-slate-900'}`}
+                        >
+                          Duplicidades ({importSummary.duplicateCount})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabela Interativa de Proposta e Aprovação Item por Item */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200 text-xs">
+                          <th className="py-3 px-3 w-12 text-center">Status</th>
+                          <th className="py-3 px-3 w-32">Data</th>
+                          <th className="py-3 px-3">Estabelecimento / Descrição</th>
+                          <th className="py-3 px-3 w-28">Parcela</th>
+                          <th className="py-3 px-3 w-44">Categoria</th>
+                          <th className="py-3 px-3 w-28">Escopo</th>
+                          <th className="py-3 px-3 w-36">Membro</th>
+                          <th className="py-3 px-4 text-right w-32">Valor (R$)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {importPreviewData
+                          .filter((item) => {
+                            if (importFilterTab === 'SELECTED') return item.selected;
+                            if (importFilterTab === 'DUPLICATES') return item.isDuplicate;
+                            return true;
+                          })
+                          .map((item) => {
+                            return (
+                              <tr
+                                key={item.id}
+                                className={`transition-colors ${
+                                  !item.selected
+                                    ? 'bg-slate-50/50 opacity-60 hover:opacity-100'
+                                    : item.isDuplicate
+                                    ? 'bg-amber-50/50 hover:bg-amber-50/80 border-l-4 border-amber-400'
+                                    : 'hover:bg-blue-50/30'
+                                }`}
+                              >
+                                {/* Checkbox Aprovar */}
+                                <td className="py-3 px-3 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.selected}
+                                    onChange={() =>
+                                      handleUpdateImportItem(item.id, { selected: !item.selected })
+                                    }
+                                    className="w-4 h-4 rounded text-blue-600 cursor-pointer focus:ring-blue-500"
+                                    title={item.selected ? 'Aprovado para importar' : 'Ignorado (não será importado)'}
+                                  />
+                                </td>
+
+                                {/* Data da Compra */}
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  <input
+                                    type="date"
+                                    value={item.date}
+                                    onChange={(e) =>
+                                      handleUpdateImportItem(item.id, {
+                                        date: e.target.value,
+                                        dateDisplay: formatDateBR(e.target.value),
+                                      })
+                                    }
+                                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                </td>
+
+                                {/* Descrição / Estabelecimento */}
+                                <td className="py-3 px-3">
+                                  <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      value={item.description}
+                                      onChange={(e) =>
+                                        handleUpdateImportItem(item.id, { description: e.target.value })
+                                      }
+                                      className="w-full font-medium border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-900 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
+                                    {item.categoryHint && (
+                                      <span className="text-[10px] text-slate-400 block truncate" title={item.categoryHint}>
+                                        Dica extrato: {item.categoryHint}
+                                      </span>
+                                    )}
+                                    {item.isDuplicate && (
+                                      <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded inline-flex items-center space-x-1">
+                                        <AlertTriangle className="w-2.5 h-2.5 text-amber-600" />
+                                        <span>Possível duplicidade no extrato</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Parcela */}
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  {item.installmentCount ? (
+                                    <div className="flex items-center space-x-1">
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max={item.installmentCount || 1}
+                                        value={item.installmentNumber || 1}
+                                        onChange={(e) =>
+                                          handleUpdateImportItem(item.id, {
+                                            installmentNumber: parseInt(e.target.value, 10) || 1,
+                                          })
+                                        }
+                                        className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-xs font-semibold"
+                                      />
+                                      <span className="text-slate-400">/</span>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="120"
+                                        value={item.installmentCount || 1}
+                                        onChange={(e) =>
+                                          handleUpdateImportItem(item.id, {
+                                            installmentCount: parseInt(e.target.value, 10) || 1,
+                                          })
+                                        }
+                                        className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-xs font-semibold"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">
+                                      À Vista
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Categoria */}
+                                <td className="py-3 px-3">
+                                  <select
+                                    value={item.categoryId || ''}
+                                    onChange={(e) =>
+                                      handleUpdateImportItem(item.id, { categoryId: e.target.value })
+                                    }
+                                    className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-800 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  >
+                                    {categories
+                                      .filter((c) => !c.archived && c.type === 'EXPENSE')
+                                      .map((cat) => (
+                                        <option key={cat.id} value={cat.id}>
+                                          {cat.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </td>
+
+                                {/* Escopo (Familiar vs Pessoal) */}
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdateImportItem(item.id, {
+                                        scope: item.scope === 'FAMILY' ? 'PERSONAL' : 'FAMILY',
+                                      })
+                                    }
+                                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase transition ${
+                                      item.scope === 'PERSONAL'
+                                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                        : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                                    }`}
+                                  >
+                                    {item.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
+                                  </button>
+                                </td>
+
+                                {/* Membro Familiar */}
+                                <td className="py-3 px-3">
+                                  <select
+                                    value={item.ownerId || 'user-1'}
+                                    onChange={(e) =>
+                                      handleUpdateImportItem(item.id, { ownerId: e.target.value })
+                                    }
+                                    className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-800 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  >
+                                    {FAMILY_MEMBERS.filter((m) => m.id !== 'user-all').map((m) => (
+                                      <option key={m.id} value={m.id}>
+                                        {m.name.replace(/^[👑🏠👤]\s*/u, '')}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+
+                                {/* Valor */}
+                                <td className="py-3 px-4 text-right font-bold whitespace-nowrap">
+                                  <span className={item.amountCents < 0 ? 'text-emerald-600' : 'text-slate-900'}>
+                                    {item.amountCents < 0 ? '+ ' : ''}
+                                    {formatMoney(Math.abs(item.amountCents))}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Barra Fixa / Rodapé de Confirmação e Gravação */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="text-xs text-slate-500 text-center sm:text-left">
+                    <span>Lançamentos selecionados: </span>
+                    <strong className="text-slate-900 font-bold">
+                      {importSummary.selectedCount} de {importPreviewData.length}
+                    </strong>
+                    <span className="mx-2">•</span>
+                    <span>Total a gravar: </span>
+                    <strong className="text-blue-700 font-bold text-sm">
+                      {formatMoney(importSummary.selectedTotalCents)}
+                    </strong>
+                  </div>
+
+                  <div className="flex items-center space-x-3 w-full sm:w-auto">
                     <button
                       type="button"
-                      onClick={() => setImportPreviewData(null)}
-                      className="px-4 py-2 border border-slate-300 text-slate-600 hover:bg-slate-50 rounded-lg text-xs sm:text-sm font-semibold transition"
+                      onClick={() => {
+                        setImportPreviewData(null);
+                        setImportMetadata(null);
+                      }}
+                      className="w-full sm:w-auto px-5 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold transition"
                     >
                       Cancelar
                     </button>
                     <button
                       type="button"
                       onClick={handleConfirmImport}
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-semibold shadow-sm transition active:scale-95"
+                      disabled={importSummary.selectedCount === 0}
+                      className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-sm transition active:scale-95 flex items-center justify-center space-x-1.5"
                     >
-                      Confirmar e Gravar na Fatura
+                      <Check className="w-4 h-4" />
+                      <span>
+                        Confirmar e Gravar {importSummary.selectedCount} Lançamento(s)
+                      </span>
                     </button>
                   </div>
-                </div>
-
-                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-sm">
-                  {importPreviewData.map((item) => (
-                    <div key={item.id} className={`p-3.5 flex items-center justify-between ${item.isDuplicate ? 'bg-amber-50/40' : 'hover:bg-slate-50'}`}>
-                      <div className="flex items-center space-x-3">
-                        <input
-                          type="checkbox"
-                          checked={item.selected}
-                          onChange={() => {
-                            setImportPreviewData(
-                              importPreviewData.map((p) => (p.id === item.id ? { ...p, selected: !p.selected } : p))
-                            );
-                          }}
-                          className="rounded text-blue-600 w-4 h-4 cursor-pointer"
-                        />
-                        <div>
-                          <p className="font-semibold text-slate-900">{item.description}</p>
-                          <span className="text-xs text-slate-400">{formatDateBR(item.date)}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center space-x-3">
-                        {item.isDuplicate && (
-                          <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
-                            <AlertTriangle className="w-3 h-3 text-amber-600" />
-                            <span>Possível Duplicidade</span>
-                          </span>
-                        )}
-                        <span className="font-bold text-slate-900">{formatMoney(item.amountCents)}</span>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </div>
             )}

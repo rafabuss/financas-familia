@@ -23,7 +23,10 @@ import {
   Sparkles,
   PieChart,
   UploadCloud,
-  LogOut
+  LogOut,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import AuthModal from './components/AuthModal';
 import {
@@ -32,6 +35,8 @@ import {
   syncBatchTransactions,
   saveToLocalStorage,
   clearAllDemoData,
+  clearDemoDataOnly,
+  resetEntireSystem,
   loadDemoPresentationData,
   STORAGE_KEYS,
 } from './services/financeService';
@@ -207,28 +212,70 @@ export default function App() {
     }
   };
 
-  // Limpeza de dados (com opção de reset total ou apenas lançamentos/simulações)
-  const handleClearDemoData = async (wipeAccountsAndCards = false) => {
-    const msg = wipeAccountsAndCards
-      ? 'Deseja realmente ZERAR TUDO (excluir todas as contas, cartões, lançamentos e simulações)? As categorias padrão serão preservadas.'
-      : 'Deseja limpar todos os lançamentos e simulações, mantendo suas contas e cartões com saldo zerado?';
+  // Limpeza estritamente segura apenas de registros de exemplo (prefixo demo-)
+  // NUNCA exclui lançamentos reais (tx-...) nem altera saldos de contas reais do usuário
+  const handleClearOnlyDemo = async () => {
+    const demoTxs = transactions.filter((t) => String(t.id || '').startsWith('demo-'));
+    const demoAccs = accounts.filter((a) => String(a.id || '').startsWith('demo-'));
+    const demoCards = cards.filter((c) => String(c.id || '').startsWith('demo-'));
+    const demoScens = scenarios.filter((s) => String(s.id || '').startsWith('demo-'));
 
-    if (confirm(msg)) {
-      const res = await clearAllDemoData(accounts, wipeAccountsAndCards);
-      setTransactions([]);
-      setScenarios([]);
+    const totalDemoItems = demoTxs.length + demoAccs.length + demoCards.length + demoScens.length;
+
+    if (totalDemoItems === 0) {
+      alert('Não há dados de demonstração pendentes. Todos os seus lançamentos e contas atuais são dados reais!');
+      return;
+    }
+
+    if (
+      confirm(
+        `Deseja realmente remover os dados de demonstração (${demoTxs.length} lançamento(s) de exemplo)?\n\n` +
+        `ATENÇÃO: Todos os seus lançamentos e contas reais cadastrados serão 100% PRESERVADOS intactos.`
+      )
+    ) {
+      const res = await clearDemoDataOnly({
+        transactions,
+        scenarios,
+        accounts,
+        cards,
+      });
+      setTransactions(res.transactions);
+      setScenarios(res.scenarios);
       setAccounts(res.accounts);
-      if (wipeAccountsAndCards) {
-        setCards([]);
-      }
-      alert('Dados limpos com sucesso!');
+      setCards(res.cards);
+      alert('Dados fictícios de exemplo removidos com sucesso! Seus dados reais permanecem intactos.');
     }
   };
 
-  // Filtros de Lançamentos
+  // Reset Geral do Sistema (Apenas mediante confirmação textual em Configurações Avançadas)
+  const handleResetEntireSystem = async () => {
+    const confirmInput = prompt(
+      '⚠️ ATENÇÃO MÁXIMA: Esta ação apagará TODOS os dados cadastrados (todas as suas contas, cartões, lançamentos e simulações).\n\nPara confirmar a exclusão TOTAL definitiva, digite ZERAR abaixo:'
+    );
+
+    if (confirmInput === 'ZERAR') {
+      const res = await resetEntireSystem();
+      setTransactions(res.transactions);
+      setScenarios(res.scenarios);
+      setAccounts(res.accounts);
+      setCards(res.cards);
+      alert('Sistema resetado com sucesso.');
+    } else if (confirmInput !== null) {
+      alert('Operação cancelada. A palavra "ZERAR" não foi digitada corretamente.');
+    }
+  };
+
+  // Filtros e Ordenação de Lançamentos
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('ALL');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  // Ordenação de Lançamentos (padrão: data mais próxima da data atual)
+  const [txSort, setTxSort] = useState({ field: 'date', direction: 'closest' }); // 'closest' | 'asc' | 'desc'
+
+  // Ordenação em outras abas
+  const [invoiceSort, setInvoiceSort] = useState({ field: 'date', direction: 'closest' });
+  const [scenarioSort, setScenarioSort] = useState({ field: 'date', direction: 'closest' });
+  const [projectionSort, setProjectionSort] = useState({ field: 'month', direction: 'asc' });
 
   // Horizonte de Projeções (12, 24 ou 36 meses)
   const [projectionHorizon, setProjectionHorizon] = useState(12);
@@ -247,6 +294,18 @@ export default function App() {
   // Controle de Escopo de Edição (Apenas esta parcela vs Todas vs Futuras)
   const [editScope, setEditScope] = useState('single'); // 'single' | 'all' | 'future'
 
+  // Controle de Modo do Valor no Parcelamento (Total da Compra vs Valor da Parcela)
+  const [installmentValueMode, setInstallmentValueMode] = useState('TOTAL'); // 'TOTAL' | 'INSTALLMENT'
+  const [formAmount, setFormAmount] = useState('');
+  const [formInstallments, setFormInstallments] = useState(1);
+
+  // Estado do Modal de Confirmação de Exclusão
+  const [deleteModalState, setDeleteModalState] = useState({
+    isOpen: false,
+    transaction: null,
+    scope: 'single', // 'single' | 'future' | 'all'
+  });
+
   // Estado dos Modais
   const [modalState, setModalState] = useState({
     isOpen: false,
@@ -255,6 +314,23 @@ export default function App() {
     data: null,
     scenarioIdToConvert: null,
   });
+
+  // Função auxiliar para abrir o modal de lançamento inicializando os campos
+  const openTransactionModal = (mode = 'create', data = null, scenarioId = null) => {
+    const sType = data?.sourceType || (data?.cardId ? 'CARD' : 'ACCOUNT');
+    setModalSourceType(sType);
+    setEditScope('single');
+    setFormAmount(data?.amountCents ? (data.amountCents / 100).toFixed(2) : '');
+    setFormInstallments(data?.installments || 1);
+    setInstallmentValueMode('TOTAL');
+    setModalState({
+      isOpen: true,
+      type: 'transaction',
+      mode,
+      data,
+      scenarioIdToConvert: scenarioId,
+    });
+  };
 
   // Lançamentos Visíveis de acordo com a Visão selecionada (Admin x Família x Membro)
   const visibleTransactions = useMemo(() => {
@@ -364,9 +440,7 @@ export default function App() {
 
   // Junção de lançamentos reais com simulações hipotéticas ativas
   const allDisplayTransactions = useMemo(() => {
-    return [...visibleTransactions, ...hypotheticalTransactions].sort((a, b) => {
-      return new Date(b.date) - new Date(a.date);
-    });
+    return [...visibleTransactions, ...hypotheticalTransactions];
   }, [visibleTransactions, hypotheticalTransactions]);
 
   // Transações base para os Gráficos (com toggle de simulações)
@@ -437,9 +511,16 @@ export default function App() {
 
   // Faturas dos Cartões de Crédito (Detalhamento, Itens e Limites)
   const cardInvoices = useMemo(() => {
+    const todayTime = new Date(new Date().toISOString().slice(0, 10) + 'T12:00:00').getTime();
     const map = {};
     cards.forEach((card) => {
       const cardTxs = visibleTransactions.filter((t) => t.cardId === card.id && t.status !== 'CANCELADO');
+      cardTxs.sort((a, b) => {
+        const diffA = Math.abs(new Date(a.date + 'T12:00:00').getTime() - todayTime);
+        const diffB = Math.abs(new Date(b.date + 'T12:00:00').getTime() - todayTime);
+        if (diffA !== diffB) return diffA - diffB;
+        return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
+      });
       const committed = cardTxs.reduce((acc, t) => acc + (t.type === 'EXPENSE' ? t.amountCents : 0), 0);
       map[card.id] = {
         card,
@@ -555,15 +636,7 @@ export default function App() {
       isRecurring: false,
     };
 
-    setModalSourceType(sType);
-    setEditScope('single');
-    setModalState({
-      isOpen: true,
-      type: 'transaction',
-      mode: 'create',
-      data: prefilledData,
-      scenarioIdToConvert: scen.id,
-    });
+    openTransactionModal('create', prefilledData, scen.id);
   };
 
   // Salvar Contas
@@ -693,12 +766,16 @@ export default function App() {
         setTransactions(updated);
         saveToLocalStorage('financas_transactions_v1', updated);
         syncBatchTransactions(matched);
-      } else if (editScope === 'future' && original.installmentGroupId) {
+      } else if (editScope === 'future' && (original.installmentGroupId || original.recurrenceRuleId)) {
         const matched = [];
         const updated = transactions.map((t) => {
           const isMatch =
-            t.installmentGroupId === original.installmentGroupId &&
-            (t.installmentNumber || 0) >= (original.installmentNumber || 0);
+            (original.installmentGroupId &&
+              t.installmentGroupId === original.installmentGroupId &&
+              (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
+            (original.recurrenceRuleId &&
+              t.recurrenceRuleId === original.recurrenceRuleId &&
+              t.date >= original.date);
           if (!isMatch) return t;
           const u = {
             ...t,
@@ -740,9 +817,21 @@ export default function App() {
         syncItem('transactions', updatedTx);
       }
     } else {
+      const installmentValueMode = fd.get('installmentValueMode') || 'TOTAL';
       if (installments > 1) {
-        const baseCents = Math.floor(amount / installments);
-        const remainder = amount % installments;
+        let installmentAmounts = [];
+        if (installmentValueMode === 'INSTALLMENT') {
+          // Repete o valor informado em todas as parcelas
+          installmentAmounts = Array(installments).fill(amount);
+        } else {
+          // Divide o valor total pelo número de parcelas
+          const baseCents = Math.floor(amount / installments);
+          const remainder = amount % installments;
+          installmentAmounts = Array.from({ length: installments }, (_, idx) =>
+            baseCents + (idx === 0 ? remainder : 0)
+          );
+        }
+
         const groupId = `inst-${Date.now()}`;
         const newTxs = [];
 
@@ -754,7 +843,7 @@ export default function App() {
           newTxs.push({
             id: `tx-${Date.now()}-${i}`,
             description: `${fd.get('description')} (${String(i).padStart(2, '0')}/${String(installments).padStart(2, '0')})`,
-            amountCents: baseCents + (i === 1 ? remainder : 0),
+            amountCents: installmentAmounts[i - 1],
             type: fd.get('type'),
             status: fd.get('status') || 'COMPROMETIDO',
             date: installmentDate.toISOString().slice(0, 10),
@@ -813,12 +902,51 @@ export default function App() {
   };
 
   const handleDeleteTransaction = (tx) => {
-    if (confirm(`Deseja realmente excluir "${tx.description}"?`)) {
-      const updated = transactions.filter((t) => t.id !== tx.id);
-      setTransactions(updated);
-      saveToLocalStorage('financas_transactions_v1', updated);
-      syncItem('transactions', tx, true);
+    setDeleteModalState({
+      isOpen: true,
+      transaction: tx,
+      scope: 'single',
+    });
+  };
+
+  const handleConfirmDeleteTransaction = () => {
+    if (!deleteModalState.transaction) return;
+    const tx = deleteModalState.transaction;
+    const scope = deleteModalState.scope;
+
+    let toDelete = [tx];
+
+    if (scope === 'all') {
+      toDelete = transactions.filter(
+        (t) =>
+          (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) ||
+          (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId)
+      );
+    } else if (scope === 'future') {
+      toDelete = transactions.filter((t) => {
+        if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) {
+          return (t.installmentNumber || 0) >= (tx.installmentNumber || 0);
+        }
+        if (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId) {
+          return t.date >= tx.date;
+        }
+        return t.id === tx.id;
+      });
     }
+
+    const deleteIds = new Set(toDelete.map((t) => t.id));
+    const updated = transactions.filter((t) => !deleteIds.has(t.id));
+
+    setTransactions(updated);
+    saveToLocalStorage('financas_transactions_v1', updated);
+
+    if (toDelete.length === 1) {
+      syncItem('transactions', toDelete[0], true);
+    } else if (toDelete.length > 1) {
+      syncBatchTransactions(toDelete, true);
+    }
+
+    setDeleteModalState({ isOpen: false, transaction: null, scope: 'single' });
   };
 
   const handleDeleteAccount = (acc) => {
@@ -1085,15 +1213,101 @@ export default function App() {
     setActiveTab('faturas');
   };
 
-  // Filtragem de Lançamentos na tabela (incluindo simulações hipotéticas ativas)
+  // Filtragem e Ordenação de Lançamentos na tabela (incluindo simulações hipotéticas ativas)
   const filteredTransactions = useMemo(() => {
-    return allDisplayTransactions.filter((t) => {
+    const list = allDisplayTransactions.filter((t) => {
       const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchType = filterType === 'ALL' || t.type === filterType;
       const matchStatus = filterStatus === 'ALL' || t.status === filterStatus;
       return matchSearch && matchType && matchStatus;
     });
-  }, [allDisplayTransactions, searchTerm, filterType, filterStatus]);
+
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayTime = new Date(todayDate + 'T12:00:00').getTime();
+
+    return list.sort((a, b) => {
+      if (txSort.field === 'date') {
+        if (txSort.direction === 'closest') {
+          // Ordenação padrão: data mais próxima da data atual
+          const diffA = Math.abs(new Date(a.date + 'T12:00:00').getTime() - todayTime);
+          const diffB = Math.abs(new Date(b.date + 'T12:00:00').getTime() - todayTime);
+          if (diffA !== diffB) return diffA - diffB;
+          // Em caso de mesmo distanciamento, data futura tem precedência
+          return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
+        }
+        if (txSort.direction === 'asc') {
+          return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
+        }
+        return new Date(b.date + 'T12:00:00') - new Date(a.date + 'T12:00:00');
+      }
+
+      if (txSort.field === 'description') {
+        const cmp = a.description.localeCompare(b.description, 'pt-BR');
+        return txSort.direction === 'asc' ? cmp : -cmp;
+      }
+
+      if (txSort.field === 'scope') {
+        const scA = a.scope || 'FAMILY';
+        const scB = b.scope || 'FAMILY';
+        const cmp = scA.localeCompare(scB, 'pt-BR');
+        return txSort.direction === 'asc' ? cmp : -cmp;
+      }
+
+      if (txSort.field === 'category') {
+        const nameA = categories.find((c) => c.id === a.categoryId)?.name || '';
+        const nameB = categories.find((c) => c.id === b.categoryId)?.name || '';
+        const cmp = nameA.localeCompare(nameB, 'pt-BR');
+        return txSort.direction === 'asc' ? cmp : -cmp;
+      }
+
+      if (txSort.field === 'source') {
+        const nameA =
+          accounts.find((acc) => acc.id === a.accountId)?.name ||
+          cards.find((c) => c.id === a.cardId)?.name ||
+          '';
+        const nameB =
+          accounts.find((acc) => acc.id === b.accountId)?.name ||
+          cards.find((c) => c.id === b.cardId)?.name ||
+          '';
+        const cmp = nameA.localeCompare(nameB, 'pt-BR');
+        return txSort.direction === 'asc' ? cmp : -cmp;
+      }
+
+      if (txSort.field === 'status') {
+        const cmp = (a.status || '').localeCompare(b.status || '', 'pt-BR');
+        return txSort.direction === 'asc' ? cmp : -cmp;
+      }
+
+      if (txSort.field === 'amount') {
+        return txSort.direction === 'asc'
+          ? a.amountCents - b.amountCents
+          : b.amountCents - a.amountCents;
+      }
+
+      return 0;
+    });
+  }, [allDisplayTransactions, searchTerm, filterType, filterStatus, txSort, categories, accounts, cards]);
+
+  // Alternador de ordenação de colunas da tabela de lançamentos
+  const handleSortTransactions = (field) => {
+    if (field === 'date') {
+      if (txSort.field !== 'date') {
+        setTxSort({ field: 'date', direction: 'closest' });
+      } else if (txSort.direction === 'closest') {
+        setTxSort({ field: 'date', direction: 'asc' });
+      } else if (txSort.direction === 'asc') {
+        setTxSort({ field: 'date', direction: 'desc' });
+      } else {
+        setTxSort({ field: 'date', direction: 'closest' });
+      }
+    } else {
+      if (txSort.field === field) {
+        setTxSort({ field, direction: txSort.direction === 'asc' ? 'desc' : 'asc' });
+      } else {
+        setTxSort({ field, direction: field === 'amount' ? 'desc' : 'asc' });
+      }
+    }
+  };
 
   if (!currentUser) {
     return (
@@ -1183,11 +1397,7 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => {
-                setModalSourceType('ACCOUNT');
-                setEditScope('single');
-                setModalState({ isOpen: true, type: 'transaction', mode: 'create', data: null, scenarioIdToConvert: null });
-              }}
+              onClick={() => openTransactionModal('create')}
               className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg flex items-center space-x-1.5 shadow-sm transition active:scale-95"
             >
               <Plus className="w-4 h-4" />
@@ -1285,24 +1495,24 @@ export default function App() {
             )}
 
             {/* Banner para Modo Demonstração / Apresentação Ativo */}
-            {(transactions.some((t) => t.id.startsWith('demo-')) || accounts.some((a) => a.id.startsWith('demo-'))) && (
+            {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
               <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center space-x-3">
                   <span className="text-2xl">✨</span>
                   <div>
-                    <h4 className="font-bold text-sm text-amber-950">Modo Apresentação Ativo</h4>
+                    <h4 className="font-bold text-sm text-amber-950">Dados de Demonstração Detectados</h4>
                     <p className="text-xs text-amber-800">
-                      Você está visualizando dados fictícios de demonstração. Quando terminar, você pode limpar tudo para utilizar seus dados reais.
+                      Existem lançamentos de exemplo carregados no sistema. Você pode removê-los com segurança sem afetar seus lançamentos reais.
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleClearDemoData(true)}
+                  onClick={handleClearOnlyDemo}
                   className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold whitespace-nowrap shadow-sm transition active:scale-95 flex items-center justify-center space-x-1.5 self-start sm:self-auto"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Zerar Dados de Exemplo</span>
+                  <span>Remover Apenas Exemplos</span>
                 </button>
               </div>
             )}
@@ -1538,12 +1748,12 @@ export default function App() {
                   <option value="HIPOTETICO">Hipotético</option>
                 </select>
 
-                {transactions.some((t) => t.id.startsWith('demo-')) && (
+                {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
                   <button
                     type="button"
-                    onClick={() => handleClearDemoData(false)}
+                    onClick={handleClearOnlyDemo}
                     className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 transition ml-auto"
-                    title="Excluir lançamentos fictícios de exemplo"
+                    title="Excluir apenas lançamentos fictícios de exemplo (seus dados reais são preservados)"
                   >
                     <Trash2 className="w-4 h-4" />
                     <span className="hidden sm:inline">Limpar Exemplos</span>
@@ -1552,11 +1762,7 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setModalSourceType('ACCOUNT');
-                    setEditScope('single');
-                    setModalState({ isOpen: true, type: 'transaction', mode: 'create', data: null, scenarioIdToConvert: null });
-                  }}
+                  onClick={() => openTransactionModal('create')}
                   className={`bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 ${
                     transactions.some((t) => t.id.startsWith('demo-')) ? '' : 'ml-auto'
                   }`}
@@ -1573,13 +1779,136 @@ export default function App() {
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200">
-                      <th className="py-3 px-4">Data</th>
-                      <th className="py-3 px-4">Descrição</th>
-                      <th className="py-3 px-4">Escopo</th>
-                      <th className="py-3 px-4">Categoria</th>
-                      <th className="py-3 px-4">Conta / Cartão</th>
-                      <th className="py-3 px-4">Situação</th>
-                      <th className="py-3 px-4 text-right">Valor</th>
+                      <th
+                        onClick={() => handleSortTransactions('date')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
+                        title="Clique para alternar ordenação por data (Mais próxima / Antiga / Futura)"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Data</span>
+                          {txSort.field === 'date' ? (
+                            txSort.direction === 'closest' ? (
+                              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded ml-1 whitespace-nowrap">
+                                Mais próxima
+                              </span>
+                            ) : txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortTransactions('description')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
+                        title="Clique para ordenar por descrição"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Descrição</span>
+                          {txSort.field === 'description' ? (
+                            txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortTransactions('scope')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
+                        title="Clique para ordenar por escopo"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Escopo</span>
+                          {txSort.field === 'scope' ? (
+                            txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortTransactions('category')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
+                        title="Clique para ordenar por categoria"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Categoria</span>
+                          {txSort.field === 'category' ? (
+                            txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortTransactions('source')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
+                        title="Clique para ordenar por conta ou cartão"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Conta / Cartão</span>
+                          {txSort.field === 'source' ? (
+                            txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortTransactions('status')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
+                        title="Clique para ordenar por situação"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Situação</span>
+                          {txSort.field === 'status' ? (
+                            txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortTransactions('amount')}
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group text-right"
+                        title="Clique para ordenar por valor"
+                      >
+                        <div className="flex items-center justify-end space-x-1">
+                          <span>Valor</span>
+                          {txSort.field === 'amount' ? (
+                            txSort.direction === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            ) : (
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                          )}
+                        </div>
+                      </th>
                       <th className="py-3 px-4 text-center">Ações</th>
                     </tr>
                   </thead>
@@ -1685,11 +2014,7 @@ export default function App() {
                                 <div className="flex items-center justify-center space-x-2">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setModalSourceType(tx.cardId ? 'CARD' : 'ACCOUNT');
-                                      setEditScope('single');
-                                      setModalState({ isOpen: true, type: 'transaction', mode: 'edit', data: tx, scenarioIdToConvert: null });
-                                    }}
+                                    onClick={() => openTransactionModal('edit', tx)}
                                     className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition"
                                     title="Editar"
                                   >
@@ -2063,14 +2388,7 @@ export default function App() {
                         </h4>
                         <button
                           type="button"
-                          onClick={() => {
-                            setModalState({
-                              isOpen: true,
-                              type: 'transaction',
-                              mode: 'create',
-                              data: { cardId: card.id, sourceType: 'CARD' }
-                            });
-                          }}
+                          onClick={() => openTransactionModal('create', { cardId: card.id, sourceType: 'CARD' })}
                           className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center space-x-1"
                         >
                           <Plus className="w-3.5 h-3.5" />
@@ -2106,7 +2424,7 @@ export default function App() {
                                   <span className="font-bold text-sm text-slate-900">{formatMoney(item.amountCents)}</span>
                                   <button
                                     type="button"
-                                    onClick={() => setModalState({ isOpen: true, type: 'transaction', mode: 'edit', data: item })}
+                                    onClick={() => openTransactionModal('edit', item)}
                                     className="p-1 text-slate-400 hover:text-blue-600 rounded transition"
                                     title="Editar lançamento"
                                   >
@@ -2228,18 +2546,97 @@ export default function App() {
               <table className="w-full text-left text-sm border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider border-b">
-                    <th className="py-3 px-4">MÊS</th>
-                    <th className="py-3 px-4 text-right text-emerald-600">RECEITAS PREVISTAS</th>
-                    <th className="py-3 px-4 text-right text-rose-600">DESPESAS & PARCELAS</th>
-                    <th className="py-3 px-4 text-right">RESULTADO DO MÊS</th>
-                    <th className="py-3 px-4 text-right">SALDO ACUMULADO PROJETADO</th>
-                    <th className="py-3 px-4 text-center">RISCO</th>
+                    <th
+                      onClick={() => setProjectionSort((prev) => ({ field: 'month', direction: prev.field === 'month' && prev.direction === 'asc' ? 'desc' : 'asc' }))}
+                      className="py-3 px-4 cursor-pointer hover:bg-slate-200/70 transition select-none group"
+                      title="Clique para ordenar por mês"
+                    >
+                      <div className="flex items-center space-x-1">
+                        <span>MÊS</span>
+                        {projectionSort.field === 'month' ? (
+                          projectionSort.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setProjectionSort((prev) => ({ field: 'income', direction: prev.field === 'income' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                      className="py-3 px-4 text-right text-emerald-600 cursor-pointer hover:bg-slate-200/70 transition select-none group"
+                      title="Clique para ordenar por receitas previstas"
+                    >
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>RECEITAS PREVISTAS</span>
+                        {projectionSort.field === 'income' ? (
+                          projectionSort.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setProjectionSort((prev) => ({ field: 'expense', direction: prev.field === 'expense' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                      className="py-3 px-4 text-right text-rose-600 cursor-pointer hover:bg-slate-200/70 transition select-none group"
+                      title="Clique para ordenar por despesas e parcelas"
+                    >
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>DESPESAS & PARCELAS</span>
+                        {projectionSort.field === 'expense' ? (
+                          projectionSort.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-rose-600" /> : <ArrowDown className="w-3.5 h-3.5 text-rose-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setProjectionSort((prev) => ({ field: 'net', direction: prev.field === 'net' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                      className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/70 transition select-none group"
+                      title="Clique para ordenar por resultado do mês"
+                    >
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>RESULTADO DO MÊS</span>
+                        {projectionSort.field === 'net' ? (
+                          projectionSort.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setProjectionSort((prev) => ({ field: 'balance', direction: prev.field === 'balance' && prev.direction === 'desc' ? 'asc' : 'desc' }))}
+                      className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/70 transition select-none group"
+                      title="Clique para ordenar por saldo acumulado projetado"
+                    >
+                      <div className="flex items-center justify-end space-x-1">
+                        <span>SALDO ACUMULADO PROJETADO</span>
+                        {projectionSort.field === 'balance' ? (
+                          projectionSort.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => setProjectionSort((prev) => ({ field: 'risk', direction: prev.field === 'risk' && prev.direction === 'asc' ? 'desc' : 'asc' }))}
+                      className="py-3 px-4 text-center cursor-pointer hover:bg-slate-200/70 transition select-none group"
+                      title="Clique para ordenar por risco"
+                    >
+                      <div className="flex items-center justify-center space-x-1">
+                        <span>RISCO</span>
+                        {projectionSort.field === 'risk' ? (
+                          projectionSort.direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                        ) : (
+                          <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
+                        )}
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {(() => {
                     let runningBalance = monthSummary.totalBankBalance;
-                    return Array.from({ length: projectionHorizon }).map((_, idx) => {
+                    const rows = [];
+                    for (let idx = 0; idx < projectionHorizon; idx++) {
                       const date = new Date(2026, 8 + idx, 1);
                       const label = date.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
 
@@ -2258,27 +2655,61 @@ export default function App() {
                       runningBalance += netMonth;
                       const isHealthy = runningBalance >= 0;
 
-                      return (
-                        <tr key={idx} className="hover:bg-slate-50 transition">
-                          <td className="py-3.5 px-4 font-semibold capitalize text-slate-900">{label}</td>
-                          <td className="py-3.5 px-4 text-right font-bold text-emerald-600">{formatMoney(totalIncome)}</td>
-                          <td className="py-3.5 px-4 text-right font-bold text-rose-600">{formatMoney(totalExpense)}</td>
-                          <td className="py-3.5 px-4 text-right font-bold text-blue-600">
-                            {netMonth >= 0 ? `+${formatMoney(netMonth)}` : formatMoney(netMonth)}
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-bold text-slate-900">{formatMoney(runningBalance)}</td>
-                          <td className="py-3.5 px-4 text-center">
-                            <span
-                              className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                                isHealthy ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                              }`}
-                            >
-                              {isHealthy ? 'Saudável' : 'Atenção'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
+                      rows.push({
+                        idx,
+                        label,
+                        totalIncome,
+                        totalExpense,
+                        netMonth,
+                        runningBalance,
+                        isHealthy,
+                      });
+                    }
+
+                    const sortedRows = [...rows].sort((a, b) => {
+                      if (projectionSort.field === 'month') {
+                        return projectionSort.direction === 'asc' ? a.idx - b.idx : b.idx - a.idx;
+                      }
+                      if (projectionSort.field === 'income') {
+                        return projectionSort.direction === 'asc' ? a.totalIncome - b.totalIncome : b.totalIncome - a.totalIncome;
+                      }
+                      if (projectionSort.field === 'expense') {
+                        return projectionSort.direction === 'asc' ? a.totalExpense - b.totalExpense : b.totalExpense - a.totalExpense;
+                      }
+                      if (projectionSort.field === 'net') {
+                        return projectionSort.direction === 'asc' ? a.netMonth - b.netMonth : b.netMonth - a.netMonth;
+                      }
+                      if (projectionSort.field === 'balance') {
+                        return projectionSort.direction === 'asc' ? a.runningBalance - b.runningBalance : b.runningBalance - a.runningBalance;
+                      }
+                      if (projectionSort.field === 'risk') {
+                        return projectionSort.direction === 'asc'
+                          ? (a.isHealthy === b.isHealthy ? 0 : a.isHealthy ? 1 : -1)
+                          : (a.isHealthy === b.isHealthy ? 0 : a.isHealthy ? -1 : 1);
+                      }
+                      return 0;
                     });
+
+                    return sortedRows.map((row) => (
+                      <tr key={row.idx} className="hover:bg-slate-50 transition">
+                        <td className="py-3.5 px-4 font-semibold capitalize text-slate-900">{row.label}</td>
+                        <td className="py-3.5 px-4 text-right font-bold text-emerald-600">{formatMoney(row.totalIncome)}</td>
+                        <td className="py-3.5 px-4 text-right font-bold text-rose-600">{formatMoney(row.totalExpense)}</td>
+                        <td className="py-3.5 px-4 text-right font-bold text-blue-600">
+                          {row.netMonth >= 0 ? `+${formatMoney(row.netMonth)}` : formatMoney(row.netMonth)}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-bold text-slate-900">{formatMoney(row.runningBalance)}</td>
+                        <td className="py-3.5 px-4 text-center">
+                          <span
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                              row.isHealthy ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            }`}
+                          >
+                            {row.isHealthy ? 'Saudável' : 'Atenção'}
+                          </span>
+                        </td>
+                      </tr>
+                    ));
                   })()}
                 </tbody>
               </table>
@@ -2619,18 +3050,18 @@ export default function App() {
 
                 <div className="p-4 border border-amber-100 bg-amber-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h4 className="font-bold text-sm text-amber-900">Limpar Movimentações (Manter Contas)</h4>
+                    <h4 className="font-bold text-sm text-amber-900">Remover Apenas Dados de Exemplo</h4>
                     <p className="text-xs text-amber-700">
-                      Remove todos os lançamentos e simulações, mantendo suas contas e cartões com saldo zerado.
+                      Remove somente lançamentos e registros fictícios de demonstração, mantendo 100% intactos seus lançamentos reais, contas e saldos.
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleClearDemoData(false)}
+                    onClick={handleClearOnlyDemo}
                     className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Limpar Movimentações</span>
+                    <span>Limpar Exemplos</span>
                   </button>
                 </div>
 
@@ -2643,7 +3074,7 @@ export default function App() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleClearDemoData(true)}
+                    onClick={handleResetEntireSystem}
                     className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -3093,13 +3524,18 @@ export default function App() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Valor Total (R$)</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {modalState.mode === 'create' && formInstallments > 1
+                        ? (installmentValueMode === 'TOTAL' ? 'Valor Total da Compra (R$)' : 'Valor de Cada Parcela (R$)')
+                        : 'Valor (R$)'}
+                    </label>
                     <input
                       type="number"
                       step="0.01"
                       name="amount"
                       required
-                      defaultValue={modalState.data ? (modalState.data.amountCents / 100).toFixed(2) : ''}
+                      value={formAmount}
+                      onChange={(e) => setFormAmount(e.target.value)}
                       placeholder="0,00"
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
@@ -3256,18 +3692,20 @@ export default function App() {
                         />
                         <span>Apenas este lançamento</span>
                       </label>
-                      {modalState.data?.installmentGroupId && (
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="editScopeRadio"
-                            checked={editScope === 'future'}
-                            onChange={() => setEditScope('future')}
-                            className="text-amber-600 focus:ring-amber-500"
-                          />
-                          <span>Deste lançamento em diante (parcelas futuras)</span>
-                        </label>
-                      )}
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="editScopeRadio"
+                          checked={editScope === 'future'}
+                          onChange={() => setEditScope('future')}
+                          className="text-amber-600 focus:ring-amber-500"
+                        />
+                        <span>
+                          {modalState.data?.installmentGroupId
+                            ? 'Deste lançamento em diante (parcelas futuras)'
+                            : 'Deste lançamento em diante (repetições futuras)'}
+                        </span>
+                      </label>
                       <label className="flex items-center space-x-2 cursor-pointer">
                         <input
                           type="radio"
@@ -3287,7 +3725,7 @@ export default function App() {
                 )}
 
                 {modalState.mode === 'create' && (
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-semibold text-slate-700">Parcelamento:</label>
                       <div className="flex items-center space-x-1">
@@ -3297,11 +3735,95 @@ export default function App() {
                           min="1"
                           max="72"
                           name="installments"
-                          defaultValue={modalState.data?.installments || '1'}
-                          className="w-16 border border-slate-300 rounded px-2 py-1 text-xs text-center"
+                          value={formInstallments}
+                          onChange={(e) => setFormInstallments(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-16 border border-slate-300 rounded px-2 py-1 text-xs text-center font-bold"
                         />
                       </div>
                     </div>
+
+                    {formInstallments > 1 && (
+                      <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-lg space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-blue-950">
+                            O valor digitado é:
+                          </label>
+                          <span className="text-[11px] font-semibold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded">
+                            {formatMoney(Math.round((parseFloat(formAmount) || 0) * 100))}
+                          </span>
+                        </div>
+                        <input type="hidden" name="installmentValueMode" value={installmentValueMode} />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <label
+                            className={`flex items-start space-x-2 p-2.5 rounded-lg border cursor-pointer transition ${
+                              installmentValueMode === 'TOTAL'
+                                ? 'bg-white border-blue-500 shadow-xs ring-1 ring-blue-500'
+                                : 'bg-white/60 border-slate-200 hover:bg-white'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="installmentValueModeRadio"
+                              checked={installmentValueMode === 'TOTAL'}
+                              onChange={() => setInstallmentValueMode('TOTAL')}
+                              className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div>
+                              <span className="font-bold text-slate-800 block">Total da Compra</span>
+                              <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                                Divide o valor em {formInstallments}x
+                              </span>
+                            </div>
+                          </label>
+
+                          <label
+                            className={`flex items-start space-x-2 p-2.5 rounded-lg border cursor-pointer transition ${
+                              installmentValueMode === 'INSTALLMENT'
+                                ? 'bg-white border-blue-500 shadow-xs ring-1 ring-blue-500'
+                                : 'bg-white/60 border-slate-200 hover:bg-white'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="installmentValueModeRadio"
+                              checked={installmentValueMode === 'INSTALLMENT'}
+                              onChange={() => setInstallmentValueMode('INSTALLMENT')}
+                              className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div>
+                              <span className="font-bold text-slate-800 block">Valor da Parcela</span>
+                              <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
+                                Repete nas {formInstallments} parcelas
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+
+                        {/* Pré-visualização transparente do cálculo */}
+                        {parseFloat(formAmount) > 0 && (
+                          <div className="mt-1 text-xs bg-white rounded-md p-2.5 border border-blue-100 flex flex-wrap items-center justify-between gap-1 shadow-2xs">
+                            <span className="text-slate-600">
+                              Cada parcela:{' '}
+                              <strong className="text-blue-700 font-bold">
+                                {installmentValueMode === 'TOTAL'
+                                  ? formatMoney(Math.floor(Math.round((parseFloat(formAmount) || 0) * 100) / formInstallments))
+                                  : formatMoney(Math.round((parseFloat(formAmount) || 0) * 100))}
+                              </strong>{' '}
+                              ({formInstallments}x)
+                            </span>
+                            <span className="text-slate-600">
+                              Total final:{' '}
+                              <strong className="text-slate-900 font-bold">
+                                {installmentValueMode === 'TOTAL'
+                                  ? formatMoney(Math.round((parseFloat(formAmount) || 0) * 100))
+                                  : formatMoney(Math.round((parseFloat(formAmount) || 0) * 100) * formInstallments)}
+                              </strong>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex items-center space-x-2 pt-2 border-t border-slate-200">
                       <input
                         type="checkbox"
@@ -3334,6 +3856,206 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Modal de Exclusão de Lançamentos com Escopo (Apenas este, Deste em diante, Todos) */}
+      {deleteModalState.isOpen && deleteModalState.transaction && (() => {
+        const tx = deleteModalState.transaction;
+        const isGrouped = Boolean(tx.installmentGroupId || tx.recurrenceRuleId);
+        const futureCount = transactions.filter((t) => {
+          if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) {
+            return (t.installmentNumber || 0) >= (tx.installmentNumber || 0);
+          }
+          if (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId) {
+            return t.date >= tx.date;
+          }
+          return t.id === tx.id;
+        }).length;
+
+        const allCount = transactions.filter((t) =>
+          (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) ||
+          (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId)
+        ).length;
+
+        const countToDelete =
+          deleteModalState.scope === 'all'
+            ? allCount
+            : deleteModalState.scope === 'future'
+            ? futureCount
+            : 1;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">Excluir Lançamento</h3>
+                    <p className="text-xs text-slate-500">Confirmação de exclusão</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalState({ isOpen: false, transaction: null, scope: 'single' })}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="py-4 space-y-3">
+                {/* Cartão de Detalhes do Lançamento */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-semibold text-sm text-slate-800">{tx.description}</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Data: {new Date(tx.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                      </p>
+                    </div>
+                    <span className={`text-sm font-bold ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'}`}>
+                      {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
+                    </span>
+                  </div>
+                </div>
+
+                {isGrouped ? (
+                  <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2.5">
+                    <div className="flex items-center space-x-1.5 text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="text-xs font-bold">
+                        {tx.installmentGroupId
+                          ? `Este lançamento faz parte de um parcelamento (${tx.installmentNumber || '?'}/${tx.installmentCount || '?'})`
+                          : 'Este lançamento faz parte de uma recorrência'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-800">
+                      Escolha como deseja prosseguir com a exclusão:
+                    </p>
+
+                    <div className="space-y-2 text-xs">
+                      <label
+                        className={`flex items-start space-x-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                          deleteModalState.scope === 'single'
+                            ? 'bg-white border-rose-500 shadow-xs ring-1 ring-rose-500'
+                            : 'bg-white/60 border-slate-200 hover:bg-white'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="deleteScopeRadio"
+                          value="single"
+                          checked={deleteModalState.scope === 'single'}
+                          onChange={() => setDeleteModalState((prev) => ({ ...prev, scope: 'single' }))}
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-800">Apenas este lançamento</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                              1 lançamento
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            {tx.installmentGroupId
+                              ? `Exclui apenas a parcela ${tx.installmentNumber || ''}. As demais parcelas continuam ativas.`
+                              : 'Exclui apenas esta ocorrência da recorrência.'}
+                          </span>
+                        </div>
+                      </label>
+
+                      <label
+                        className={`flex items-start space-x-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                          deleteModalState.scope === 'future'
+                            ? 'bg-white border-rose-500 shadow-xs ring-1 ring-rose-500'
+                            : 'bg-white/60 border-slate-200 hover:bg-white'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="deleteScopeRadio"
+                          value="future"
+                          checked={deleteModalState.scope === 'future'}
+                          onChange={() => setDeleteModalState((prev) => ({ ...prev, scope: 'future' }))}
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-800">Deste lançamento em diante</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded">
+                              {futureCount} {futureCount === 1 ? 'lançamento' : 'lançamentos'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            {tx.installmentGroupId
+                              ? `Exclui a partir da parcela ${tx.installmentNumber || ''} até a última parcela.`
+                              : 'Exclui este lançamento e todas as repetições futuras.'}
+                          </span>
+                        </div>
+                      </label>
+
+                      <label
+                        className={`flex items-start space-x-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                          deleteModalState.scope === 'all'
+                            ? 'bg-white border-rose-500 shadow-xs ring-1 ring-rose-500'
+                            : 'bg-white/60 border-slate-200 hover:bg-white'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="deleteScopeRadio"
+                          value="all"
+                          checked={deleteModalState.scope === 'all'}
+                          onChange={() => setDeleteModalState((prev) => ({ ...prev, scope: 'all' }))}
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-800">
+                              {tx.installmentGroupId ? 'Todas as parcelas' : 'Todas as repetições'}
+                            </span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded">
+                              {allCount} {allCount === 1 ? 'lançamento' : 'lançamentos'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            {tx.installmentGroupId
+                              ? `Exclui todas as ${allCount} parcelas deste grupo desde o início.`
+                              : 'Exclui todas as repetições desta recorrência.'}
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-600 px-1">
+                    Tem certeza de que deseja excluir este lançamento? Esta ação não poderá ser desfeita.
+                  </p>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalState({ isOpen: false, transaction: null, scope: 'single' })}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteTransaction}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-semibold transition active:scale-95 shadow-xs"
+                >
+                  Excluir {countToDelete > 1 ? `(${countToDelete})` : ''}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal de Autenticação e Gestão de Perfis */}
       <AuthModal

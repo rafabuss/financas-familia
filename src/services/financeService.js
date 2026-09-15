@@ -242,7 +242,54 @@ export const loadDemoPresentationData = async (demo) => {
   };
 };
 
-export const clearAllDemoData = async (currentAccounts = [], wipeAccountsAndCards = false) => {
+// Limpeza estrita e segura APENAS de dados de exemplo (prefixo demo-)
+export const clearDemoDataOnly = async ({
+  transactions = [],
+  scenarios = [],
+  accounts = [],
+  cards = [],
+}) => {
+  const isCloud = isSupabaseConfigured() && supabase;
+
+  const demoTxIds = transactions.filter((t) => String(t.id || '').startsWith('demo-')).map((t) => t.id);
+  const demoScenIds = scenarios.filter((s) => String(s.id || '').startsWith('demo-')).map((s) => s.id);
+  const demoAccIds = accounts.filter((a) => String(a.id || '').startsWith('demo-')).map((a) => a.id);
+  const demoCardIds = cards.filter((c) => String(c.id || '').startsWith('demo-')).map((c) => c.id);
+
+  if (isCloud) {
+    try {
+      if (demoTxIds.length) await supabase.from('transactions').delete().in('id', demoTxIds);
+      if (demoScenIds.length) await supabase.from('scenarios').delete().in('id', demoScenIds);
+      if (demoAccIds.length) await supabase.from('accounts').delete().in('id', demoAccIds);
+      if (demoCardIds.length) await supabase.from('cards').delete().in('id', demoCardIds);
+    } catch (e) {
+      console.error('Erro ao excluir dados demo do Supabase:', e);
+    }
+  }
+
+  // Preserva TODOS os dados reais do usuário intactos
+  const remainingTransactions = transactions.filter((t) => !String(t.id || '').startsWith('demo-'));
+  const remainingScenarios = scenarios.filter((s) => !String(s.id || '').startsWith('demo-'));
+  const remainingAccounts = accounts.filter((a) => !String(a.id || '').startsWith('demo-'));
+  const remainingCards = cards.filter((c) => !String(c.id || '').startsWith('demo-'));
+
+  localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(remainingTransactions));
+  localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify(remainingScenarios));
+  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(remainingAccounts));
+  localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(remainingCards));
+  localStorage.removeItem('financas_demo_loaded');
+  localStorage.setItem('financas_initialized', 'true');
+
+  return {
+    transactions: remainingTransactions,
+    scenarios: remainingScenarios,
+    accounts: remainingAccounts,
+    cards: remainingCards,
+  };
+};
+
+// Reset Geral do Sistema (Apenas quando acionado explicitamente em Configurações Avançadas)
+export const resetEntireSystem = async () => {
   const isCloud = isSupabaseConfigured() && supabase;
 
   if (isCloud) {
@@ -250,36 +297,31 @@ export const clearAllDemoData = async (currentAccounts = [], wipeAccountsAndCard
       await Promise.all([
         supabase.from('transactions').delete().neq('id', '__none__'),
         supabase.from('scenarios').delete().neq('id', '__none__'),
+        supabase.from('accounts').delete().neq('id', '__none__'),
+        supabase.from('cards').delete().neq('id', '__none__'),
       ]);
-      if (wipeAccountsAndCards) {
-        await Promise.all([
-          supabase.from('accounts').delete().neq('id', '__none__'),
-          supabase.from('cards').delete().neq('id', '__none__'),
-        ]);
-      }
     } catch (e) {
-      console.error('Erro ao limpar Supabase:', e);
+      console.error('Erro ao resetar Supabase:', e);
     }
   }
 
-  const newAccounts = wipeAccountsAndCards ? [] : currentAccounts.map((a) => ({ ...a, initialBalanceCents: 0 }));
-
   localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify([]));
-  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(newAccounts));
-  if (wipeAccountsAndCards) {
-    localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify([]));
-  }
+  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify([]));
+  localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify([]));
   localStorage.removeItem('financas_demo_loaded');
   localStorage.setItem('financas_initialized', 'true');
 
   return {
     transactions: [],
     scenarios: [],
-    accounts: newAccounts,
-    cards: wipeAccountsAndCards ? [] : undefined,
+    accounts: [],
+    cards: [],
   };
 };
+
+// Alias para compatibilidade anterior, redirecionando para a versão segura
+export const clearAllDemoData = clearDemoDataOnly;
 
 // ==========================================
 // OPERAÇÕES DE PERSISTÊNCIA (SAVE / DELETE)

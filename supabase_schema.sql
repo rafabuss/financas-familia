@@ -118,20 +118,20 @@ VALUES
   ('cat-8', 'Transporte & Combustível', 'EXPENSE', '#475569', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Contas Iniciais
-INSERT INTO public.accounts (id, name, bank, type, initial_balance_cents, holder, color, archived, owner_id)
-VALUES
-  ('acc-1', 'Conta Corrente Principal', 'Banco do Brasil', 'corrente', 450000, 'Família', '#2563eb', false, 'user-all'),
-  ('acc-2', 'Reserva de Emergência', 'Nubank', 'investimento', 1500000, 'Família', '#16a34a', false, 'user-all'),
-  ('acc-3', 'Conta Pessoal Rafael', 'Inter', 'corrente', 180000, 'Rafael', '#f97316', false, 'user-1')
-ON CONFLICT (id) DO NOTHING;
+-- Contas Iniciais (Opcional - Mantido comentado para iniciar o banco 100% limpo)
+-- INSERT INTO public.accounts (id, name, bank, type, initial_balance_cents, holder, color, archived, owner_id)
+-- VALUES
+--   ('acc-1', 'Conta Corrente Principal', 'Banco do Brasil', 'corrente', 450000, 'Família', '#2563eb', false, 'user-all'),
+--   ('acc-2', 'Reserva de Emergência', 'Nubank', 'investimento', 1500000, 'Família', '#16a34a', false, 'user-all'),
+--   ('acc-3', 'Conta Pessoal Rafael', 'Inter', 'corrente', 180000, 'Rafael', '#f97316', false, 'user-1')
+-- ON CONFLICT (id) DO NOTHING;
 
--- Cartões Iniciais
-INSERT INTO public.cards (id, name, bank, flag, limit_cents, closing_day, due_day, color, archived, owner_id)
-VALUES
-  ('card-1', 'Nubank Ultravioleta', 'Nubank', 'Mastercard', 1500000, 25, 5, '#1e293b', false, 'user-all'),
-  ('card-2', 'XP Infinite', 'XP Investimentos', 'Visa', 2000000, 15, 25, '#0f172a', false, 'user-all')
-ON CONFLICT (id) DO NOTHING;
+-- Cartões Iniciais (Opcional - Mantido comentado para iniciar o banco 100% limpo)
+-- INSERT INTO public.cards (id, name, bank, flag, limit_cents, closing_day, due_day, color, archived, owner_id)
+-- VALUES
+--   ('card-1', 'Nubank Ultravioleta', 'Nubank', 'Mastercard', 1500000, 25, 5, '#1e293b', false, 'user-all'),
+--   ('card-2', 'XP Infinite', 'XP Investimentos', 'Visa', 2000000, 15, 25, '#0f172a', false, 'user-all')
+-- ON CONFLICT (id) DO NOTHING;
 
 -- Habilitar RLS (Row Level Security) com políticas permissivas para a família autenticada
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;

@@ -32,8 +32,16 @@ import {
   syncBatchTransactions,
   saveToLocalStorage,
   clearAllDemoData,
+  loadDemoPresentationData,
   STORAGE_KEYS,
 } from './services/financeService';
+import {
+  DEMO_ACCOUNTS,
+  DEMO_CARDS,
+  DEMO_CATEGORIES,
+  DEMO_TRANSACTIONS,
+  DEMO_SCENARIOS,
+} from './data/demoData';
 import {
   signOutUser,
   isSupabaseConfigured,
@@ -57,19 +65,8 @@ const FAMILY_MEMBERS = [
   { id: 'user-2', name: '👤 Ana Débora (Apenas Pessoal / Membro)', isFamily: false },
 ];
 
-// Dados Iniciais Fictícios
-const INITIAL_ACCOUNTS = [
-  { id: 'acc-1', name: 'Conta Corrente Principal', bank: 'Banco do Brasil', type: 'corrente', initialBalanceCents: 450000, holder: 'Família', color: '#2563eb', archived: false, ownerId: 'user-all' },
-  { id: 'acc-2', name: 'Reserva de Emergência', bank: 'Nubank', type: 'investimento', initialBalanceCents: 1500000, holder: 'Família', color: '#16a34a', archived: false, ownerId: 'user-all' },
-  { id: 'acc-3', name: 'Conta Pessoal Rafael', bank: 'Inter', type: 'corrente', initialBalanceCents: 180000, holder: 'Rafael', color: '#f97316', archived: false, ownerId: 'user-1' },
-];
-
-const INITIAL_CARDS = [
-  { id: 'card-1', name: 'Nubank Ultravioleta', bank: 'Nubank', flag: 'Mastercard', limitCents: 1500000, closingDay: 25, dueDay: 5, color: '#1e293b', archived: false, ownerId: 'user-all' },
-  { id: 'card-2', name: 'XP Infinite', bank: 'XP Investimentos', flag: 'Visa', limitCents: 2000000, closingDay: 15, dueDay: 25, color: '#0f172a', archived: false, ownerId: 'user-all' },
-];
-
-const INITIAL_CATEGORIES = [
+// Categorias Padrão Essenciais do Sistema
+const DEFAULT_CATEGORIES = [
   { id: 'cat-1', name: 'Salário & Dividendos', type: 'INCOME', color: '#16a34a', archived: false },
   { id: 'cat-2', name: 'Renda Extra & Consultoria', type: 'INCOME', color: '#0d9488', archived: false },
   { id: 'cat-3', name: 'Moradia (Aluguel/Condomínio)', type: 'EXPENSE', color: '#2563eb', archived: false },
@@ -80,118 +77,16 @@ const INITIAL_CATEGORIES = [
   { id: 'cat-8', name: 'Transporte & Combustível', type: 'EXPENSE', color: '#475569', archived: false },
 ];
 
-const INITIAL_TRANSACTIONS = [
-  {
-    id: 'tx-1',
-    description: 'Salário Principal - Rafael',
-    amountCents: 980000,
-    type: 'INCOME',
-    status: 'REALIZADO',
-    date: '2026-09-05',
-    accountId: 'acc-1',
-    categoryId: 'cat-1',
-    scope: 'FAMILY', // 'FAMILY' | 'PERSONAL'
-    ownerId: 'user-1',
-    isRecurring: true,
-  },
-  {
-    id: 'tx-2',
-    description: 'Salário & Proventos - Ana Débora',
-    amountCents: 850000,
-    type: 'INCOME',
-    status: 'REALIZADO',
-    date: '2026-09-08',
-    accountId: 'acc-1',
-    categoryId: 'cat-1',
-    scope: 'FAMILY',
-    ownerId: 'user-2',
-    isRecurring: true,
-  },
-  {
-    id: 'tx-3',
-    description: 'Aluguel do Apartamento',
-    amountCents: 340000,
-    type: 'EXPENSE',
-    status: 'REALIZADO',
-    date: '2026-09-10',
-    accountId: 'acc-1',
-    categoryId: 'cat-3',
-    scope: 'FAMILY',
-    ownerId: 'user-all',
-    isRecurring: true,
-  },
-  {
-    id: 'tx-4',
-    description: 'Supermercado Mensal',
-    amountCents: 145020,
-    type: 'EXPENSE',
-    status: 'REALIZADO',
-    date: '2026-09-12',
-    accountId: 'acc-1',
-    categoryId: 'cat-4',
-    scope: 'FAMILY',
-    ownerId: 'user-all',
-  },
-  {
-    id: 'tx-5',
-    description: 'iPhone 15 Pro (Parcela 01/10)',
-    amountCents: 64990,
-    type: 'EXPENSE',
-    status: 'COMPROMETIDO',
-    date: '2026-09-25',
-    cardId: 'card-1',
-    categoryId: 'cat-5',
-    scope: 'PERSONAL',
-    ownerId: 'user-1',
-    installmentGroupId: 'inst-1',
-    installmentNumber: 1,
-    installmentCount: 10,
-  },
-];
-
-const INITIAL_SCENARIOS = [
-  {
-    id: 'scen-1',
-    title: 'Troca de Carro (Financiamento)',
-    type: 'EXPENSE',
-    monthlyImpactCents: -185000,
-    months: 24,
-    startDate: '2026-10-01',
-    categoryId: 'cat-8',
-    sourceType: 'ACCOUNT',
-    accountId: 'acc-1',
-    cardId: null,
-    scope: 'FAMILY',
-    ownerId: 'user-1',
-    active: false,
-  },
-  {
-    id: 'scen-2',
-    title: 'Consultoria Nova (Renda Extra)',
-    type: 'INCOME',
-    monthlyImpactCents: 300000,
-    months: 6,
-    startDate: '2026-09-15',
-    categoryId: 'cat-2',
-    sourceType: 'ACCOUNT',
-    accountId: 'acc-1',
-    cardId: null,
-    scope: 'FAMILY',
-    ownerId: 'user-1',
-    active: true,
-  },
-];
-
 export default function App() {
-  // Estado Principal
+  // Estado Principal (Inicia 100% limpo, sem dados mockados)
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentMemberId, setCurrentMemberId] = useState('user-all');
 
-  const [accounts, setAccounts] = useState(INITIAL_ACCOUNTS);
-  const [cards, setCards] = useState(INITIAL_CARDS);
-  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
-  const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
-  const [scenarios, setScenarios] = useState(INITIAL_SCENARIOS);
+  const [accounts, setAccounts] = useState([]);
+  const [cards, setCards] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [transactions, setTransactions] = useState([]);
+  const [scenarios, setScenarios] = useState([]);
 
   // Controle de Nuvem e Sessão de Usuário
   const [isCloudConnected, setIsCloudConnected] = useState(false);
@@ -258,11 +153,7 @@ export default function App() {
     if (!currentUser) return;
 
     loadInitialAppData({
-      accounts: INITIAL_ACCOUNTS,
-      cards: INITIAL_CARDS,
-      categories: INITIAL_CATEGORIES,
-      transactions: INITIAL_TRANSACTIONS,
-      scenarios: INITIAL_SCENARIOS,
+      categories: DEFAULT_CATEGORIES,
     }).then((res) => {
       if (res) {
         setIsCloudConnected(res.isCloud);
@@ -297,13 +188,40 @@ export default function App() {
     }
   };
 
-  const handleClearDemoData = async () => {
-    if (confirm('Deseja realmente limpar todos os lançamentos e simulações fictícias de exemplo e começar com seus dados reais?')) {
-      const res = await clearAllDemoData(accounts);
+  // Carregar dados de demonstração sob demanda para apresentar a aplicação
+  const handleLoadDemoData = async () => {
+    if (confirm('Deseja carregar os dados de demonstração/apresentação? Isso criará contas, cartões, lançamentos e simulações de exemplo para você demonstrar a plataforma.')) {
+      const res = await loadDemoPresentationData({
+        accounts: DEMO_ACCOUNTS,
+        cards: DEMO_CARDS,
+        categories: DEMO_CATEGORIES,
+        transactions: DEMO_TRANSACTIONS,
+        scenarios: DEMO_SCENARIOS,
+      });
+      setAccounts(res.accounts);
+      setCards(res.cards);
+      setCategories(res.categories);
+      setTransactions(res.transactions);
+      setScenarios(res.scenarios);
+      alert('Dados de demonstração carregados com sucesso! Você pode zerar tudo a qualquer momento.');
+    }
+  };
+
+  // Limpeza de dados (com opção de reset total ou apenas lançamentos/simulações)
+  const handleClearDemoData = async (wipeAccountsAndCards = false) => {
+    const msg = wipeAccountsAndCards
+      ? 'Deseja realmente ZERAR TUDO (excluir todas as contas, cartões, lançamentos e simulações)? As categorias padrão serão preservadas.'
+      : 'Deseja limpar todos os lançamentos e simulações, mantendo suas contas e cartões com saldo zerado?';
+
+    if (confirm(msg)) {
+      const res = await clearAllDemoData(accounts, wipeAccountsAndCards);
       setTransactions([]);
       setScenarios([]);
       setAccounts(res.accounts);
-      alert('Dados de exemplo limpos com sucesso! Agora você já pode cadastrar suas contas e lançamentos reais.');
+      if (wipeAccountsAndCards) {
+        setCards([]);
+      }
+      alert('Dados limpos com sucesso!');
     }
   };
 
@@ -766,8 +684,8 @@ export default function App() {
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? fd.get('accountId') : null,
-            cardId: modalSourceType === 'CARD' ? fd.get('cardId') : null,
+            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
           };
           matched.push(u);
           return u;
@@ -792,8 +710,8 @@ export default function App() {
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? fd.get('accountId') : null,
-            cardId: modalSourceType === 'CARD' ? fd.get('cardId') : null,
+            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
           };
           matched.push(u);
           return u;
@@ -812,8 +730,8 @@ export default function App() {
           categoryId: fd.get('categoryId'),
           scope,
           ownerId,
-          accountId: modalSourceType === 'ACCOUNT' ? fd.get('accountId') : null,
-          cardId: modalSourceType === 'CARD' ? fd.get('cardId') : null,
+          accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+          cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
         };
 
         const updated = transactions.map((t) => (t.id === original.id ? updatedTx : t));
@@ -843,8 +761,8 @@ export default function App() {
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? fd.get('accountId') : null,
-            cardId: modalSourceType === 'CARD' ? fd.get('cardId') : null,
+            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
             installmentGroupId: groupId,
             installmentNumber: i,
             installmentCount: installments,
@@ -865,8 +783,8 @@ export default function App() {
           categoryId: fd.get('categoryId'),
           scope,
           ownerId,
-          accountId: modalSourceType === 'ACCOUNT' ? fd.get('accountId') : null,
-          cardId: modalSourceType === 'CARD' ? fd.get('cardId') : null,
+          accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+          cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
           isRecurring,
           recurrenceRuleId: isRecurring ? `rec-${Date.now()}` : null,
         };
@@ -1330,25 +1248,61 @@ export default function App() {
               </div>
             )}
 
-            {/* Banner para Limpar Dados de Demonstração */}
-            {transactions.length > 0 && transactions.some((t) => t.id.startsWith('tx-') && !t.id.startsWith('tx-imp-')) && (
-              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+            {/* Card de Boas-vindas para Sistema Limpo (0 Contas e 0 Lançamentos) */}
+            {accounts.length === 0 && transactions.length === 0 && (
+              <div className="p-6 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border border-blue-200 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-start space-x-3">
+                  <span className="text-3xl">👋</span>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Bem-vindo ao Finanças da Família!</h3>
+                    <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-xl">
+                      Seu sistema está pronto para você cadastrar as contas, cartões e movimentações reais da sua família.
+                      Se preferir explorar a ferramenta primeiro com dados de simulação ou apresentá-la a alguém, você pode carregar os dados de demonstração com um clique.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={handleLoadDemoData}
+                    className="px-4 py-2 bg-white hover:bg-slate-50 text-blue-700 border border-blue-300 rounded-xl text-xs font-semibold whitespace-nowrap shadow-sm transition active:scale-95 flex items-center space-x-1.5"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Carregar Exemplos (Demo)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalState({ isOpen: true, type: 'account', mode: 'create', data: null });
+                    }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold whitespace-nowrap shadow-sm transition active:scale-95 flex items-center space-x-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Cadastrar 1ª Conta</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Banner para Modo Demonstração / Apresentação Ativo */}
+            {(transactions.some((t) => t.id.startsWith('demo-')) || accounts.some((a) => a.id.startsWith('demo-'))) && (
+              <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center space-x-3">
                   <span className="text-2xl">✨</span>
                   <div>
-                    <h4 className="font-bold text-sm text-slate-900">Começar com seus dados reais?</h4>
-                    <p className="text-xs text-slate-600">
-                      Os dados atuais são exemplos de demonstração. Você pode limpá-los agora com um clique para iniciar suas finanças do zero.
+                    <h4 className="font-bold text-sm text-amber-950">Modo Apresentação Ativo</h4>
+                    <p className="text-xs text-amber-800">
+                      Você está visualizando dados fictícios de demonstração. Quando terminar, você pode limpar tudo para utilizar seus dados reais.
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={handleClearDemoData}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold whitespace-nowrap shadow-sm transition active:scale-95 flex items-center justify-center space-x-1.5 self-start sm:self-auto"
+                  onClick={() => handleClearDemoData(true)}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold whitespace-nowrap shadow-sm transition active:scale-95 flex items-center justify-center space-x-1.5 self-start sm:self-auto"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Limpar Dados de Exemplo</span>
+                  <span>Zerar Dados de Exemplo</span>
                 </button>
               </div>
             )}
@@ -1584,10 +1538,10 @@ export default function App() {
                   <option value="HIPOTETICO">Hipotético</option>
                 </select>
 
-                {transactions.some((t) => t.id.startsWith('tx-') && !t.id.startsWith('tx-imp-')) && (
+                {transactions.some((t) => t.id.startsWith('demo-')) && (
                   <button
                     type="button"
-                    onClick={handleClearDemoData}
+                    onClick={() => handleClearDemoData(false)}
                     className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 transition ml-auto"
                     title="Excluir lançamentos fictícios de exemplo"
                   >
@@ -1604,7 +1558,7 @@ export default function App() {
                     setModalState({ isOpen: true, type: 'transaction', mode: 'create', data: null, scenarioIdToConvert: null });
                   }}
                   className={`bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 ${
-                    transactions.some((t) => t.id.startsWith('tx-') && !t.id.startsWith('tx-imp-')) ? '' : 'ml-auto'
+                    transactions.some((t) => t.id.startsWith('demo-')) ? '' : 'ml-auto'
                   }`}
                 >
                   <Plus className="w-4 h-4" />
@@ -2639,21 +2593,63 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="p-4 border border-rose-100 bg-rose-50/60 rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-rose-900">Limpar Dados de Exemplo</h4>
-                  <p className="text-xs text-rose-600">
-                    Remove os lançamentos fictícios para que você inicie do zero com suas informações reais.
-                  </p>
+              {/* Seção Modo Demonstração e Gerenciamento de Dados */}
+              <div className="pt-4 border-t border-slate-200 space-y-4">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>Modo Demonstração & Gerenciamento de Dados</span>
+                </h3>
+
+                <div className="p-4 border border-blue-100 bg-blue-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-sm text-blue-900">Carregar Dados de Demonstração</h4>
+                    <p className="text-xs text-blue-700">
+                      Insere contas, cartões, lançamentos e simulações de exemplo para você testar ou apresentar a plataforma.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLoadDemoData}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Carregar Exemplos</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleClearDemoData}
-                  className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Limpar Agora</span>
-                </button>
+
+                <div className="p-4 border border-amber-100 bg-amber-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-sm text-amber-900">Limpar Movimentações (Manter Contas)</h4>
+                    <p className="text-xs text-amber-700">
+                      Remove todos os lançamentos e simulações, mantendo suas contas e cartões com saldo zerado.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleClearDemoData(false)}
+                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Limpar Movimentações</span>
+                  </button>
+                </div>
+
+                <div className="p-4 border border-rose-100 bg-rose-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-sm text-rose-900">Zerar Todo o Sistema (Reset Completo)</h4>
+                    <p className="text-xs text-rose-600">
+                      Exclui todas as contas, cartões, lançamentos e cenários, deixando a aplicação 100% vazia para iniciar do zero.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleClearDemoData(true)}
+                    className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Reset Completo</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2782,14 +2778,18 @@ export default function App() {
                       <label className="block text-xs font-semibold text-slate-700 mb-1">Conta Bancária Prevista</label>
                       <select
                         name="accountId"
-                        defaultValue={modalState.data?.accountId || accounts[0]?.id}
+                        defaultValue={modalState.data?.accountId || accounts[0]?.id || ''}
                         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       >
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.bank})
-                          </option>
-                        ))}
+                        {accounts.length === 0 ? (
+                          <option value="">Nenhuma conta cadastrada</option>
+                        ) : (
+                          accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name} ({a.bank})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   ) : (
@@ -2797,14 +2797,18 @@ export default function App() {
                       <label className="block text-xs font-semibold text-slate-700 mb-1">Cartão de Crédito Previsto</label>
                       <select
                         name="cardId"
-                        defaultValue={modalState.data?.cardId || cards[0]?.id}
+                        defaultValue={modalState.data?.cardId || cards[0]?.id || ''}
                         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       >
-                        {cards.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.bank})
-                          </option>
-                        ))}
+                        {cards.length === 0 ? (
+                          <option value="">Nenhum cartão cadastrado</option>
+                        ) : (
+                          cards.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} ({c.bank})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   )}
@@ -3201,14 +3205,18 @@ export default function App() {
                       <label className="block text-xs font-semibold text-slate-700 mb-1">Conta Bancária</label>
                       <select
                         name="accountId"
-                        defaultValue={modalState.data?.accountId || accounts[0]?.id}
+                        defaultValue={modalState.data?.accountId || accounts[0]?.id || ''}
                         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       >
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.bank})
-                          </option>
-                        ))}
+                        {accounts.length === 0 ? (
+                          <option value="">Nenhuma conta cadastrada</option>
+                        ) : (
+                          accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name} ({a.bank})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   ) : (
@@ -3216,14 +3224,18 @@ export default function App() {
                       <label className="block text-xs font-semibold text-slate-700 mb-1">Cartão de Crédito</label>
                       <select
                         name="cardId"
-                        defaultValue={modalState.data?.cardId || cards[0]?.id}
+                        defaultValue={modalState.data?.cardId || cards[0]?.id || ''}
                         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       >
-                        {cards.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.bank})
-                          </option>
-                        ))}
+                        {cards.length === 0 ? (
+                          <option value="">Nenhum cartão cadastrado</option>
+                        ) : (
+                          cards.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} ({c.bank})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   )}

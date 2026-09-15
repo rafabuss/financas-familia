@@ -152,7 +152,7 @@ export const scenarioToDb = (scen) => ({
 // CARREGAMENTO INICIAL UNIFICADO
 // ==========================================
 
-export const loadInitialAppData = async (defaults) => {
+export const loadInitialAppData = async (defaults = {}) => {
   const isCloud = isSupabaseConfigured() && supabase;
 
   if (isCloud) {
@@ -165,74 +165,36 @@ export const loadInitialAppData = async (defaults) => {
         supabase.from('scenarios').select('*').order('created_at', { ascending: true }),
       ]);
 
-      const hasRemoteData = (accRes.data?.length || 0) > 0 || (txRes.data?.length || 0) > 0;
-
-      if (hasRemoteData) {
-        return {
-          isCloud: true,
-          accounts: (accRes.data || []).map(accountToClient),
-          cards: (cardRes.data || []).map(cardToClient),
-          categories: (catRes.data || []).map(categoryToClient),
-          transactions: (txRes.data || []).map(transactionToClient),
-          scenarios: (scenRes.data || []).map(scenarioToClient),
-        };
-      } else {
-        // Se as tabelas estiverem vazias, faz o seed inicial no Supabase com os dados padrão
-        try {
-          if (defaults.categories?.length) {
+      // Se as categorias estiverem vazias, faz o seed apenas de categorias essenciais
+      if (!catRes.data || catRes.data.length === 0) {
+        if (defaults.categories?.length) {
+          try {
             await supabase.from('categories').upsert(defaults.categories.map(categoryToDb));
+          } catch (e) {
+            console.warn('Erro ao inserir categorias padrão:', e);
           }
-          if (defaults.accounts?.length) {
-            await supabase.from('accounts').upsert(defaults.accounts.map(accountToDb));
-          }
-          if (defaults.cards?.length) {
-            await supabase.from('cards').upsert(defaults.cards.map(cardToDb));
-          }
-          if (defaults.transactions?.length) {
-            await supabase.from('transactions').upsert(defaults.transactions.map(transactionToDb));
-          }
-          if (defaults.scenarios?.length) {
-            await supabase.from('scenarios').upsert(defaults.scenarios.map(scenarioToDb));
-          }
-        } catch (e) {
-          console.warn('Aviso no seed inicial do Supabase:', e);
         }
-
-        const isInitialized = localStorage.getItem('financas_initialized') === 'true';
-        if (isInitialized) {
-          return {
-            isCloud: true,
-            accounts: (accRes.data || []).map(accountToClient),
-            cards: (cardRes.data || []).map(cardToClient),
-            categories: (catRes.data || []).map(categoryToClient),
-            transactions: [],
-            scenarios: [],
-          };
-        }
-
-        return {
-          isCloud: true,
-          accounts: defaults.accounts,
-          cards: defaults.cards,
-          categories: defaults.categories,
-          transactions: defaults.transactions,
-          scenarios: defaults.scenarios,
-        };
       }
+
+      // Retorna exatamente os dados reais do banco (SEM injetar transações ou simulações fictícias)
+      return {
+        isCloud: true,
+        accounts: (accRes.data || []).map(accountToClient),
+        cards: (cardRes.data || []).map(cardToClient),
+        categories: ((catRes.data?.length ? catRes.data : defaults.categories) || []).map(categoryToClient),
+        transactions: (txRes.data || []).map(transactionToClient),
+        scenarios: (scenRes.data || []).map(scenarioToClient),
+      };
     } catch (err) {
       console.warn('Falha ao conectar no Supabase. Usando armazenamento local:', err);
     }
   }
 
-  // Fallback para LocalStorage
-  const isInitialized = localStorage.getItem('financas_initialized') === 'true';
+  // Fallback para LocalStorage (NUNCA gera transações de exemplo por padrão)
   const getLocal = (key, fallback) => {
     try {
       const stored = localStorage.getItem(key);
       if (stored !== null) return JSON.parse(stored);
-      if (isInitialized && (key === STORAGE_KEYS.transactions || key === STORAGE_KEYS.scenarios)) {
-        return [];
-      }
       return fallback;
     } catch {
       return fallback;
@@ -241,44 +203,81 @@ export const loadInitialAppData = async (defaults) => {
 
   return {
     isCloud: false,
-    accounts: getLocal(STORAGE_KEYS.accounts, defaults.accounts),
-    cards: getLocal(STORAGE_KEYS.cards, defaults.cards),
-    categories: getLocal(STORAGE_KEYS.categories, defaults.categories),
-    transactions: getLocal(STORAGE_KEYS.transactions, isInitialized ? [] : defaults.transactions),
-    scenarios: getLocal(STORAGE_KEYS.scenarios, isInitialized ? [] : defaults.scenarios),
+    accounts: getLocal(STORAGE_KEYS.accounts, []),
+    cards: getLocal(STORAGE_KEYS.cards, []),
+    categories: getLocal(STORAGE_KEYS.categories, defaults.categories || []),
+    transactions: getLocal(STORAGE_KEYS.transactions, []),
+    scenarios: getLocal(STORAGE_KEYS.scenarios, []),
   };
 };
 
-export const clearAllDemoData = async (currentAccounts = []) => {
+export const loadDemoPresentationData = async (demo) => {
   const isCloud = isSupabaseConfigured() && supabase;
-  
+
+  if (isCloud) {
+    try {
+      if (demo.categories?.length) await supabase.from('categories').upsert(demo.categories.map(categoryToDb));
+      if (demo.accounts?.length) await supabase.from('accounts').upsert(demo.accounts.map(accountToDb));
+      if (demo.cards?.length) await supabase.from('cards').upsert(demo.cards.map(cardToDb));
+      if (demo.transactions?.length) await supabase.from('transactions').upsert(demo.transactions.map(transactionToDb));
+      if (demo.scenarios?.length) await supabase.from('scenarios').upsert(demo.scenarios.map(scenarioToDb));
+    } catch (e) {
+      console.error('Erro ao carregar demo no Supabase:', e);
+    }
+  }
+
+  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(demo.accounts || []));
+  localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(demo.cards || []));
+  localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(demo.categories || []));
+  localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(demo.transactions || []));
+  localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify(demo.scenarios || []));
+  localStorage.setItem('financas_demo_loaded', 'true');
+
+  return {
+    accounts: demo.accounts || [],
+    cards: demo.cards || [],
+    categories: demo.categories || [],
+    transactions: demo.transactions || [],
+    scenarios: demo.scenarios || [],
+  };
+};
+
+export const clearAllDemoData = async (currentAccounts = [], wipeAccountsAndCards = false) => {
+  const isCloud = isSupabaseConfigured() && supabase;
+
   if (isCloud) {
     try {
       await Promise.all([
         supabase.from('transactions').delete().neq('id', '__none__'),
         supabase.from('scenarios').delete().neq('id', '__none__'),
       ]);
-      if (currentAccounts.length) {
-        for (const a of currentAccounts) {
-          await supabase.from('accounts').update({ initial_balance_cents: 0 }).eq('id', a.id);
-        }
+      if (wipeAccountsAndCards) {
+        await Promise.all([
+          supabase.from('accounts').delete().neq('id', '__none__'),
+          supabase.from('cards').delete().neq('id', '__none__'),
+        ]);
       }
     } catch (e) {
       console.error('Erro ao limpar Supabase:', e);
     }
   }
 
-  const zeroedAccounts = currentAccounts.map((a) => ({ ...a, initialBalanceCents: 0 }));
+  const newAccounts = wipeAccountsAndCards ? [] : currentAccounts.map((a) => ({ ...a, initialBalanceCents: 0 }));
 
   localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify([]));
-  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(zeroedAccounts));
+  localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(newAccounts));
+  if (wipeAccountsAndCards) {
+    localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify([]));
+  }
+  localStorage.removeItem('financas_demo_loaded');
   localStorage.setItem('financas_initialized', 'true');
 
   return {
     transactions: [],
     scenarios: [],
-    accounts: zeroedAccounts,
+    accounts: newAccounts,
+    cards: wipeAccountsAndCards ? [] : undefined,
   };
 };
 

@@ -32,7 +32,8 @@ import {
   ChevronDown,
   FileText,
   Check,
-  Filter
+  Filter,
+  Search
 } from 'lucide-react';
 import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
@@ -361,6 +362,7 @@ export default function App() {
   const [filterDatePreset, setFilterDatePreset] = useState('ALL'); // 'ALL' | 'THIS_MONTH' | 'LAST_MONTH' | 'NEXT_MONTH' | 'CUSTOM'
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
+  const [showFilterDrawer, setShowFilterDrawer] = useState(false);
 
   // Ordenação de Lançamentos (padrão: data mais próxima da data atual)
   const [txSort, setTxSort] = useState({ field: 'date', direction: 'closest' }); // 'closest' | 'asc' | 'desc'
@@ -2342,6 +2344,18 @@ export default function App() {
     Boolean(filterStartDate) ||
     Boolean(filterEndDate);
 
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim()) count++;
+    if (filterType !== 'ALL') count++;
+    if (filterStatus !== 'ALL') count++;
+    if (filterSource !== 'ALL') count++;
+    if (filterCategory !== 'ALL') count++;
+    if (filterScope !== 'ALL') count++;
+    if (filterDatePreset !== 'ALL' || filterStartDate || filterEndDate) count++;
+    return count;
+  }, [searchTerm, filterType, filterStatus, filterSource, filterCategory, filterScope, filterDatePreset, filterStartDate, filterEndDate]);
+
   // Filtragem e Ordenação de Lançamentos na tabela (incluindo simulações hipotéticas ativas)
   const filteredTransactions = useMemo(() => {
     const todayDate = new Date().toISOString().slice(0, 10);
@@ -2550,6 +2564,26 @@ export default function App() {
     getTxDueDate,
     isTxOverdue,
   ]);
+
+  // Totais consolidados dos lançamentos filtrados para o mini-resumo
+  const filteredTotals = useMemo(() => {
+    let incomeCents = 0;
+    let expenseCents = 0;
+    filteredTransactions.forEach((tx) => {
+      if (tx.status === 'CANCELADO') return;
+      if (tx.type === 'INCOME') {
+        incomeCents += tx.amountCents;
+      } else if (tx.type === 'EXPENSE') {
+        expenseCents += tx.amountCents;
+      }
+    });
+    return {
+      incomeCents,
+      expenseCents,
+      netCents: incomeCents - expenseCents,
+      count: filteredTransactions.length,
+    };
+  }, [filteredTransactions]);
 
   // Alternador de ordenação de colunas da tabela de lançamentos
   const handleSortTransactions = (field) => {
@@ -3227,51 +3261,53 @@ export default function App() {
         {/* ===================== ABA: LANÇAMENTOS ===================== */}
         {activeTab === 'transactions' && (
           <div className="space-y-4">
-            {/* Painel Avançado de Filtros e Busca */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              {/* Linha 1: Busca Livre, Período e Ações */}
-              <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
-                <div className="relative flex-1">
-                  <Filter className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            {/* Barra de Ferramentas Superior: Busca, Período, Filtros e Ações */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+              <div className="flex flex-col md:flex-row gap-2.5 items-stretch md:items-center justify-between">
+                {/* Campo de Busca Rápida */}
+                <div className="relative flex-1 min-w-[240px]">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
-                    placeholder="Buscar por descrição, valor, categoria, conta ou cartão..."
+                    placeholder="Buscar lançamentos, compras, faturas..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-9 pr-8 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    className="w-full pl-10 pr-9 py-2 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all placeholder:text-slate-400"
                   />
                   {searchTerm && (
                     <button
                       type="button"
                       onClick={() => setSearchTerm('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition"
+                      title="Limpar busca"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
 
+                {/* Controles de Período, Filtros e Botões */}
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Seletor de Período Pré-definido */}
-                  <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                    <Calendar className="w-4 h-4 text-slate-400" />
+                  {/* Seletor de Período */}
+                  <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                    <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
                     <select
                       value={filterDatePreset}
                       onChange={(e) => handleDatePresetChange(e.target.value)}
-                      className="bg-transparent text-xs sm:text-sm font-medium text-slate-700 focus:outline-none cursor-pointer"
+                      className="bg-transparent text-xs sm:text-sm font-medium text-slate-700 focus:outline-none cursor-pointer pr-1"
                     >
                       <option value="ALL">Todo o Período</option>
                       <option value="THIS_MONTH">Este Mês</option>
                       <option value="LAST_MONTH">Mês Passado</option>
                       <option value="NEXT_MONTH">Próximo Mês</option>
-                      <option value="CUSTOM">Personalizado (De / Até)</option>
+                      <option value="CUSTOM">Personalizado</option>
                     </select>
                   </div>
 
-                  {/* Campos de Data De/Até (exibidos quando personalizado ou com datas preenchidas) */}
+                  {/* Campos de Data De/Até (quando CUSTOM ou datas preenchidas) */}
                   {(filterDatePreset === 'CUSTOM' || filterStartDate || filterEndDate) && (
-                    <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
-                      <span className="text-xs text-slate-400">De:</span>
+                    <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-600">
+                      <span className="text-slate-400">De:</span>
                       <input
                         type="date"
                         value={filterStartDate}
@@ -3281,7 +3317,7 @@ export default function App() {
                         }}
                         className="bg-transparent text-xs text-slate-700 focus:outline-none"
                       />
-                      <span className="text-xs text-slate-400">Até:</span>
+                      <span className="text-slate-400">Até:</span>
                       <input
                         type="date"
                         value={filterEndDate}
@@ -3294,166 +3330,27 @@ export default function App() {
                     </div>
                   )}
 
-                  {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
-                    <button
-                      type="button"
-                      onClick={handleClearOnlyDemo}
-                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1 transition"
-                      title="Excluir apenas lançamentos fictícios de exemplo"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span className="hidden sm:inline">Limpar Exemplos</span>
-                    </button>
-                  )}
-
+                  {/* Botão de Gaveta de Filtros */}
                   <button
                     type="button"
-                    onClick={() => openTransactionModal('create')}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95 ml-auto sm:ml-0"
+                    onClick={() => setShowFilterDrawer((prev) => !prev)}
+                    className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium border transition active:scale-95 shadow-2xs ${
+                      showFilterDrawer || activeFiltersCount > 0
+                        ? 'bg-blue-50 border-blue-300 text-blue-700 font-semibold'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title="Abrir filtros avançados"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Novo Lançamento</span>
+                    <Filter className="w-3.5 h-3.5" />
+                    <span>Filtros</span>
+                    {activeFiltersCount > 0 && (
+                      <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full min-w-[18px] text-center">
+                        {activeFiltersCount}
+                      </span>
+                    )}
                   </button>
-                </div>
-              </div>
 
-              {/* Linha 2: Filtros por Conta/Cartão, Situação, Categoria, Escopo e Tipo */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-2 border-t border-slate-100">
-                {/* Conta / Cartão */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    Conta / Cartão
-                  </label>
-                  <select
-                    value={filterSource}
-                    onChange={(e) => setFilterSource(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
-                  >
-                    <option value="ALL">Todas as Contas & Cartões</option>
-                    <option value="ACCOUNTS_ONLY">🏦 Apenas Contas</option>
-                    <option value="CARDS_ONLY">💳 Apenas Cartões</option>
-                    <optgroup label="Contas Bancárias">
-                      {accounts.map((a) => (
-                        <option key={a.id} value={`acc-${a.id}`}>
-                          Conta: {a.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Cartões de Crédito">
-                      {cards.map((c) => (
-                        <option key={c.id} value={`card-${c.id}`}>
-                          Cartão: {c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-
-                {/* Situação */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    Situação
-                  </label>
-                  <select
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    <option value="ALL">Todas as Situações</option>
-                    <option value="OVERDUE">🚨 Em Atraso ({overdueTransactions.length})</option>
-                    <option value="REALIZADO">✅ Realizado</option>
-                    <option value="COMPROMETIDO">⏳ Comprometido</option>
-                    <option value="PREVISTO">📅 Previsto</option>
-                    <option value="HIPOTETICO">✨ Hipotético</option>
-                    <option value="CANCELADO">🚫 Cancelado</option>
-                  </select>
-                </div>
-
-                {/* Categoria */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    Categoria
-                  </label>
-                  <select
-                    value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
-                  >
-                    <option value="ALL">Todas as Categorias</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Escopo */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    Escopo
-                  </label>
-                  <select
-                    value={filterScope}
-                    onChange={(e) => setFilterScope(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    <option value="ALL">Todos os Escopos</option>
-                    <option value="FAMILY">Familiar</option>
-                    <option value="PERSONAL">Pessoal / Individual</option>
-                  </select>
-                </div>
-
-                {/* Tipo */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    Tipo
-                  </label>
-                  <select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    <option value="ALL">Todos os Tipos</option>
-                    <option value="INCOME">Receitas (+)</option>
-                    <option value="EXPENSE">Despesas (-)</option>
-                  </select>
-                </div>
-
-                {/* Botão de Limpar / Reset */}
-                <div className="flex flex-col justify-end">
-                  {isAnyFilterActive ? (
-                    <button
-                      type="button"
-                      onClick={handleResetFilters}
-                      className="w-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg px-2.5 py-1.5 text-xs flex items-center justify-center space-x-1 transition active:scale-95"
-                      title="Resetar todos os filtros para o padrão"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      <span>Limpar Filtros</span>
-                    </button>
-                  ) : (
-                    <div className="text-[11px] text-slate-400 text-center py-1.5">
-                      Filtros desativados
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Barra de Contagem e Feedback dos Filtros Ativos */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
-                <div className="flex items-center space-x-2">
-                  <span>
-                    Exibindo <strong>{filteredTransactions.length}</strong> de <strong>{allDisplayTransactions.length}</strong> lançamentos
-                  </span>
-                  {isAnyFilterActive && (
-                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      Filtros ativos
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center space-x-3">
+                  {/* Botão Expandir / Recolher Faturas */}
                   {cardInvoiceMasters.length > 0 && (
                     <button
                       type="button"
@@ -3466,171 +3363,437 @@ export default function App() {
                         });
                         setExpandedInvoices(nextState);
                       }}
-                      className="text-xs text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-lg font-semibold flex items-center space-x-1.5 transition active:scale-95 shadow-2xs"
+                      className="text-xs text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-3 py-2 rounded-xl font-medium flex items-center space-x-1.5 transition active:scale-95 shadow-2xs"
                       title="Expandir ou recolher as compras de todas as faturas exibidas"
                     >
                       <CreditCard className="w-3.5 h-3.5 text-purple-600" />
-                      <span>{Object.values(expandedInvoices).some(Boolean) ? 'Recolher Faturas' : 'Expandir Faturas'}</span>
+                      <span className="hidden sm:inline">
+                        {Object.values(expandedInvoices).some(Boolean) ? 'Recolher Faturas' : 'Expandir Faturas'}
+                      </span>
+                      <span className="sm:hidden">Faturas</span>
                     </button>
                   )}
 
-                  {isAnyFilterActive && (
+                  {/* Limpar Exemplos (se houver demos) */}
+                  {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
                     <button
                       type="button"
-                      onClick={handleResetFilters}
-                      className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
+                      onClick={handleClearOnlyDemo}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-2 rounded-xl text-xs font-medium flex items-center space-x-1 transition"
+                      title="Excluir apenas lançamentos fictícios de exemplo"
                     >
-                      Mostrar todos os lançamentos
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Limpar Exemplos</span>
                     </button>
                   )}
+
+                  {/* Botão Novo Lançamento (CTA Principal) */}
+                  <button
+                    type="button"
+                    onClick={() => openTransactionModal('create')}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Novo Lançamento</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Chips Rápidos de Filtro */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+                <span className="text-[11px] font-semibold text-slate-400 mr-1 hidden sm:inline">
+                  Atalhos:
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('ALL');
+                    setFilterStatus('ALL');
+                    setFilterSource('ALL');
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                    filterType === 'ALL' && filterStatus === 'ALL' && filterSource === 'ALL'
+                      ? 'bg-slate-800 text-white font-semibold shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  Todos
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterType(filterType === 'EXPENSE' ? 'ALL' : 'EXPENSE')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                    filterType === 'EXPENSE'
+                      ? 'bg-rose-100 text-rose-800 border border-rose-300 font-semibold'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  💸 Despesas
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterType(filterType === 'INCOME' ? 'ALL' : 'INCOME')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                    filterType === 'INCOME'
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  💰 Receitas
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterStatus(filterStatus === 'OVERDUE' ? 'ALL' : 'OVERDUE')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center space-x-1 transition ${
+                    filterStatus === 'OVERDUE'
+                      ? 'bg-rose-600 text-white font-semibold'
+                      : overdueTransactions.length > 0
+                      ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  <span>🚨 Em Atraso</span>
+                  {overdueTransactions.length > 0 && (
+                    <span className="text-[10px] bg-rose-200 text-rose-900 font-bold px-1.5 py-0.2 rounded-full">
+                      {overdueTransactions.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterSource(filterSource === 'CARDS_ONLY' ? 'ALL' : 'CARDS_ONLY')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                    filterSource === 'CARDS_ONLY'
+                      ? 'bg-purple-100 text-purple-800 border border-purple-300 font-semibold'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  💳 Cartões
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterSource(filterSource === 'ACCOUNTS_ONLY' ? 'ALL' : 'ACCOUNTS_ONLY')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                    filterSource === 'ACCOUNTS_ONLY'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300 font-semibold'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  🏦 Contas
+                </button>
+
+                {isAnyFilterActive && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="ml-auto text-xs text-rose-600 hover:text-rose-800 font-semibold flex items-center space-x-1 transition py-1"
+                    title="Limpar todos os filtros aplicados"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Limpar Filtros</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Gaveta de Filtros Detalhados (Expansível) */}
+              {showFilterDrawer && (
+                <div className="pt-3 border-t border-slate-100">
+                  <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Filtros Específicos
+                      </span>
+                      {isAnyFilterActive && (
+                        <button
+                          type="button"
+                          onClick={handleResetFilters}
+                          className="text-xs text-rose-600 hover:underline font-medium"
+                        >
+                          Resetar Filtros
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                      {/* Conta / Cartão */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                          Conta / Cartão
+                        </label>
+                        <select
+                          value={filterSource}
+                          onChange={(e) => setFilterSource(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+                        >
+                          <option value="ALL">Todas as Contas & Cartões</option>
+                          <option value="ACCOUNTS_ONLY">🏦 Apenas Contas</option>
+                          <option value="CARDS_ONLY">💳 Apenas Cartões</option>
+                          <optgroup label="Contas Bancárias">
+                            {accounts.map((a) => (
+                              <option key={a.id} value={`acc-${a.id}`}>
+                                Conta: {a.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Cartões de Crédito">
+                            {cards.map((c) => (
+                              <option key={c.id} value={`card-${c.id}`}>
+                                Cartão: {c.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
+                      </div>
+
+                      {/* Situação */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                          Situação
+                        </label>
+                        <select
+                          value={filterStatus}
+                          onChange={(e) => setFilterStatus(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        >
+                          <option value="ALL">Todas as Situações</option>
+                          <option value="OVERDUE">🚨 Em Atraso ({overdueTransactions.length})</option>
+                          <option value="REALIZADO">✅ Realizado</option>
+                          <option value="COMPROMETIDO">⏳ Comprometido</option>
+                          <option value="PREVISTO">📅 Previsto</option>
+                          <option value="HIPOTETICO">✨ Hipotético</option>
+                          <option value="CANCELADO">🚫 Cancelado</option>
+                        </select>
+                      </div>
+
+                      {/* Categoria */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                          Categoria
+                        </label>
+                        <select
+                          value={filterCategory}
+                          onChange={(e) => setFilterCategory(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+                        >
+                          <option value="ALL">Todas as Categorias</option>
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Escopo */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                          Escopo
+                        </label>
+                        <select
+                          value={filterScope}
+                          onChange={(e) => setFilterScope(e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        >
+                          <option value="ALL">Todos os Escopos</option>
+                          <option value="FAMILY">Familiar</option>
+                          <option value="PERSONAL">Pessoal / Individual</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mini Faixa de Resumo Financeiro da Seleção Atual */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 px-4 py-2.5 bg-white rounded-xl border border-slate-200/80 text-xs shadow-2xs">
+              <div className="flex items-center space-x-2 text-slate-600">
+                <span className="font-semibold text-slate-800">
+                  {filteredTotals.count} {filteredTotals.count === 1 ? 'lançamento' : 'lançamentos'}
+                </span>
+                {allDisplayTransactions.length !== filteredTotals.count && (
+                  <span className="text-slate-400 text-[11px]">
+                    (de {allDisplayTransactions.length})
+                  </span>
+                )}
+                {isAnyFilterActive && (
+                  <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    Filtros aplicados
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center space-x-1 text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md">
+                  <span className="text-[11px] font-normal text-emerald-600">Entradas:</span>
+                  <span>+{formatMoney(filteredTotals.incomeCents)}</span>
+                </div>
+                <div className="flex items-center space-x-1 text-rose-700 font-semibold bg-rose-50 px-2 py-0.5 rounded-md">
+                  <span className="text-[11px] font-normal text-rose-600">Saídas:</span>
+                  <span>-{formatMoney(filteredTotals.expenseCents)}</span>
+                </div>
+                <div className="flex items-center space-x-1 text-slate-800 font-bold bg-slate-100 px-2 py-0.5 rounded-md">
+                  <span className="text-[11px] font-normal text-slate-500">Saldo:</span>
+                  <span className={filteredTotals.netCents >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                    {formatMoney(filteredTotals.netCents)}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Tabela de Lançamentos */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Tabela de Lançamentos Desentulhada (7 Colunas) */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
-                    <tr className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200 text-xs">
+                      {/* 1. Data */}
                       <th
                         onClick={() => handleSortTransactions('date')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
-                        title="Clique para alternar ordenação por data (Mais próxima / Antiga / Futura)"
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition select-none group whitespace-nowrap"
+                        title="Ordenar por data"
                       >
                         <div className="flex items-center space-x-1">
                           <span>Data</span>
                           {txSort.field === 'date' ? (
                             txSort.direction === 'closest' ? (
-                              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded ml-1 whitespace-nowrap">
-                                Mais próxima
+                              <span className="text-[9px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">
+                                Próxima
                               </span>
                             ) : txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
                             )
                           ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
                         </div>
                       </th>
+
+                      {/* 2. Descrição */}
                       <th
                         onClick={() => handleSortTransactions('description')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
-                        title="Clique para ordenar por descrição"
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition select-none group"
+                        title="Ordenar por descrição"
                       >
                         <div className="flex items-center space-x-1">
                           <span>Descrição</span>
                           {txSort.field === 'description' ? (
                             txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
                             )
                           ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
                         </div>
                       </th>
-                      <th
-                        onClick={() => handleSortTransactions('scope')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
-                        title="Clique para ordenar por escopo"
-                      >
-                        <div className="flex items-center space-x-1">
-                          <span>Escopo</span>
-                          {txSort.field === 'scope' ? (
-                            txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
-                            ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
-                            )
-                          ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
-                          )}
-                        </div>
-                      </th>
+
+                      {/* 3. Categoria */}
                       <th
                         onClick={() => handleSortTransactions('category')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
-                        title="Clique para ordenar por categoria"
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition select-none group"
+                        title="Ordenar por categoria"
                       >
                         <div className="flex items-center space-x-1">
                           <span>Categoria</span>
                           {txSort.field === 'category' ? (
                             txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
                             )
                           ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
                         </div>
                       </th>
+
+                      {/* 4. Conta / Cartão */}
                       <th
                         onClick={() => handleSortTransactions('source')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
-                        title="Clique para ordenar por conta ou cartão"
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition select-none group whitespace-nowrap"
+                        title="Ordenar por conta ou cartão"
                       >
                         <div className="flex items-center space-x-1">
                           <span>Conta / Cartão</span>
                           {txSort.field === 'source' ? (
                             txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
                             )
                           ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
                         </div>
                       </th>
+
+                      {/* 5. Situação */}
                       <th
                         onClick={() => handleSortTransactions('status')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group"
-                        title="Clique para ordenar por situação"
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition select-none group"
+                        title="Ordenar por situação"
                       >
                         <div className="flex items-center space-x-1">
                           <span>Situação</span>
                           {txSort.field === 'status' ? (
                             txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
                             )
                           ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
                         </div>
                       </th>
+
+                      {/* 6. Valor */}
                       <th
                         onClick={() => handleSortTransactions('amount')}
-                        className="py-3 px-4 cursor-pointer hover:bg-slate-200/80 transition select-none group text-right"
-                        title="Clique para ordenar por valor"
+                        className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition select-none group text-right whitespace-nowrap"
+                        title="Ordenar por valor"
                       >
                         <div className="flex items-center justify-end space-x-1">
                           <span>Valor</span>
                           {txSort.field === 'amount' ? (
                             txSort.direction === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 ml-1" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
                             )
                           ) : (
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition ml-1" />
+                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
                         </div>
                       </th>
-                      <th className="py-3 px-4 text-center">Ações</th>
+
+                      {/* 7. Ações */}
+                      <th className="py-3 px-4 text-center text-xs">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredTransactions.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="text-center py-8 text-slate-400">
-                          Nenhum lançamento encontrado para esta visão.
+                        <td colSpan={7} className="text-center py-12 text-slate-400 space-y-2">
+                          <p className="text-sm">Nenhum lançamento encontrado para os filtros selecionados.</p>
+                          {isAnyFilterActive && (
+                            <button
+                              type="button"
+                              onClick={handleResetFilters}
+                              className="text-xs text-blue-600 hover:underline font-semibold"
+                            >
+                              Limpar todos os filtros
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ) : (
@@ -3660,25 +3823,27 @@ export default function App() {
                               <tr
                                 className={`transition-colors border-l-4 ${
                                   tx.isPaid
-                                    ? 'bg-slate-50/70 hover:bg-slate-100/70 border-emerald-500'
+                                    ? 'bg-emerald-50/30 hover:bg-emerald-50/50 border-emerald-500'
                                     : isOverdue
-                                    ? 'bg-rose-50/60 hover:bg-rose-50/90 border-rose-500'
-                                    : 'bg-purple-50/40 hover:bg-purple-50/70 border-purple-600'
+                                    ? 'bg-rose-50/50 hover:bg-rose-50/80 border-rose-500'
+                                    : 'bg-purple-50/30 hover:bg-purple-50/60 border-purple-500'
                                 }`}
                               >
-                                <td className="py-3.5 px-4 whitespace-nowrap">
+                                {/* 1. Data */}
+                                <td className="py-3 px-4 whitespace-nowrap">
                                   <div className="flex flex-col">
                                     <div className="flex items-center space-x-1.5">
                                       <CreditCard className="w-3.5 h-3.5 text-purple-600 shrink-0" />
                                       <span className="font-bold text-slate-900">{formatDateBR(tx.dueDate)}</span>
                                     </div>
-                                    <span className="text-[10px] text-purple-700 font-semibold mt-0.5">
+                                    <span className="text-[10px] text-purple-700 font-medium">
                                       Vencimento Fatura
                                     </span>
                                   </div>
                                 </td>
 
-                                <td className="py-3.5 px-4 font-medium text-slate-900">
+                                {/* 2. Descrição com Chevron de Expansão */}
+                                <td className="py-3 px-4 font-medium text-slate-900">
                                   <div className="flex items-center space-x-2">
                                     <button
                                       type="button"
@@ -3688,7 +3853,7 @@ export default function App() {
                                           [tx.id]: !prev[tx.id],
                                         }))
                                       }
-                                      className="flex items-center space-x-2 text-left hover:text-purple-700 transition group focus:outline-none"
+                                      className="flex items-center space-x-1.5 text-left hover:text-purple-700 transition group focus:outline-none"
                                       title={isExpanded ? 'Recolher compras desta fatura' : 'Expandir e ver compras desta fatura'}
                                     >
                                       {isExpanded ? (
@@ -3709,14 +3874,14 @@ export default function App() {
                                           [tx.id]: !prev[tx.id],
                                         }))
                                       }
-                                      className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-800 font-bold px-2 py-0.5 rounded-full transition"
+                                      className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-800 font-semibold px-2 py-0.5 rounded-full transition"
                                       title="Clique para expandir/recolher"
                                     >
-                                      {tx.items.length} {tx.items.length === 1 ? 'compra' : 'compras'} {isExpanded ? '▲' : '▼'}
+                                      {tx.items.length} {tx.items.length === 1 ? 'item' : 'itens'} {isExpanded ? '▲' : '▼'}
                                     </button>
 
                                     {tx.isPaid && (
-                                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
+                                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded-full flex items-center space-x-1">
                                         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                         <span>Quitada</span>
                                       </span>
@@ -3731,27 +3896,17 @@ export default function App() {
                                   </div>
                                 </td>
 
-                                <td className="py-3.5 px-4">
-                                  <span
-                                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                                      tx.scope === 'PERSONAL'
-                                        ? 'bg-amber-100 text-amber-800'
-                                        : 'bg-blue-100 text-blue-800'
-                                    }`}
-                                  >
-                                    {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
-                                  </span>
-                                </td>
-
-                                <td className="py-3.5 px-4 text-slate-600">
-                                  <span className="inline-flex items-center space-x-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md">
+                                {/* 3. Categoria */}
+                                <td className="py-3 px-4 text-slate-600">
+                                  <span className="inline-flex items-center space-x-1 text-xs font-semibold text-purple-700 bg-purple-100/70 border border-purple-200 px-2 py-0.5 rounded-md">
                                     <CreditCard className="w-3 h-3 text-purple-600" />
                                     <span>Fatura Consolidada</span>
                                   </span>
                                 </td>
 
-                                <td className="py-3.5 px-4 text-slate-600 whitespace-nowrap">
-                                  <span className="text-purple-700 font-bold block">
+                                {/* 4. Conta / Cartão */}
+                                <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
+                                  <span className="text-purple-700 font-bold block text-xs sm:text-sm">
                                     💳 {tx.card?.name}
                                   </span>
                                   {tx.isPaid && tx.paymentTx && (
@@ -3761,7 +3916,8 @@ export default function App() {
                                   )}
                                 </td>
 
-                                <td className="py-3.5 px-4">
+                                {/* 5. Situação */}
+                                <td className="py-3 px-4">
                                   <span
                                     className={`text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center space-x-1 w-fit ${
                                       tx.status === 'REALIZADO'
@@ -3782,11 +3938,13 @@ export default function App() {
                                   </span>
                                 </td>
 
-                                <td className="py-3.5 px-4 text-right font-bold whitespace-nowrap text-purple-900 text-base">
+                                {/* 6. Valor */}
+                                <td className="py-3 px-4 text-right font-bold whitespace-nowrap text-purple-900 text-sm sm:text-base">
                                   - {formatMoney(tx.amountCents)}
                                 </td>
 
-                                <td className="py-3.5 px-4 text-center">
+                                {/* 7. Ações */}
+                                <td className="py-3 px-4 text-center">
                                   <div className="flex items-center justify-center space-x-1.5">
                                     {!tx.isPaid && (
                                       <button
@@ -3796,7 +3954,7 @@ export default function App() {
                                         title="Pagar e quitar esta fatura debitando de uma conta bancária"
                                       >
                                         <CreditCard className="w-3.5 h-3.5" />
-                                        <span>Pagar Fatura</span>
+                                        <span>Pagar</span>
                                       </button>
                                     )}
 
@@ -3821,20 +3979,22 @@ export default function App() {
                                       key={`sub-${item.id}`}
                                       className="bg-purple-50/20 hover:bg-purple-50/40 border-l-4 border-purple-300 text-xs transition-colors"
                                     >
-                                      <td className="py-2.5 px-4 pl-8 whitespace-nowrap text-slate-500">
+                                      {/* 1. Data da Compra */}
+                                      <td className="py-2.5 px-4 pl-7 whitespace-nowrap text-slate-500">
                                         <div className="flex items-center space-x-1.5">
                                           <span className="text-purple-400 font-bold">↳</span>
-                                          <span className="font-semibold text-slate-700">
+                                          <span className="font-medium text-slate-700">
                                             {formatDateBR(item.purchaseDate || item.date)}
                                           </span>
-                                          <span className="text-[9px] bg-slate-100 text-slate-500 px-1 py-0.2 rounded">
+                                          <span className="text-[9px] bg-slate-100 text-slate-500 px-1 py-0.2 rounded font-medium">
                                             Compra
                                           </span>
                                         </div>
                                       </td>
 
+                                      {/* 2. Descrição da Compra */}
                                       <td className="py-2.5 px-4 font-normal text-slate-800">
-                                        <div className="flex items-center space-x-2 pl-4">
+                                        <div className="flex items-center space-x-2">
                                           <span>{item.description}</span>
                                           {item.installmentCount && (
                                             <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold">
@@ -3847,21 +4007,15 @@ export default function App() {
                                               <span>Recorrente</span>
                                             </span>
                                           )}
+                                          {item.scope === 'PERSONAL' && (
+                                            <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-semibold">
+                                              👤 Pessoal
+                                            </span>
+                                          )}
                                         </div>
                                       </td>
 
-                                      <td className="py-2.5 px-4">
-                                        <span
-                                          className={`text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase ${
-                                            item.scope === 'PERSONAL'
-                                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                              : 'bg-blue-50 text-blue-700 border border-blue-200'
-                                          }`}
-                                        >
-                                          {item.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
-                                        </span>
-                                      </td>
-
+                                      {/* 3. Categoria */}
                                       <td className="py-2.5 px-4 text-slate-600">
                                         {itemCat ? (
                                           <span className="inline-flex items-center space-x-1.5">
@@ -3869,14 +4023,16 @@ export default function App() {
                                             <span>{itemCat.name}</span>
                                           </span>
                                         ) : (
-                                          'Sem Categoria'
+                                          <span className="text-slate-400 italic">Sem Categoria</span>
                                         )}
                                       </td>
 
+                                      {/* 4. Conta / Cartão */}
                                       <td className="py-2.5 px-4 text-slate-500 whitespace-nowrap">
-                                        <span className="text-[11px] text-purple-600">Item do Cartão</span>
+                                        <span className="text-[11px] text-purple-600 font-medium">Item do Cartão</span>
                                       </td>
 
+                                      {/* 5. Situação */}
                                       <td className="py-2.5 px-4">
                                         <span
                                           className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
@@ -3889,10 +4045,12 @@ export default function App() {
                                         </span>
                                       </td>
 
+                                      {/* 6. Valor */}
                                       <td className="py-2.5 px-4 text-right font-medium whitespace-nowrap text-slate-700">
                                         - {formatMoney(item.amountCents)}
                                       </td>
 
+                                      {/* 7. Ações */}
                                       <td className="py-2.5 px-4 text-center">
                                         <div className="flex items-center justify-center space-x-1">
                                           <button
@@ -3934,17 +4092,18 @@ export default function App() {
                               tx.isHypothetical
                                 ? 'bg-purple-50/20 hover:bg-purple-50/40 border-l-2 border-purple-500'
                                 : isOverdue
-                                ? 'bg-rose-50/50 hover:bg-rose-50/80 border-l-4 border-rose-500'
-                                : 'hover:bg-slate-50'
+                                ? 'bg-rose-50/40 hover:bg-rose-50/70 border-l-4 border-rose-500'
+                                : 'hover:bg-slate-50/80'
                             }`}
                           >
+                            {/* 1. Data */}
                             <td className={`py-3 px-4 whitespace-nowrap ${isOverdue ? 'text-rose-600 font-semibold' : 'text-slate-600'}`}>
                               <div className="flex flex-col">
                                 {tx.purchaseDate && tx.cardId ? (
                                   <>
                                     <div className="flex items-center space-x-1.5">
                                       <span className="font-semibold text-slate-900">{formatDateBR(tx.purchaseDate)}</span>
-                                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium" title="Data em que a compra foi realizada">
+                                      <span className="text-[9px] bg-slate-100 text-slate-600 px-1 py-0.2 rounded font-medium" title="Data em que a compra foi realizada">
                                         Compra
                                       </span>
                                     </div>
@@ -3960,9 +4119,16 @@ export default function App() {
                                 )}
                               </div>
                             </td>
+
+                            {/* 2. Descrição */}
                             <td className="py-3 px-4 font-medium text-slate-900">
                               <div className="flex items-center space-x-2">
                                 <span>{tx.description}</span>
+                                {tx.scope === 'PERSONAL' && (
+                                  <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-semibold whitespace-nowrap">
+                                    👤 Pessoal
+                                  </span>
+                                )}
                                 {isOverdue && (
                                   <span className="text-[10px] bg-rose-100 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded font-bold flex items-center space-x-1" title="Lançamento com vencimento em atraso">
                                     <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
@@ -3970,29 +4136,20 @@ export default function App() {
                                   </span>
                                 )}
                                 {tx.installmentCount && (
-                                  <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold">
+                                  <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold whitespace-nowrap">
                                     {tx.installmentNumber}/{tx.installmentCount}
                                   </span>
                                 )}
                                 {!tx.installmentCount && (tx.recurrenceRuleId || tx.isRecurring) && (
-                                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold flex items-center space-x-1" title="Lançamento com repetição mensal recorrente">
+                                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold flex items-center space-x-1 whitespace-nowrap" title="Lançamento com repetição mensal recorrente">
                                     <RefreshCw className="w-2.5 h-2.5" />
                                     <span>Recorrente</span>
                                   </span>
                                 )}
                               </div>
                             </td>
-                            <td className="py-3 px-4">
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                                  tx.scope === 'PERSONAL'
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-blue-100 text-blue-800'
-                                }`}
-                              >
-                                {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
-                              </span>
-                            </td>
+
+                            {/* 3. Categoria */}
                             <td className="py-3 px-4 text-slate-600">
                               {cat ? (
                                 <span className="inline-flex items-center space-x-1.5">
@@ -4000,17 +4157,21 @@ export default function App() {
                                   <span>{cat.name}</span>
                                 </span>
                               ) : (
-                                'Sem Categoria'
+                                <span className="text-slate-400 italic">Sem Categoria</span>
                               )}
                             </td>
+
+                            {/* 4. Conta / Cartão */}
                             <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
                               {acc && <span className="text-blue-700 font-medium">{acc.name}</span>}
                               {card && <span className="text-purple-700 font-medium">💳 {card.name}</span>}
                               {!acc && !card && <span className="text-slate-400">-</span>}
                             </td>
+
+                            {/* 5. Situação */}
                             <td className="py-3 px-4">
                               {tx.isHypothetical ? (
-                                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center space-x-1 bg-purple-100 text-purple-800 border border-purple-200">
+                                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center space-x-1 bg-purple-100 text-purple-800 border border-purple-200 w-fit">
                                   <Sparkles className="w-3 h-3 text-purple-600" />
                                   <span>Hipotético</span>
                                 </span>
@@ -4038,6 +4199,8 @@ export default function App() {
                                 </button>
                               )}
                             </td>
+
+                            {/* 6. Valor */}
                             <td
                               className={`py-3 px-4 text-right font-bold whitespace-nowrap ${
                                 tx.type === 'INCOME' ? 'text-emerald-600' : isOverdue ? 'text-rose-600' : 'text-slate-900'
@@ -4045,12 +4208,14 @@ export default function App() {
                             >
                               {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
                             </td>
+
+                            {/* 7. Ações */}
                             <td className="py-3 px-4 text-center">
                               {tx.isHypothetical ? (
                                 <button
                                   type="button"
                                   onClick={() => handleConvertScenarioToReal(tx.scenarioData || scenarios.find((s) => s.id === tx.scenarioId))}
-                                  className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 flex items-center space-x-1 transition active:scale-95 mx-auto shadow-xs"
+                                  className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 flex items-center space-x-1 transition active:scale-95 mx-auto shadow-2xs"
                                   title="Converter esta simulação em lançamento real"
                                 >
                                   <Sparkles className="w-3.5 h-3.5 text-blue-600" />

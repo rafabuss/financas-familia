@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Wallet,
   CreditCard,
@@ -80,6 +80,30 @@ const formatDateBR = (dateStr) => {
     }
   }
   return dateStr;
+};
+
+// Cálculo inteligente do vencimento da fatura do cartão a partir da data da compra e datas de corte
+const calculateCardDueDate = (dateStr, closingDay = 1, dueDay = 10) => {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  const clean = dateStr.trim().slice(0, 10);
+  const parts = clean.split('-');
+  if (parts.length !== 3) return dateStr;
+
+  let year = parseInt(parts[0], 10);
+  let month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+
+  // Se a compra ocorreu após o dia de fechamento, o vencimento vai para o mês seguinte
+  if (day > closingDay) {
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+
+  const safeDueDay = Math.min(Math.max(dueDay || 10, 1), 28);
+  return `${year}-${String(month).padStart(2, '0')}-${String(safeDueDay).padStart(2, '0')}`;
 };
 
 // Usuários da Família e Visões
@@ -185,7 +209,32 @@ export default function App() {
         if (res.accounts) setAccounts(res.accounts);
         if (res.cards) setCards(res.cards);
         if (res.categories) setCategories(res.categories);
-        if (res.transactions) setTransactions(res.transactions);
+        if (res.transactions) {
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const activeCards = res.cards || [];
+          const normalized = res.transactions.map((t) => {
+            if (t.cardId && (!t.purchaseDate || !t.dueDate)) {
+              const card = activeCards.find((c) => c.id === t.cardId);
+              const cardDue = card && card.dueDay && card.closingDay
+                ? calculateCardDueDate(t.purchaseDate || t.date, card.closingDay, card.dueDay)
+                : t.date;
+              const purchaseDate = t.purchaseDate || t.date;
+              const dueDate = t.dueDate || cardDue;
+              const isOldImport = String(t.id).startsWith('tx-imp-');
+              const shouldBeComprometido = isOldImport && dueDate >= todayStr && t.status === 'REALIZADO';
+
+              return {
+                ...t,
+                purchaseDate,
+                dueDate,
+                date: dueDate,
+                status: shouldBeComprometido ? 'COMPROMETIDO' : t.status,
+              };
+            }
+            return t;
+          });
+          setTransactions(normalized);
+        }
         if (res.scenarios) setScenarios(res.scenarios);
       }
     });
@@ -329,6 +378,7 @@ export default function App() {
   const [importMetadata, setImportMetadata] = useState(null);
   const [isImportLoading, setIsImportLoading] = useState(false);
   const [importFilterTab, setImportFilterTab] = useState('ALL'); // 'ALL' | 'SELECTED' | 'DUPLICATES'
+  const [importDefaultStatus, setImportDefaultStatus] = useState('COMPROMETIDO'); // 'COMPROMETIDO' | 'REALIZADO'
 
   // Controle de Campos Condicionais do Modal (Conta vs Cartão)
   const [modalSourceType, setModalSourceType] = useState('ACCOUNT');
@@ -555,6 +605,26 @@ export default function App() {
     };
   }, [chartTransactions, categories]);
 
+  // Retorna a data efetiva de vencimento financeiro de um lançamento (usada para fluxo de caixa, mês e atrasos)
+  const getTxDueDate = useCallback((tx) => {
+    if (!tx) return '';
+    if (tx.dueDate) return tx.dueDate;
+    if (tx.cardId) {
+      const card = cards.find((c) => c.id === tx.cardId);
+      if (card && card.closingDay && card.dueDay) {
+        return calculateCardDueDate(tx.purchaseDate || tx.date, card.closingDay, card.dueDay);
+      }
+    }
+    return tx.date;
+  }, [cards]);
+
+  // Verifica se um lançamento está de fato em atraso (comprometido com vencimento anterior a hoje)
+  const isTxOverdue = useCallback((tx, todayStr = new Date().toISOString().slice(0, 10)) => {
+    if (!tx || tx.isHypothetical || tx.status !== 'COMPROMETIDO') return false;
+    const dueDate = getTxDueDate(tx);
+    return Boolean(dueDate && dueDate < todayStr);
+  }, [getTxDueDate]);
+
   // Faturas dos Cartões de Crédito (Detalhamento, Itens e Limites)
   const cardInvoices = useMemo(() => {
     const todayTime = new Date(new Date().toISOString().slice(0, 10) + 'T12:00:00').getTime();
@@ -562,16 +632,22 @@ export default function App() {
     cards.forEach((card) => {
       const cardTxs = visibleTransactions.filter((t) => t.cardId === card.id && t.status !== 'CANCELADO');
       cardTxs.sort((a, b) => {
-        const diffA = Math.abs(new Date(a.date + 'T12:00:00').getTime() - todayTime);
-        const diffB = Math.abs(new Date(b.date + 'T12:00:00').getTime() - todayTime);
+        const dateA = getTxDueDate(a) || a.date;
+        const dateB = getTxDueDate(b) || b.date;
+        const diffA = Math.abs(new Date(dateA + 'T12:00:00').getTime() - todayTime);
+        const diffB = Math.abs(new Date(dateB + 'T12:00:00').getTime() - todayTime);
         if (diffA !== diffB) return diffA - diffB;
-        return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
+        return new Date(dateA + 'T12:00:00') - new Date(dateB + 'T12:00:00');
       });
       // Limite comprometido total (soma de todas as parcelas ativas)
       const committed = cardTxs.reduce((acc, t) => acc + (t.type === 'EXPENSE' ? t.amountCents : 0), 0);
       // Fatura do mês selecionado: apenas despesas com vencimento no mês do dashboard
       const currentMonthExpenses = cardTxs
-        .filter((t) => t.type === 'EXPENSE' && t.date && t.date.startsWith(dashboardMonth))
+        .filter((t) => {
+          if (t.type !== 'EXPENSE') return false;
+          const due = getTxDueDate(t) || t.date;
+          return due && due.startsWith(dashboardMonth);
+        })
         .reduce((acc, t) => acc + t.amountCents, 0);
 
       map[card.id] = {
@@ -597,7 +673,8 @@ export default function App() {
     visibleTransactions.forEach((tx) => {
       // Filtrar estritamente pelo mês de referência (ex: '2026-09') e ignorar cancelados
       if (tx.status === 'CANCELADO') return;
-      if (!tx.date || !tx.date.startsWith(dashboardMonth)) return;
+      const effectiveDate = getTxDueDate(tx) || tx.date;
+      if (!effectiveDate || !effectiveDate.startsWith(dashboardMonth)) return;
 
       if (tx.type === 'INCOME') {
         income += tx.amountCents;
@@ -618,7 +695,7 @@ export default function App() {
       totalBankBalance,
       totalCardsAvailable,
     };
-  }, [visibleTransactions, accountBalances, cardStats, dashboardMonth]);
+  }, [visibleTransactions, accountBalances, cardStats, dashboardMonth, cards]);
 
   // Maiores Gastos por Categoria no Mês do Dashboard
   const dashboardCategoryChartData = useMemo(() => {
@@ -627,7 +704,8 @@ export default function App() {
 
     visibleTransactions.forEach((tx) => {
       if (tx.status === 'CANCELADO') return;
-      if (!tx.date || !tx.date.startsWith(dashboardMonth)) return;
+      const effectiveDate = getTxDueDate(tx) || tx.date;
+      if (!effectiveDate || !effectiveDate.startsWith(dashboardMonth)) return;
       if (tx.type !== 'EXPENSE') return;
 
       expenseMap[tx.categoryId] = (expenseMap[tx.categoryId] || 0) + tx.amountCents;
@@ -652,15 +730,13 @@ export default function App() {
       expensesList,
       totalExpensesCents,
     };
-  }, [visibleTransactions, dashboardMonth, categories]);
+  }, [visibleTransactions, dashboardMonth, categories, cards]);
 
-  // Lançamentos em atraso (comprometidos com data anterior a hoje)
+  // Lançamentos em atraso (comprometidos com vencimento anterior a hoje)
   const overdueTransactions = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return visibleTransactions.filter(
-      (tx) => tx.status === 'COMPROMETIDO' && tx.date && tx.date < todayStr
-    );
-  }, [visibleTransactions]);
+    return visibleTransactions.filter((tx) => isTxOverdue(tx, todayStr));
+  }, [visibleTransactions, isTxOverdue]);
 
   const overdueExpensesTotalCents = useMemo(() => {
     return overdueTransactions
@@ -675,24 +751,27 @@ export default function App() {
     // Filtra transações não canceladas: vencimentos futuros ou pendentes/atrasados
     const pendingOrUpcoming = visibleTransactions.filter((tx) => {
       if (tx.status === 'CANCELADO') return false;
-      if (tx.date >= todayStr) return true;
+      const due = getTxDueDate(tx);
+      if (due >= todayStr) return true;
       return tx.status === 'COMPROMETIDO';
     });
 
     // Ordenação: contas em atraso no topo (da mais antiga para a mais recente),
     // seguidas pelos compromissos a partir de hoje em ordem cronológica crescente.
     pendingOrUpcoming.sort((a, b) => {
-      const isOverdueA = a.status === 'COMPROMETIDO' && a.date < todayStr;
-      const isOverdueB = b.status === 'COMPROMETIDO' && b.date < todayStr;
+      const isOverdueA = isTxOverdue(a, todayStr);
+      const isOverdueB = isTxOverdue(b, todayStr);
 
       if (isOverdueA && !isOverdueB) return -1;
       if (!isOverdueA && isOverdueB) return 1;
 
-      return (a.date || '').localeCompare(b.date || '');
+      const dueA = getTxDueDate(a) || '';
+      const dueB = getTxDueDate(b) || '';
+      return dueA.localeCompare(dueB);
     });
 
     return pendingOrUpcoming.slice(0, 6);
-  }, [visibleTransactions]);
+  }, [visibleTransactions, getTxDueDate, isTxOverdue]);
 
   // Resumo de dados da importação de fatura em conferência
   const importSummary = useMemo(() => {
@@ -948,6 +1027,8 @@ export default function App() {
           type: fd.get('type'),
           status: fd.get('status'),
           date: fd.get('date'),
+          dueDate: fd.get('date'),
+          purchaseDate: modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || fd.get('date')) : original.purchaseDate || fd.get('date'),
           categoryId: fd.get('categoryId'),
           scope,
           ownerId,
@@ -991,6 +1072,8 @@ export default function App() {
             type: fd.get('type'),
             status: fd.get('status') || 'COMPROMETIDO',
             date: installmentDate.toISOString().slice(0, 10),
+            dueDate: installmentDate.toISOString().slice(0, 10),
+            purchaseDate: modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : installmentDate.toISOString().slice(0, 10),
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
@@ -1046,6 +1129,8 @@ export default function App() {
           type: fd.get('type'),
           status: fd.get('status'),
           date: fd.get('date'),
+          dueDate: fd.get('date'),
+          purchaseDate: modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date'),
           categoryId: fd.get('categoryId'),
           scope,
           ownerId,
@@ -1253,10 +1338,10 @@ export default function App() {
       filename = `financas-da-familia-${new Date().toISOString().slice(0, 10)}.json`;
     } else {
       const csvRows = [
-        'ID,Descricao,Valor_Centavos,Tipo,Status,Data,Escopo,Responsavel,Categoria_ID,Conta_ID,Cartao_ID',
+        'ID,Descricao,Valor_Centavos,Tipo,Status,Data_Vencimento,Data_Compra,Escopo,Responsavel,Categoria_ID,Conta_ID,Cartao_ID',
         ...transactions.map(
           (t) =>
-            `"${t.id}","${t.description}",${t.amountCents},"${t.type}","${t.status}","${formatDateBR(t.date)}","${t.scope}","${t.ownerId}","${t.categoryId}","${t.accountId || ''}","${t.cardId || ''}"`
+            `"${t.id}","${t.description}",${t.amountCents},"${t.type}","${t.status}","${formatDateBR(getTxDueDate(t) || t.date)}","${formatDateBR(t.purchaseDate || t.date)}","${t.scope}","${t.ownerId}","${t.categoryId}","${t.accountId || ''}","${t.cardId || ''}"`
         ),
       ];
       blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -1306,17 +1391,23 @@ export default function App() {
           }
         }
 
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const suggestedStatus = (parsed.dueDateIso && parsed.dueDateIso >= todayStr) ? 'COMPROMETIDO' : 'REALIZADO';
+        setImportDefaultStatus(suggestedStatus);
+
         // Verificação inteligente de duplicidade contra os lançamentos já existentes
         const analyzed = parsed.items.map((item) => {
           const isDuplicate = transactions.some(
             (t) =>
               t.cardId === targetCardId &&
               t.amountCents === item.amountCents &&
-              (t.date === item.date ||
+              (t.purchaseDate === item.purchaseDate ||
+                t.date === item.date ||
                 t.description.toLowerCase().trim() === item.description.toLowerCase().trim())
           );
           return {
             ...item,
+            status: suggestedStatus,
             isDuplicate,
             selected: !isDuplicate,
           };
@@ -1327,6 +1418,7 @@ export default function App() {
           cardholder: parsed.cardholder,
           cardLast4: parsed.cardLast4,
           dueDate: parsed.dueDate,
+          dueDateIso: parsed.dueDateIso,
           closingDate: parsed.closingDate,
           totalInvoiceCents: parsed.totalInvoiceCents,
           isReconciled: parsed.isReconciled,
@@ -1437,24 +1529,42 @@ export default function App() {
       return;
     }
 
-    const newTxs = toImport.map((item, idx) => ({
-      id: `tx-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-      description: item.description,
-      amountCents: item.amountCents,
-      type: 'EXPENSE',
-      status: 'REALIZADO',
-      date: item.date,
-      cardId: importSelectedCard,
-      categoryId: item.categoryId || categories[0]?.id,
-      scope: item.scope || 'FAMILY',
-      ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
-      installmentNumber: item.installmentNumber || null,
-      installmentCount: item.installmentCount || null,
-      installmentGroupId:
-        item.installmentCount && item.installmentCount > 1
-          ? `group-imp-${Date.now()}-${idx}`
-          : null,
-    }));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const targetCard = cards.find((c) => c.id === importSelectedCard);
+
+    const newTxs = toImport.map((item, idx) => {
+      const purchaseIso = item.purchaseDate || item.date;
+      let dueIso = item.dueDate || importMetadata?.dueDateIso;
+      if (!dueIso && targetCard && targetCard.closingDay && targetCard.dueDay) {
+        dueIso = calculateCardDueDate(purchaseIso, targetCard.closingDay, targetCard.dueDay);
+      }
+      if (!dueIso) dueIso = purchaseIso;
+
+      const isFuture = dueIso >= todayStr;
+      const defaultStatus = isFuture ? 'COMPROMETIDO' : 'REALIZADO';
+      const status = item.status || importDefaultStatus || defaultStatus;
+
+      return {
+        id: `tx-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        description: item.description,
+        amountCents: item.amountCents,
+        type: 'EXPENSE',
+        status,
+        date: dueIso, // Vencimento contábil da fatura para conciliação e caixa
+        dueDate: dueIso, // Vencimento explícito do cartão
+        purchaseDate: purchaseIso, // Data em que a compra ocorreu fisicamente
+        cardId: importSelectedCard,
+        categoryId: item.categoryId || categories[0]?.id,
+        scope: item.scope || 'FAMILY',
+        ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
+        installmentNumber: item.installmentNumber || null,
+        installmentCount: item.installmentCount || null,
+        installmentGroupId:
+          item.installmentCount && item.installmentCount > 1
+            ? `group-imp-${Date.now()}-${idx}`
+            : null,
+      };
+    });
 
     setTransactions((prev) => {
       const updated = [...prev, ...newTxs];
@@ -1475,31 +1585,38 @@ export default function App() {
     const todayTime = new Date(todayDate + 'T12:00:00').getTime();
 
     const list = allDisplayTransactions.filter((t) => {
-      const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch =
+        t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t.purchaseDate && formatDateBR(t.purchaseDate).includes(searchTerm)) ||
+        (t.dueDate && formatDateBR(t.dueDate).includes(searchTerm)) ||
+        (t.date && formatDateBR(t.date).includes(searchTerm));
       const matchType = filterType === 'ALL' || t.type === filterType;
       const matchStatus =
         filterStatus === 'ALL'
           ? true
           : filterStatus === 'OVERDUE'
-          ? !t.isHypothetical && t.status === 'COMPROMETIDO' && t.date && t.date < todayDate
+          ? isTxOverdue(t, todayDate)
           : t.status === filterStatus;
       return matchSearch && matchType && matchStatus;
     });
 
     return list.sort((a, b) => {
       if (txSort.field === 'date') {
+        const getSortDate = (t) => getTxDueDate(t) || t.date;
+        const dateA = getSortDate(a);
+        const dateB = getSortDate(b);
         if (txSort.direction === 'closest') {
           // Ordenação padrão: data mais próxima da data atual
-          const diffA = Math.abs(new Date(a.date + 'T12:00:00').getTime() - todayTime);
-          const diffB = Math.abs(new Date(b.date + 'T12:00:00').getTime() - todayTime);
+          const diffA = Math.abs(new Date(dateA + 'T12:00:00').getTime() - todayTime);
+          const diffB = Math.abs(new Date(dateB + 'T12:00:00').getTime() - todayTime);
           if (diffA !== diffB) return diffA - diffB;
           // Em caso de mesmo distanciamento, data futura tem precedência
-          return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
+          return new Date(dateA + 'T12:00:00') - new Date(dateB + 'T12:00:00');
         }
         if (txSort.direction === 'asc') {
-          return new Date(a.date + 'T12:00:00') - new Date(b.date + 'T12:00:00');
+          return new Date(dateA + 'T12:00:00') - new Date(dateB + 'T12:00:00');
         }
-        return new Date(b.date + 'T12:00:00') - new Date(a.date + 'T12:00:00');
+        return new Date(dateB + 'T12:00:00') - new Date(dateA + 'T12:00:00');
       }
 
       if (txSort.field === 'description') {
@@ -1547,7 +1664,7 @@ export default function App() {
 
       return 0;
     });
-  }, [allDisplayTransactions, searchTerm, filterType, filterStatus, txSort, categories, accounts, cards]);
+  }, [allDisplayTransactions, searchTerm, filterType, filterStatus, txSort, categories, accounts, cards, getTxDueDate, isTxOverdue]);
 
   // Alternador de ordenação de colunas da tabela de lançamentos
   const handleSortTransactions = (field) => {
@@ -1983,7 +2100,8 @@ export default function App() {
                     <p className="text-xs text-slate-400 py-6 text-center">Nenhum vencimento pendente para os próximos dias.</p>
                   ) : (
                     upcomingCommitments.map((tx) => {
-                      const isOverdue = tx.status === 'COMPROMETIDO' && tx.date && tx.date < new Date().toISOString().slice(0, 10);
+                      const isOverdue = isTxOverdue(tx);
+                      const effectiveDue = getTxDueDate(tx);
                       return (
                         <div
                           key={tx.id}
@@ -2009,7 +2127,10 @@ export default function App() {
                               )}
                             </div>
                             <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
-                              <span className={isOverdue ? 'text-rose-600 font-semibold' : ''}>{formatDateBR(tx.date)}</span>
+                              <span className={isOverdue ? 'text-rose-600 font-semibold' : ''}>{formatDateBR(effectiveDue)}</span>
+                              {tx.purchaseDate && tx.cardId && tx.purchaseDate !== effectiveDue && (
+                                <span className="text-[10px] text-slate-400 font-normal">(Compra: {formatDateBR(tx.purchaseDate)})</span>
+                              )}
                               <span>•</span>
                               <span
                                 className={`font-semibold ${
@@ -2290,7 +2411,8 @@ export default function App() {
                         const cat = categories.find((c) => c.id === tx.categoryId);
                         const acc = accounts.find((a) => a.id === tx.accountId);
                         const card = cards.find((c) => c.id === tx.cardId);
-                        const isOverdue = !tx.isHypothetical && tx.status === 'COMPROMETIDO' && tx.date && tx.date < new Date().toISOString().slice(0, 10);
+                        const isOverdue = isTxOverdue(tx);
+                        const effectiveDue = getTxDueDate(tx);
 
                         return (
                           <tr
@@ -2304,7 +2426,26 @@ export default function App() {
                             }`}
                           >
                             <td className={`py-3 px-4 whitespace-nowrap ${isOverdue ? 'text-rose-600 font-semibold' : 'text-slate-600'}`}>
-                              {formatDateBR(tx.date)}
+                              <div className="flex flex-col">
+                                {tx.purchaseDate && tx.cardId ? (
+                                  <>
+                                    <div className="flex items-center space-x-1.5">
+                                      <span className="font-semibold text-slate-900">{formatDateBR(tx.purchaseDate)}</span>
+                                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium" title="Data em que a compra foi realizada">
+                                        Compra
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] mt-0.5 flex items-center space-x-1" title="Data de vencimento da fatura do cartão">
+                                      <CreditCard className="w-3 h-3 text-purple-600 shrink-0" />
+                                      <span className={isOverdue ? 'text-rose-600 font-bold' : 'text-purple-700 font-medium'}>
+                                        Venc: {formatDateBR(effectiveDue)}
+                                      </span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="font-medium text-slate-900">{formatDateBR(tx.date)}</span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-3 px-4 font-medium text-slate-900">
                               <div className="flex items-center space-x-2">
@@ -2810,7 +2951,12 @@ export default function App() {
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-xs text-slate-400 block mt-0.5">Vencimento: {formatDateBR(item.date)}</span>
+                                  <span className="text-xs text-slate-400 block mt-0.5">
+                                    Vencimento: <strong className="text-slate-600 font-medium">{formatDateBR(getTxDueDate(item))}</strong>
+                                    {item.purchaseDate && item.purchaseDate !== getTxDueDate(item) && (
+                                      <span className="ml-2 text-slate-400 font-normal">• Compra: {formatDateBR(item.purchaseDate)}</span>
+                                    )}
+                                  </span>
                                 </div>
                                 <div className="flex items-center space-x-3">
                                   <span className="font-bold text-sm text-slate-900">{formatMoney(item.amountCents)}</span>
@@ -3540,30 +3686,60 @@ export default function App() {
                       )}
                     </div>
 
-                    <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
-                      <button
-                        type="button"
-                        onClick={() => setImportFilterTab('ALL')}
-                        className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'}`}
-                      >
-                        Todos ({importPreviewData.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setImportFilterTab('SELECTED')}
-                        className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'SELECTED' ? 'bg-white text-emerald-700 shadow-xs' : 'hover:text-slate-900'}`}
-                      >
-                        Aprovados ({importSummary.selectedCount})
-                      </button>
-                      {importSummary.duplicateCount > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                        <span className="text-slate-500 px-1 text-[11px]">Situação padrão:</span>
                         <button
                           type="button"
-                          onClick={() => setImportFilterTab('DUPLICATES')}
-                          className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'DUPLICATES' ? 'bg-white text-amber-700 shadow-xs' : 'hover:text-slate-900'}`}
+                          onClick={() => {
+                            setImportDefaultStatus('COMPROMETIDO');
+                            setImportPreviewData((prev) => prev ? prev.map((i) => ({ ...i, status: 'COMPROMETIDO' })) : prev);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg transition ${
+                            importDefaultStatus === 'COMPROMETIDO' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                          }`}
                         >
-                          Duplicidades ({importSummary.duplicateCount})
+                          A Vencer (Comprometido)
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImportDefaultStatus('REALIZADO');
+                            setImportPreviewData((prev) => prev ? prev.map((i) => ({ ...i, status: 'REALIZADO' })) : prev);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg transition ${
+                            importDefaultStatus === 'REALIZADO' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Fatura Paga (Realizado)
+                        </button>
+                      </div>
+
+                      <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
+                        <button
+                          type="button"
+                          onClick={() => setImportFilterTab('ALL')}
+                          className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'}`}
+                        >
+                          Todos ({importPreviewData.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setImportFilterTab('SELECTED')}
+                          className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'SELECTED' ? 'bg-white text-emerald-700 shadow-xs' : 'hover:text-slate-900'}`}
+                        >
+                          Aprovados ({importSummary.selectedCount})
+                        </button>
+                        {importSummary.duplicateCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setImportFilterTab('DUPLICATES')}
+                            className={`px-3 py-1 rounded-lg transition ${importFilterTab === 'DUPLICATES' ? 'bg-white text-amber-700 shadow-xs' : 'hover:text-slate-900'}`}
+                          >
+                            Duplicidades ({importSummary.duplicateCount})
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3575,12 +3751,13 @@ export default function App() {
                       <thead>
                         <tr className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200 text-xs">
                           <th className="py-3 px-3 w-12 text-center">Status</th>
-                          <th className="py-3 px-3 w-32">Data</th>
+                          <th className="py-3 px-3 w-32">Data Compra</th>
                           <th className="py-3 px-3">Estabelecimento / Descrição</th>
                           <th className="py-3 px-3 w-28">Parcela</th>
-                          <th className="py-3 px-3 w-44">Categoria</th>
+                          <th className="py-3 px-3 w-32">Situação</th>
+                          <th className="py-3 px-3 w-40">Categoria</th>
                           <th className="py-3 px-3 w-28">Escopo</th>
-                          <th className="py-3 px-3 w-36">Membro</th>
+                          <th className="py-3 px-3 w-32">Membro</th>
                           <th className="py-3 px-4 text-right w-32">Valor (R$)</th>
                         </tr>
                       </thead>
@@ -3620,15 +3797,21 @@ export default function App() {
                                 <td className="py-3 px-3 whitespace-nowrap">
                                   <input
                                     type="date"
-                                    value={item.date}
+                                    value={item.purchaseDate || item.date}
                                     onChange={(e) =>
                                       handleUpdateImportItem(item.id, {
                                         date: e.target.value,
+                                        purchaseDate: e.target.value,
                                         dateDisplay: formatDateBR(e.target.value),
                                       })
                                     }
                                     className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                                   />
+                                  {importMetadata?.dueDate && (
+                                    <span className="text-[10px] text-purple-600 block mt-0.5" title="Vencimento na fatura do cartão">
+                                      Venc: {importMetadata.dueDate}
+                                    </span>
+                                  )}
                                 </td>
 
                                 {/* Descrição / Estabelecimento */}
@@ -3691,6 +3874,24 @@ export default function App() {
                                       À Vista
                                     </span>
                                   )}
+                                </td>
+
+                                {/* Situação: Comprometido vs Realizado */}
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  <select
+                                    value={item.status || importDefaultStatus}
+                                    onChange={(e) =>
+                                      handleUpdateImportItem(item.id, { status: e.target.value })
+                                    }
+                                    className={`border rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                                      (item.status || importDefaultStatus) === 'REALIZADO'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                        : 'bg-blue-50 text-blue-700 border-blue-300'
+                                    }`}
+                                  >
+                                    <option value="COMPROMETIDO">Comprometido</option>
+                                    <option value="REALIZADO">Realizado</option>
+                                  </select>
                                 </td>
 
                                 {/* Categoria */}
@@ -4362,16 +4563,35 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Data Vencimento/Recebimento</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {modalSourceType === 'CARD' ? 'Vencimento da Fatura' : 'Data Vencimento/Recebimento'}
+                    </label>
                     <input
                       type="date"
                       name="date"
                       required
-                      defaultValue={modalState.data?.date || new Date().toISOString().slice(0, 10)}
+                      defaultValue={modalState.data?.dueDate || modalState.data?.date || new Date().toISOString().slice(0, 10)}
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
                   </div>
                 </div>
+
+                {modalSourceType === 'CARD' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Data da Compra no Cartão</label>
+                      <input
+                        type="date"
+                        name="purchaseDate"
+                        defaultValue={modalState.data?.purchaseDate || modalState.data?.date || new Date().toISOString().slice(0, 10)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center text-xs text-slate-500 pt-5">
+                      <span>* O vencimento define o mês da fatura e se está em atraso.</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Seletor de Escopo: Familiar vs Pessoal */}
                 <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">

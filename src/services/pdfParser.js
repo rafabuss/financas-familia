@@ -116,6 +116,12 @@ export async function parseInvoicePdf(pdfData, availableCategories = [], familyM
   const dueMatch = page1FullText.match(/Vencimento:\s*(\d{2}\/\d{2}\/\d{4})/i) || page1FullText.match(/vencimento em:\s*(\d{2}\/\d{2}\/\d{4})/i);
   if (dueMatch) dueDate = dueMatch[1];
 
+  let dueDateIso = '';
+  if (dueDate && dueDate.includes('/')) {
+    const [d, m, y] = dueDate.split('/');
+    dueDateIso = `${y}-${m}-${d}`;
+  }
+
   // Fechamento / Emissão (ex: 15/09/2026)
   let closingDate = '';
   const closingMatch = page1FullText.match(/(?:Emissão|Postagem|Fechamento):\s*(\d{2}\/\d{2}\/\d{4})/i);
@@ -301,6 +307,8 @@ export async function parseInvoicePdf(pdfData, availableCategories = [], familyM
           rawItems.push({
             id: `imp-item-${Date.now()}-${rawItems.length + 1}-${Math.random().toString(36).slice(2, 6)}`,
             date: fullIsoDate,
+            purchaseDate: fullIsoDate,
+            dueDate: dueDateIso || fullIsoDate,
             dateDisplay,
             description: rawDesc,
             amountCents,
@@ -326,6 +334,7 @@ export async function parseInvoicePdf(pdfData, availableCategories = [], familyM
     cardholder,
     cardLast4,
     dueDate,
+    dueDateIso,
     closingDate,
     totalInvoiceCents,
     itemsTotalCents,

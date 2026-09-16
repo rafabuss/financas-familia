@@ -100,20 +100,28 @@ export function suggestScope(description = '', categoryHint = '') {
 export async function parseInvoicePdf(pdfData, availableCategories = [], familyMembers = []) {
   const doc = await pdfjsLib.getDocument({ data: pdfData }).promise;
 
-  // 1. Extração de metadados da Fatura (Página 1)
+  // 1. Extração de metadados da Fatura (Página 1 e seguintes)
   const page1 = await doc.getPage(1);
   const textContent1 = await page1.getTextContent();
   const page1Strings = textContent1.items.filter(i => 'str' in i).map(i => i.str);
   const page1FullText = page1Strings.join(' ');
 
-  // Cartão (ex: Cartão 5536.XXXX.XXXX.8557 -> 8557)
+  const isMercadoPago = page1FullText.includes('Mercado Pago') || page1FullText.includes('MERCADOLIVRE');
+
+  // Cartão (ex: Cartão 5536.XXXX.XXXX.8557 -> 8557 ou Cartão Visa [************2166] -> 2166)
   let cardLast4 = '';
-  const cardMatch = page1FullText.match(/Cartão\s+[\d.X]+\.(\d{4})/i) || page1FullText.match(/(?:Final|Cartão|Card)[:\s]+.*?(\d{4})/i);
+  const cardMatch =
+    page1FullText.match(/Cartão\s+[\d.X]+\.(\d{4})/i) ||
+    page1FullText.match(/(?:Final|Cartão|Card)[:\s]+.*?(\d{4})/i) ||
+    page1FullText.match(/\[\*{4,}(\d{4})\]/i);
   if (cardMatch) cardLast4 = cardMatch[1];
 
-  // Vencimento (ex: 22/09/2026)
+  // Vencimento (ex: 22/09/2026 ou 14/09/2026)
   let dueDate = '';
-  const dueMatch = page1FullText.match(/Vencimento:\s*(\d{2}\/\d{2}\/\d{4})/i) || page1FullText.match(/vencimento em:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const dueMatch =
+    page1FullText.match(/Vencimento:\s*(\d{2}\/\d{2}\/\d{4})/i) ||
+    page1FullText.match(/vencimento em:\s*(\d{2}\/\d{2}\/\d{4})/i) ||
+    page1FullText.match(/Vence em\s*(\d{2}\/\d{2}\/\d{4})/i);
   if (dueMatch) dueDate = dueMatch[1];
 
   let dueDateIso = '';
@@ -122,19 +130,29 @@ export async function parseInvoicePdf(pdfData, availableCategories = [], familyM
     dueDateIso = `${y}-${m}-${d}`;
   }
 
-  // Fechamento / Emissão (ex: 15/09/2026)
+  // Fechamento / Emissão (ex: 15/09/2026 ou 10/09/2026)
   let closingDate = '';
-  const closingMatch = page1FullText.match(/(?:Emissão|Postagem|Fechamento):\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const closingMatch =
+    page1FullText.match(/(?:Emissão|Postagem|Fechamento):\s*(\d{2}\/\d{2}\/\d{4})/i) ||
+    page1FullText.match(/Emitida em:\s*(\d{2}\/\d{2}\/\d{4})/i) ||
+    page1FullText.match(/Fechamento da fatura\s*(\d{2}\/\d{2}\/\d{4})/i);
   if (closingMatch) closingDate = closingMatch[1];
 
   // Titular da fatura
   let cardholder = '';
-  const holderMatch = page1FullText.match(/Titular\s+([A-Z\s]{4,40})/i) || page1FullText.match(/RAFAEL BUSS FERREIRA/i);
+  const holderMatch =
+    page1FullText.match(/Titular\s+([A-Z\s]{4,40})/i) ||
+    page1FullText.match(/RAFAEL BUSS FERREIRA/i) ||
+    page1FullText.match(/^([A-Z\s]{4,40})/);
   if (holderMatch) cardholder = holderMatch[1]?.trim() || holderMatch[0]?.trim();
 
-  // Total da Fatura (ex: R$ 2.149,92)
+  // Total da Fatura (ex: R$ 2.149,92 ou R$ 104,61)
   let totalInvoiceCents = 0;
-  const totalMatch = page1FullText.match(/Total desta fatura\s*([\d.,]+)/i) || page1FullText.match(/total da sua fatura é:\s*R\$\s*([\d.,]+)/i);
+  const totalMatch =
+    page1FullText.match(/Total desta fatura\s*([\d.,]+)/i) ||
+    page1FullText.match(/total da sua fatura é:\s*R\$\s*([\d.,]+)/i) ||
+    page1FullText.match(/Total a pagar\s*R\$\s*([\d.,]+)/i) ||
+    page1FullText.match(/Consumos de [^\s]+ a [^\s]+\s*R\$\s*([\d.,]+)/i);
   if (totalMatch) {
     const clean = totalMatch[1].replace(/\./g, '').replace(',', '.');
     totalInvoiceCents = Math.round(parseFloat(clean) * 100);
@@ -149,8 +167,8 @@ export async function parseInvoicePdf(pdfData, availableCategories = [], familyM
       return (
         m.id !== 'user-all' &&
         m.id !== 'family-shared' &&
-        (holderLower.includes('rafael') && mName.includes('rafael') ||
-         holderLower.includes('ana') && mName.includes('ana'))
+        ((holderLower.includes('rafael') && mName.includes('rafael')) ||
+         (holderLower.includes('ana') && mName.includes('ana')))
       );
     });
     if (matchedMember) defaultOwnerId = matchedMember.id;
@@ -171,6 +189,97 @@ export async function parseInvoicePdf(pdfData, availableCategories = [], familyM
         y: Math.round(i.transform[5]),
         width: Math.round(i.width || 0)
       }));
+
+    // Se o last4 não estava na página 1, procura nas páginas seguintes
+    if (!cardLast4) {
+      const pageFullStr = textItems.map(it => it.str).join(' ');
+      const pCardMatch = pageFullStr.match(/\[\*{4,}(\d{4})\]/i);
+      if (pCardMatch) cardLast4 = pCardMatch[1];
+    }
+
+    if (isMercadoPago) {
+      // Parser para Mercado Livre / Mercado Pago (Tabelas lineares)
+      const lines = [];
+      textItems.sort((a, b) => b.y - a.y || a.x - b.x);
+      for (const it of textItems) {
+        const ex = lines.find(l => Math.abs(l.y - it.y) <= 4);
+        if (ex) {
+          ex.items.push(it);
+          ex.items.sort((a, b) => a.x - b.x);
+        } else {
+          lines.push({ y: it.y, items: [it] });
+        }
+      }
+
+      for (const line of lines) {
+        const firstItem = line.items[0]?.str;
+        const lastItem = line.items[line.items.length - 1]?.str;
+        const dateMatch = firstItem && firstItem.match(/^(\d{2}\/\d{2})$/);
+        const amountMatch = lastItem && lastItem.match(/(?:R\$\s*)?([\d.]*,\d{2})$/);
+
+        if (dateMatch && amountMatch && line.items.length >= 2) {
+          const dateShort = dateMatch[1];
+          const amountNum = parseFloat(amountMatch[1].replace(/\./g, '').replace(',', '.'));
+          const amountCents = Math.round(amountNum * 100);
+
+          const middleItems = line.items.slice(1, line.items.length - 1);
+          let rawDesc = middleItems.map(it => it.str).join(' ').trim();
+
+          // Ignora pagamentos de fatura anterior ou créditos concedidos
+          if (
+            rawDesc.toLowerCase().includes('pagamento da fatura') ||
+            rawDesc.toLowerCase().includes('pagamento efetuado') ||
+            rawDesc.toLowerCase().includes('crédito concedido')
+          ) {
+            continue;
+          }
+
+          // Detecta parcelamento "Parcela X de Y" ou "X/Y"
+          let installmentNumber = null;
+          let installmentCount = null;
+          const parcMatch =
+            rawDesc.match(/Parcela\s+(\d{1,2})\s+de\s+(\d{1,2})/i) ||
+            rawDesc.match(/(\d{1,2})\/(\d{1,2})$/);
+          if (parcMatch) {
+            installmentNumber = parseInt(parcMatch[1], 10);
+            installmentCount = parseInt(parcMatch[2], 10);
+            rawDesc = rawDesc
+              .replace(/Parcela\s+\d{1,2}\s+de\s+\d{1,2}/i, '')
+              .replace(/\s*\d{1,2}\/\d{1,2}$/, '')
+              .trim();
+          }
+
+          let year = new Date().getFullYear();
+          if (dueDateIso) {
+            year = parseInt(dueDateIso.split('-')[0], 10);
+          }
+          const [dDay, dMonth] = dateShort.split('/');
+          const fullIsoDate = `${year}-${dMonth.padStart(2, '0')}-${dDay.padStart(2, '0')}`;
+          const dateDisplay = `${dDay.padStart(2, '0')}/${dMonth.padStart(2, '0')}/${year}`;
+
+          const suggestedCatId = suggestCategory(rawDesc, '', availableCategories);
+          const suggestedScope = suggestScope(rawDesc, '');
+
+          rawItems.push({
+            id: `imp-item-${Date.now()}-${rawItems.length + 1}-${Math.random().toString(36).slice(2, 6)}`,
+            date: dueDateIso || fullIsoDate,
+            purchaseDate: fullIsoDate,
+            dueDate: dueDateIso || fullIsoDate,
+            dateDisplay,
+            description: rawDesc,
+            amountCents,
+            installmentNumber,
+            installmentCount,
+            categoryHint: '',
+            categoryId: suggestedCatId,
+            scope: suggestedScope,
+            ownerId: defaultOwnerId,
+            selected: true,
+          });
+        }
+      }
+      continue;
+    }
 
     // No modelo Itaú (página 2), os lançamentos são organizados em duas colunas paralelas
     // Coluna 1: x < 340 | Coluna 2: x >= 340

@@ -107,6 +107,21 @@ const calculateCardDueDate = (dateStr, closingDay = 1, dueDay = 10) => {
   return `${year}-${String(month).padStart(2, '0')}-${String(safeDueDay).padStart(2, '0')}`;
 };
 
+// Adiciona N meses a uma data ISO YYYY-MM-DD mantendo o dia seguro (máx 28 para fev/outros)
+const addMonthsToIso = (isoDateStr, monthsToAdd) => {
+  if (!isoDateStr || typeof isoDateStr !== 'string') return isoDateStr;
+  const parts = isoDateStr.trim().slice(0, 10).split('-');
+  if (parts.length !== 3) return isoDateStr;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  const target = new Date(y, m - 1 + monthsToAdd, Math.min(d, 28));
+  const newY = target.getFullYear();
+  const newM = String(target.getMonth() + 1).padStart(2, '0');
+  const newD = String(target.getDate()).padStart(2, '0');
+  return `${newY}-${newM}-${newD}`;
+};
+
 // Usuários da Família e Visões
 const FAMILY_MEMBERS = [
   { id: 'user-all', name: '👑 Visão Admin (Toda a Família)', isFamily: true },
@@ -662,9 +677,10 @@ export default function App() {
     return Boolean(dueDate && dueDate < todayStr);
   }, [getTxDueDate]);
 
-  // Faturas dos Cartões de Crédito (Detalhamento, Itens e Limites)
+  // Faturas dos Cartões de Crédito (Detalhamento, Itens, Status e Limites para o Mês do Dashboard)
   const cardInvoices = useMemo(() => {
-    const todayTime = new Date(new Date().toISOString().slice(0, 10) + 'T12:00:00').getTime();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayTime = new Date(todayStr + 'T12:00:00').getTime();
     const map = {};
     cards.forEach((card) => {
       const cardTxs = visibleTransactions.filter((t) => t.cardId === card.id && t.status !== 'CANCELADO');
@@ -678,21 +694,59 @@ export default function App() {
       });
       // Limite comprometido total (soma de todas as parcelas ativas)
       const committed = cardTxs.reduce((acc, t) => acc + (t.type === 'EXPENSE' ? t.amountCents : 0), 0);
-      // Fatura do mês selecionado: apenas despesas com vencimento no mês do dashboard
-      const currentMonthExpenses = cardTxs
-        .filter((t) => {
-          if (t.type !== 'EXPENSE') return false;
-          const due = getTxDueDate(t) || t.date;
-          return due && due.startsWith(dashboardMonth);
-        })
+
+      // Itens da fatura do mês selecionado no dashboard
+      const monthItems = cardTxs.filter((t) => {
+        const due = getTxDueDate(t) || t.date;
+        return due && due.startsWith(dashboardMonth);
+      });
+
+      const currentMonthExpenses = monthItems
+        .filter((t) => t.type === 'EXPENSE')
         .reduce((acc, t) => acc + t.amountCents, 0);
+
+      // Procura pagamento registrado para este cartão nesta fatura
+      const paymentTx = visibleTransactions.find(
+        (t) => t.isInvoicePayment && t.targetCardId === card.id && t.invoiceMonth === dashboardMonth && t.status !== 'CANCELADO'
+      );
+
+      const paidItemsCents = monthItems
+        .filter((t) => t.type === 'EXPENSE' && t.status === 'REALIZADO')
+        .reduce((acc, t) => acc + t.amountCents, 0);
+
+      const allItemsRealizado = monthItems.length > 0 && monthItems.every((t) => t.status === 'REALIZADO');
+      const isPaid = Boolean(paymentTx || (monthItems.length > 0 && allItemsRealizado));
+
+      // Datas nominais de vencimento e fechamento
+      const dueDayPadded = String(Math.min(28, card.dueDay || 10)).padStart(2, '0');
+      const closingDayPadded = String(Math.min(28, card.closingDay || 3)).padStart(2, '0');
+      const dueDateIso = `${dashboardMonth}-${dueDayPadded}`;
+      const closingDateIso = `${dashboardMonth}-${closingDayPadded}`;
+
+      let invoiceStatus = 'ABERTA';
+      if (isPaid) {
+        invoiceStatus = 'PAGA';
+      } else if (todayStr > dueDateIso) {
+        invoiceStatus = 'EM ATRASO';
+      } else if (todayStr > closingDateIso) {
+        invoiceStatus = 'FECHADA';
+      } else {
+        invoiceStatus = 'ABERTA';
+      }
 
       map[card.id] = {
         card,
         items: cardTxs,
+        monthItems,
         invoiceTotalCents: currentMonthExpenses,
         committedCents: committed,
         availableCents: Math.max(0, card.limitCents - committed),
+        isPaid,
+        paidCents: paymentTx ? paymentTx.amountCents : paidItemsCents,
+        paymentTx,
+        invoiceStatus,
+        dueDateIso,
+        closingDateIso,
       };
     });
     return map;
@@ -797,10 +851,16 @@ export default function App() {
     return map;
   }, [cards, visibleTransactions, invoiceSelectedMonth, getTxDueDate]);
 
-  // Totais do Mês Selecionado (Dashboard)
+  // Totais do Mês Selecionado (Dashboard) e Projeção Consolidada
   const monthSummary = useMemo(() => {
     let income = 0;
+    let incomeRealized = 0;
+    let incomePending = 0;
+
     let expense = 0;
+    let expenseRealized = 0;
+    let expensePending = 0;
+
     let committed = 0;
 
     visibleTransactions.forEach((tx) => {
@@ -811,11 +871,21 @@ export default function App() {
 
       if (tx.type === 'INCOME') {
         income += tx.amountCents;
+        if (tx.status === 'REALIZADO') {
+          incomeRealized += tx.amountCents;
+        } else {
+          incomePending += tx.amountCents;
+        }
       } else {
         // Se houver transação de pagamento de fatura, ela representa a saída efetiva em dinheiro da conta bancária.
         // Evitamos duplicar entre compras no cartão e a quitação da fatura:
         if (tx.isInvoicePayment) {
           expense += tx.amountCents;
+          if (tx.status === 'REALIZADO') {
+            expenseRealized += tx.amountCents;
+          } else {
+            expensePending += tx.amountCents;
+          }
         } else if (tx.cardId) {
           // Se a fatura deste cartão para este mês já tem quitação registrada via isInvoicePayment, não duplica
           const hasInvoicePayment = visibleTransactions.some(
@@ -823,26 +893,42 @@ export default function App() {
           );
           if (!hasInvoicePayment) {
             expense += tx.amountCents;
-            if (tx.status === 'COMPROMETIDO') committed += tx.amountCents;
+            if (tx.status === 'COMPROMETIDO') {
+              committed += tx.amountCents;
+              expensePending += tx.amountCents;
+            } else {
+              expenseRealized += tx.amountCents;
+            }
           }
         } else {
           // Despesas regulares em conta / dinheiro
           expense += tx.amountCents;
-          if (tx.status === 'COMPROMETIDO') committed += tx.amountCents;
+          if (tx.status === 'COMPROMETIDO') {
+            committed += tx.amountCents;
+            expensePending += tx.amountCents;
+          } else {
+            expenseRealized += tx.amountCents;
+          }
         }
       }
     });
 
     const totalBankBalance = Object.values(accountBalances).reduce((a, b) => a + b, 0);
     const totalCardsAvailable = Object.values(cardStats).reduce((a, b) => a + b.availableCents, 0);
+    const projectedEndBalance = totalBankBalance + incomePending - expensePending;
 
     return {
       income,
+      incomeRealized,
+      incomePending,
       expense,
+      expenseRealized,
+      expensePending,
       balance: income - expense,
       committed,
       totalBankBalance,
       totalCardsAvailable,
+      projectedEndBalance,
     };
   }, [visibleTransactions, accountBalances, cardStats, dashboardMonth, getTxDueDate]);
 
@@ -1594,6 +1680,24 @@ export default function App() {
     syncItem('transactions', updatedTx);
   };
 
+  // Quitação ou confirmação explícita de lançamento (1 clique)
+  const handleQuickPayTransaction = (tx, targetStatus = 'REALIZADO') => {
+    if (!tx) return;
+    if (tx.cardId) {
+      const card = cards.find((c) => c.id === tx.cardId);
+      const effectiveDue = getTxDueDate(tx) || tx.date;
+      const monthKey = effectiveDue ? effectiveDue.slice(0, 7) : invoiceSelectedMonth;
+      openInvoicePaymentModal(card, monthKey);
+      return;
+    }
+
+    const updatedTx = { ...tx, status: targetStatus };
+    const updated = transactions.map((t) => (t.id === tx.id ? updatedTx : t));
+    setTransactions(updated);
+    saveToLocalStorage('financas_transactions_v1', updated);
+    syncItem('transactions', updatedTx);
+  };
+
   // Exportação de Dados JSON e CSV
   const exportData = (format) => {
     const exportBundle = {
@@ -1806,8 +1910,10 @@ export default function App() {
 
     const todayStr = new Date().toISOString().slice(0, 10);
     const targetCard = cards.find((c) => c.id === importSelectedCard);
+    const newTxs = [];
+    let futureInstallmentsCount = 0;
 
-    const newTxs = toImport.map((item, idx) => {
+    toImport.forEach((item, idx) => {
       const purchaseIso = item.purchaseDate || item.date;
       let dueIso = item.dueDate || importMetadata?.dueDateIso;
       if (!dueIso && targetCard && targetCard.closingDay && targetCard.dueDay) {
@@ -1818,8 +1924,13 @@ export default function App() {
       const isFuture = dueIso >= todayStr;
       const defaultStatus = isFuture ? 'COMPROMETIDO' : 'REALIZADO';
       const status = item.status || importDefaultStatus || defaultStatus;
+      const installmentGroupId =
+        item.installmentCount && item.installmentCount > 1
+          ? `group-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`
+          : null;
 
-      return {
+      // 1. Parcela referente a esta fatura
+      const currentTx = {
         id: `tx-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
         description: item.description,
         amountCents: item.amountCents,
@@ -1834,11 +1945,49 @@ export default function App() {
         ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
         installmentNumber: item.installmentNumber || null,
         installmentCount: item.installmentCount || null,
-        installmentGroupId:
-          item.installmentCount && item.installmentCount > 1
-            ? `group-imp-${Date.now()}-${idx}`
-            : null,
+        installmentGroupId,
       };
+      newTxs.push(currentTx);
+
+      // 2. Geração automática das parcelas futuras restantes
+      const instNum = item.installmentNumber ? parseInt(item.installmentNumber, 10) : null;
+      const instTotal = item.installmentCount ? parseInt(item.installmentCount, 10) : null;
+      if (instNum && instTotal && instNum < instTotal) {
+        for (let nextK = instNum + 1; nextK <= instTotal; nextK++) {
+          const monthOffset = nextK - instNum;
+          const nextDueIso = addMonthsToIso(dueIso, monthOffset);
+
+          // Ajustar descrição da parcela futura de forma legível
+          let futureDesc = item.description;
+          if (/parcela\s+\d+\s+de\s+\d+/i.test(futureDesc)) {
+            futureDesc = futureDesc.replace(/parcela\s+\d+\s+de\s+\d+/i, `Parcela ${nextK} de ${instTotal}`);
+          } else if (/\(\d+\/\d+\)/.test(futureDesc)) {
+            futureDesc = futureDesc.replace(/\(\d+\/\d+\)/, `(${String(nextK).padStart(2, '0')}/${String(instTotal).padStart(2, '0')})`);
+          } else {
+            futureDesc = `${futureDesc} (${nextK}/${instTotal})`;
+          }
+
+          const futureTx = {
+            id: `tx-imp-${Date.now()}-${idx}-p${nextK}-${Math.random().toString(36).slice(2, 6)}`,
+            description: futureDesc,
+            amountCents: item.amountCents,
+            type: 'EXPENSE',
+            status: 'COMPROMETIDO',
+            date: nextDueIso,
+            dueDate: nextDueIso,
+            purchaseDate: purchaseIso,
+            cardId: importSelectedCard,
+            categoryId: item.categoryId || categories[0]?.id,
+            scope: item.scope || 'FAMILY',
+            ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
+            installmentNumber: nextK,
+            installmentCount: instTotal,
+            installmentGroupId,
+          };
+          newTxs.push(futureTx);
+          futureInstallmentsCount++;
+        }
+      }
     });
 
     setTransactions((prev) => {
@@ -1848,7 +1997,8 @@ export default function App() {
     });
     syncBatchTransactions(newTxs);
 
-    alert(`${toImport.length} lançamento(s) importado(s) e vinculado(s) à fatura com sucesso!`);
+    const futureMsg = futureInstallmentsCount > 0 ? ` e ${futureInstallmentsCount} parcela(s) futura(s) agendada(s) automaticamente` : '';
+    alert(`${toImport.length} lançamento(s) importado(s)${futureMsg} com sucesso!`);
     setImportPreviewData(null);
     setImportMetadata(null);
     setActiveTab('faturas');
@@ -2377,35 +2527,63 @@ export default function App() {
               </div>
             )}
 
-            {/* 4 Cards de Métricas Principais (Identidade Visual da Imagem) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 5 Cards de Métricas Principais (Identidade Visual da Família com Saldo Consolidado) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              {/* Card 1: Saldo Consolidado Projetado */}
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-5 rounded-2xl shadow-sm flex flex-col justify-between border border-slate-700">
+                <div className="flex items-center justify-between text-slate-300 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-blue-300">Saldo Consolidado</span>
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <div className={`text-2xl font-black ${monthSummary.projectedEndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {formatMoney(monthSummary.projectedEndBalance)}
+                  </div>
+                  <div className="text-[11px] text-slate-300 mt-1 leading-tight">
+                    Previsão para o fim do mês
+                  </div>
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-700/60 flex items-center justify-between text-[10px] text-slate-300">
+                  <span className="text-emerald-300">+{formatMoney(monthSummary.incomePending)} a receber</span>
+                  <span className="text-rose-300">-{formatMoney(monthSummary.expensePending)} a pagar</span>
+                </div>
+              </div>
+
+              {/* Card 2: Saldo em Contas */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
                 <div className="flex items-center justify-between text-slate-400 mb-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo em Contas</span>
                   <Wallet className="w-5 h-5 text-blue-500" />
                 </div>
                 <div className="text-2xl font-bold text-slate-900">{formatMoney(monthSummary.totalBankBalance)}</div>
-                <div className="text-xs text-slate-400 mt-2">Soma de todas as contas ativas</div>
+                <div className="text-xs text-slate-400 mt-2">Soma atual de todas as contas</div>
               </div>
 
+              {/* Card 3: Receitas Mês */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
                 <div className="flex items-center justify-between text-slate-400 mb-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Receitas Mês</span>
                   <ArrowUpRight className="w-5 h-5 text-emerald-500" />
                 </div>
                 <div className="text-2xl font-bold text-emerald-600">{formatMoney(monthSummary.income)}</div>
-                <div className="text-xs text-slate-400 mt-2">Previsto + Realizado ({formatMonthLabel(dashboardMonth)})</div>
+                <div className="text-xs text-slate-400 mt-2">
+                  Recebido: {formatMoney(monthSummary.incomeRealized)} | Previsto: {formatMoney(monthSummary.incomePending)}
+                </div>
               </div>
 
+              {/* Card 4: Despesas Mês */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
                 <div className="flex items-center justify-between text-slate-400 mb-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Despesas Mês</span>
                   <ArrowDownRight className="w-5 h-5 text-rose-500" />
                 </div>
                 <div className="text-2xl font-bold text-rose-600">{formatMoney(monthSummary.expense)}</div>
-                <div className="text-xs text-slate-400 mt-2">Fixas, Cartões & Parcelas ({formatMonthLabel(dashboardMonth)})</div>
+                <div className="text-xs text-slate-400 mt-2">
+                  Pago: {formatMoney(monthSummary.expenseRealized)} | Pendente: {formatMoney(monthSummary.expensePending)}
+                </div>
               </div>
 
+              {/* Card 5: Limite Cartões */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
                 <div className="flex items-center justify-between text-slate-400 mb-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Limite Cartões</span>
@@ -2555,38 +2733,117 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Status dos Cartões de Crédito */}
+              {/* Status dos Cartões de Crédito (Sincronizado com o Mês do Dashboard) */}
               <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
-                    <CreditCard className="w-4 h-4 text-purple-600" />
-                    <span>Status dos Cartões de Crédito</span>
-                  </h3>
-                  <button onClick={() => setActiveTab('accounts')} className="text-xs font-semibold text-purple-600 hover:underline">
-                    Ver detalhes
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+                      <CreditCard className="w-4 h-4 text-purple-600" />
+                      <span>Faturas & Limites dos Cartões</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Faturas sincronizadas com {formatMonthLabel(dashboardMonth)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setInvoiceSelectedMonth(dashboardMonth);
+                      setActiveTab('faturas');
+                    }}
+                    className="text-xs font-semibold text-purple-600 hover:underline flex items-center space-x-1"
+                  >
+                    <span>Ver todas as faturas</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
                 <div className="space-y-4">
                   {cards.map((card) => {
-                    const stats = cardStats[card.id] || { committedCents: 0, availableCents: card.limitCents };
+                    const stats = cardStats[card.id] || {
+                      committedCents: 0,
+                      availableCents: card.limitCents,
+                      invoiceTotalCents: 0,
+                      invoiceStatus: 'ABERTA',
+                      isPaid: false,
+                    };
                     const pct = Math.min(100, Math.round((stats.committedCents / card.limitCents) * 100));
                     return (
-                      <div key={card.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-sm text-slate-900">{card.name}</span>
-                          <span className="text-xs text-slate-400">
-                            Fecha dia {card.closingDay} | Vence dia {card.dueDay}
-                          </span>
+                      <div key={card.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-sm text-slate-900">{card.name}</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                                stats.invoiceStatus === 'PAGA'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : stats.invoiceStatus === 'EM ATRASO'
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : stats.invoiceStatus === 'FECHADA'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}
+                            >
+                              Fatura {stats.invoiceStatus}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 flex items-center space-x-2">
+                            <span>Vence dia {card.dueDay}</span>
+                            <span>•</span>
+                            <span>Fecha dia {card.closingDay}</span>
+                          </div>
                         </div>
-                        <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${pct > 75 ? 'bg-rose-500' : 'bg-blue-600'}`}
-                            style={{ width: `${pct}%` }}
-                          />
+
+                        {/* Valor da fatura no mês selecionado e botão de ação */}
+                        <div className="p-3 bg-white rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <span className="text-xs text-slate-500 block">
+                              Fatura de {formatMonthLabel(dashboardMonth)}:
+                            </span>
+                            <span className="text-lg font-bold text-slate-900">
+                              {formatMoney(stats.invoiceTotalCents || 0)}
+                            </span>
+                            {stats.isPaid && (
+                              <span className="text-xs text-emerald-600 font-semibold block flex items-center space-x-1 mt-0.5">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Quitada</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            {!stats.isPaid && (stats.invoiceTotalCents || 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => openInvoicePaymentModal(card, dashboardMonth)}
+                                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-700 text-white flex items-center space-x-1.5 shadow-xs transition active:scale-95"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                                <span>Pagar Fatura</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInvoiceSelectedMonth(dashboardMonth);
+                                setActiveTab('faturas');
+                              }}
+                              className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:text-purple-600 hover:bg-purple-50 transition"
+                            >
+                              Detalhar
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex justify-between text-xs text-slate-600">
-                          <span>Comprometido: {formatMoney(stats.committedCents)} ({pct}%)</span>
-                          <span className="font-semibold text-slate-900">Disponível: {formatMoney(stats.availableCents)}</span>
+
+                        {/* Barra de Limite Global */}
+                        <div className="space-y-1">
+                          <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${pct > 75 ? 'bg-rose-500' : 'bg-blue-600'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-xs text-slate-500">
+                            <span>Comprometido Total: {formatMoney(stats.committedCents)} ({pct}%)</span>
+                            <span className="font-semibold text-slate-800">Disponível: {formatMoney(stats.availableCents)}</span>
+                          </div>
                         </div>
                       </div>
                     );
@@ -3122,7 +3379,44 @@ export default function App() {
                                   <span>Tornar Real</span>
                                 </button>
                               ) : (
-                                <div className="flex items-center justify-center space-x-2">
+                                <div className="flex items-center justify-center space-x-1.5">
+                                  {/* Ação Explícita de Quitação / Pagamento / Recebimento */}
+                                  {tx.status === 'COMPROMETIDO' && (
+                                    tx.cardId ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const c = cards.find((card) => card.id === tx.cardId);
+                                          const monthKey = (getTxDueDate(tx) || tx.date).slice(0, 7);
+                                          openInvoicePaymentModal(c, monthKey);
+                                        }}
+                                        className="px-2 py-1 text-xs font-semibold rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 flex items-center space-x-1 transition active:scale-95 shadow-2xs"
+                                        title="Pagar Fatura deste Cartão"
+                                      >
+                                        <CreditCard className="w-3.5 h-3.5 text-purple-600" />
+                                        <span>Pagar Fatura</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickPayTransaction(tx, 'REALIZADO')}
+                                        className={`px-2 py-1 text-xs font-semibold rounded-lg flex items-center space-x-1 transition active:scale-95 shadow-2xs ${
+                                          isOverdue
+                                            ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 animate-pulse'
+                                            : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                                        }`}
+                                        title={
+                                          tx.type === 'INCOME'
+                                            ? 'Confirmar recebimento deste valor'
+                                            : 'Quitar e marcar esta despesa como paga'
+                                        }
+                                      >
+                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>{tx.type === 'INCOME' ? 'Receber' : 'Pagar'}</span>
+                                      </button>
+                                    )
+                                  )}
+
                                   <button
                                     type="button"
                                     onClick={() => openTransactionModal('edit', tx)}
@@ -4554,32 +4848,42 @@ export default function App() {
                                 {/* Parcela */}
                                 <td className="py-3 px-3 whitespace-nowrap">
                                   {item.installmentCount ? (
-                                    <div className="flex items-center space-x-1">
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        max={item.installmentCount || 1}
-                                        value={item.installmentNumber || 1}
-                                        onChange={(e) =>
-                                          handleUpdateImportItem(item.id, {
-                                            installmentNumber: parseInt(e.target.value, 10) || 1,
-                                          })
-                                        }
-                                        className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-xs font-semibold"
-                                      />
-                                      <span className="text-slate-400">/</span>
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        max="120"
-                                        value={item.installmentCount || 1}
-                                        onChange={(e) =>
-                                          handleUpdateImportItem(item.id, {
-                                            installmentCount: parseInt(e.target.value, 10) || 1,
-                                          })
-                                        }
-                                        className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-xs font-semibold"
-                                      />
+                                    <div className="flex flex-col space-y-1">
+                                      <div className="flex items-center space-x-1">
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          max={item.installmentCount || 1}
+                                          value={item.installmentNumber || 1}
+                                          onChange={(e) =>
+                                            handleUpdateImportItem(item.id, {
+                                              installmentNumber: parseInt(e.target.value, 10) || 1,
+                                            })
+                                          }
+                                          className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-xs font-semibold"
+                                        />
+                                        <span className="text-slate-400">/</span>
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          max="120"
+                                          value={item.installmentCount || 1}
+                                          onChange={(e) =>
+                                            handleUpdateImportItem(item.id, {
+                                              installmentCount: parseInt(e.target.value, 10) || 1,
+                                            })
+                                          }
+                                          className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-xs font-semibold"
+                                        />
+                                      </div>
+                                      {item.installmentNumber < item.installmentCount && (
+                                        <span
+                                          className="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.5 rounded text-center inline-block"
+                                          title="As parcelas restantes dos meses seguintes serão agendadas automaticamente no sistema"
+                                        >
+                                          +{item.installmentCount - item.installmentNumber} futuras
+                                        </span>
+                                      )}
                                     </div>
                                   ) : (
                                     <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">
@@ -5619,17 +5923,38 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="pt-4 border-t border-slate-100 flex justify-end space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null })}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">
-                    Salvar Lançamento
-                  </button>
+                <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                  {modalState.mode === 'edit' && modalState.data?.status === 'COMPROMETIDO' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleQuickPayTransaction(modalState.data, 'REALIZADO');
+                        setModalState({ isOpen: false, type: null, mode: 'create', data: null });
+                      }}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center space-x-1.5 shadow-xs transition active:scale-95"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>
+                        {modalState.data?.cardId
+                          ? 'Pagar Fatura deste Cartão'
+                          : modalState.data?.type === 'INCOME'
+                          ? 'Confirmar Recebimento Agora'
+                          : 'Quitar / Marcar como Pago Agora'}
+                      </span>
+                    </button>
+                  )}
+                  <div className="flex space-x-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null })}
+                      className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">
+                      {modalState.mode === 'create' ? 'Salvar Lançamento' : 'Atualizar Lançamento'}
+                    </button>
+                  </div>
                 </div>
               </form>
             )}

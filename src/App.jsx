@@ -45,6 +45,7 @@ import {
   clearDemoDataOnly,
   resetEntireSystem,
   loadDemoPresentationData,
+  healMigratedInvoiceTransactions,
   STORAGE_KEYS,
 } from './services/financeService';
 import {
@@ -215,10 +216,8 @@ export default function App() {
     }
   }, []);
 
-  // Carregamento inicial de dados (executado quando há usuário logado)
+  // Carregamento inicial de dados unificado com auto-cura de faturas e preservação de datas
   useEffect(() => {
-    if (!currentUser) return;
-
     loadInitialAppData({
       categories: DEFAULT_CATEGORIES,
     }).then((res) => {
@@ -228,30 +227,13 @@ export default function App() {
         if (res.cards) setCards(res.cards);
         if (res.categories) setCategories(res.categories);
         if (res.transactions) {
-          const todayStr = new Date().toISOString().slice(0, 10);
           const activeCards = res.cards || [];
-          const normalized = res.transactions.map((t) => {
-            if (t.cardId && (!t.purchaseDate || !t.dueDate)) {
-              const card = activeCards.find((c) => c.id === t.cardId);
-              const cardDue = card && card.dueDay && card.closingDay
-                ? calculateCardDueDate(t.purchaseDate || t.date, card.closingDay, card.dueDay)
-                : t.date;
-              const purchaseDate = t.purchaseDate || t.date;
-              const dueDate = t.dueDate || cardDue;
-              const isOldImport = String(t.id).startsWith('tx-imp-');
-              const shouldBeComprometido = isOldImport && dueDate >= todayStr && t.status === 'REALIZADO';
-
-              return {
-                ...t,
-                purchaseDate,
-                dueDate,
-                date: dueDate,
-                status: shouldBeComprometido ? 'COMPROMETIDO' : t.status,
-              };
-            }
-            return t;
-          });
-          setTransactions(normalized);
+          const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(res.transactions, activeCards);
+          setTransactions(healedTransactions);
+          saveToLocalStorage('financas_transactions_v1', healedTransactions);
+          if (hasChanges && changedTxs.length > 0) {
+            syncBatchTransactions(changedTxs);
+          }
         }
         if (res.scenarios) setScenarios(res.scenarios);
       }
@@ -607,10 +589,10 @@ export default function App() {
   const getTxDueDate = useCallback((tx) => {
     if (!tx) return '';
     if (tx.dueDate) return tx.dueDate;
-    if (tx.cardId) {
+    if (tx.cardId && tx.purchaseDate && tx.purchaseDate !== tx.date) {
       const card = cards.find((c) => c.id === tx.cardId);
       if (card && card.closingDay && card.dueDay) {
-        return calculateCardDueDate(tx.purchaseDate || tx.date, card.closingDay, card.dueDay);
+        return calculateCardDueDate(tx.purchaseDate, card.closingDay, card.dueDay);
       }
     }
     return tx.date;

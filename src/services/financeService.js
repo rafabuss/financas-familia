@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase.js';
 
 export const STORAGE_KEYS = {
   accounts: 'financas_accounts_v1',
@@ -78,43 +78,99 @@ export const categoryToDb = (cat) => ({
   archived: cat.archived,
 });
 
-export const transactionToClient = (row) => ({
-  id: row.id,
-  description: row.description,
-  amountCents: Number(row.amount_cents ?? row.amountCents ?? 0),
-  type: row.type || 'EXPENSE',
-  status: row.status || 'COMPROMETIDO',
-  date: row.date,
-  accountId: row.account_id || row.accountId || null,
-  cardId: row.card_id || row.cardId || null,
-  categoryId: row.category_id || row.categoryId || null,
-  scope: row.scope || 'FAMILY',
-  ownerId: row.owner_id || row.ownerId || 'user-1',
-  installmentGroupId: row.installment_group_id || row.installmentGroupId || null,
-  installmentNumber: row.installment_number ? Number(row.installment_number) : null,
-  installmentCount: row.installment_count ? Number(row.installment_count) : null,
-  isRecurring: Boolean(row.is_recurring ?? row.isRecurring),
-  recurrenceRuleId: row.recurrence_rule_id || row.recurrenceRuleId || null,
-});
+export const transactionToClient = (row) => {
+  const recRule = row.recurrence_rule_id || row.recurrenceRuleId || '';
+  const isInvoicePayByRec = typeof recRule === 'string' && recRule.startsWith('INVOICE_PAY:');
+  const isInvoicePayById = String(row.id || '').startsWith('tx-invoice-pay-');
+  const isInvoicePayment = Boolean(
+    row.is_invoice_payment ??
+    row.isInvoicePayment ??
+    isInvoicePayByRec ??
+    isInvoicePayById
+  );
 
-export const transactionToDb = (tx) => ({
-  id: tx.id,
-  description: tx.description,
-  amount_cents: tx.amountCents,
-  type: tx.type,
-  status: tx.status,
-  date: tx.date,
-  account_id: tx.accountId || null,
-  card_id: tx.cardId || null,
-  category_id: tx.categoryId || null,
-  scope: tx.scope,
-  owner_id: tx.ownerId,
-  installment_group_id: tx.installmentGroupId || null,
-  installment_number: tx.installmentNumber || null,
-  installment_count: tx.installmentCount || null,
-  is_recurring: tx.isRecurring || false,
-  recurrence_rule_id: tx.recurrenceRuleId || null,
-});
+  let targetCardId = row.target_card_id || row.targetCardId || null;
+  let invoiceMonth = row.invoice_month || row.invoiceMonth || null;
+
+  if (isInvoicePayByRec) {
+    const parts = recRule.split(':');
+    if (parts.length >= 3) {
+      targetCardId = targetCardId || parts[1];
+      invoiceMonth = invoiceMonth || parts[2];
+    }
+  } else if (isInvoicePayById) {
+    const idMatch = String(row.id || '').match(/^tx-invoice-pay-(.+)-(\d{4}-\d{2})-\d+$/);
+    if (idMatch) {
+      targetCardId = targetCardId || idMatch[1];
+      invoiceMonth = invoiceMonth || idMatch[2];
+    }
+  }
+
+  let purchaseDate = row.purchase_date || row.purchaseDate || null;
+  let dueDate = row.due_date || row.dueDate || row.date || null;
+
+  if (!purchaseDate && typeof recRule === 'string' && recRule.startsWith('PURCHASE_DATE:')) {
+    purchaseDate = recRule.replace('PURCHASE_DATE:', '').slice(0, 10);
+  }
+
+  return {
+    id: row.id,
+    description: row.description,
+    amountCents: Number(row.amount_cents ?? row.amountCents ?? 0),
+    type: row.type || 'EXPENSE',
+    status: row.status || 'COMPROMETIDO',
+    date: row.date,
+    dueDate: dueDate || row.date,
+    purchaseDate: purchaseDate || row.date,
+    accountId: row.account_id || row.accountId || null,
+    cardId: row.card_id || row.cardId || null,
+    targetCardId,
+    categoryId: row.category_id || row.categoryId || null,
+    scope: row.scope || 'FAMILY',
+    ownerId: row.owner_id || row.ownerId || 'user-1',
+    installmentGroupId: row.installment_group_id || row.installmentGroupId || null,
+    installmentNumber: row.installment_number ? Number(row.installment_number) : null,
+    installmentCount: row.installment_count ? Number(row.installment_count) : null,
+    isRecurring: Boolean(row.is_recurring ?? row.isRecurring),
+    recurrenceRuleId:
+      isInvoicePayment || (typeof recRule === 'string' && recRule.startsWith('PURCHASE_DATE:'))
+        ? null
+        : (row.recurrence_rule_id || row.recurrenceRuleId || null),
+    isInvoicePayment,
+    invoiceMonth,
+  };
+};
+
+export const transactionToDb = (tx) => {
+  let recurrenceRuleId = tx.recurrenceRuleId || null;
+
+  // Se for pagamento de fatura, persistir metadados em recurrence_rule_id para sobreviver ao Supabase
+  if (tx.isInvoicePayment && tx.targetCardId && tx.invoiceMonth) {
+    recurrenceRuleId = `INVOICE_PAY:${tx.targetCardId}:${tx.invoiceMonth}`;
+  } else if (!recurrenceRuleId && tx.purchaseDate && tx.cardId && tx.purchaseDate !== tx.date) {
+    // Para compras de cartão cujo purchaseDate difere do vencimento contábil da fatura (date)
+    recurrenceRuleId = `PURCHASE_DATE:${tx.purchaseDate}`;
+  }
+
+  return {
+    id: tx.id,
+    description: tx.description,
+    amount_cents: tx.amountCents,
+    type: tx.type,
+    status: tx.status,
+    date: tx.dueDate || tx.date,
+    account_id: tx.accountId || null,
+    card_id: tx.cardId || null,
+    category_id: tx.categoryId || null,
+    scope: tx.scope,
+    owner_id: tx.ownerId,
+    installment_group_id: tx.installmentGroupId || null,
+    installment_number: tx.installmentNumber || null,
+    installment_count: tx.installmentCount || null,
+    is_recurring: Boolean(tx.isRecurring),
+    recurrence_rule_id: recurrenceRuleId,
+  };
+};
 
 export const scenarioToClient = (row) => ({
   id: row.id,
@@ -206,7 +262,7 @@ export const loadInitialAppData = async (defaults = {}) => {
     accounts: getLocal(STORAGE_KEYS.accounts, []),
     cards: getLocal(STORAGE_KEYS.cards, []),
     categories: getLocal(STORAGE_KEYS.categories, defaults.categories || []),
-    transactions: getLocal(STORAGE_KEYS.transactions, []),
+    transactions: getLocal(STORAGE_KEYS.transactions, []).map(transactionToClient),
     scenarios: getLocal(STORAGE_KEYS.scenarios, []),
   };
 };
@@ -374,4 +430,100 @@ export const saveToLocalStorage = (key, data) => {
   } catch (e) {
     console.warn('Erro ao salvar no localStorage:', e);
   }
+};
+
+/**
+ * Auto-recuperação (Self-Healing) de lançamentos de fatura indevidamente migrados para o mês seguinte.
+ * Detecta itens de cartão que pertenciam a uma fatura que já possui pagamento registrado no mês anterior
+ * e restaura seu vencimento contábil e status para 'REALIZADO'.
+ */
+export const healMigratedInvoiceTransactions = (txList, cards = []) => {
+  if (!Array.isArray(txList) || txList.length === 0) {
+    return { healedTransactions: txList || [], hasChanges: false, changedTxs: [] };
+  }
+
+  // 1. Localizar pagamentos de fatura
+  const paymentTxs = txList.filter(
+    (t) => t.isInvoicePayment && t.targetCardId && t.invoiceMonth && t.status !== 'CANCELADO'
+  );
+
+  if (paymentTxs.length === 0) {
+    let patched = false;
+    const normalized = txList.map((t) => {
+      let changed = false;
+      const u = { ...t };
+      if (!u.dueDate) {
+        u.dueDate = u.date;
+        changed = true;
+      }
+      if (!u.purchaseDate) {
+        u.purchaseDate = u.date;
+        changed = true;
+      }
+      if (changed) patched = true;
+      return u;
+    });
+    return { healedTransactions: normalized, hasChanges: patched, changedTxs: [] };
+  }
+
+  let hasChanges = false;
+  const changedTxs = [];
+
+  const healedTransactions = txList.map((t) => {
+    const baseDueDate = t.dueDate || t.date;
+    const basePurchaseDate = t.purchaseDate || t.date;
+
+    // Apenas compras de cartão de crédito ativas
+    if (!t.cardId || t.status === 'CANCELADO') {
+      if (!t.dueDate || !t.purchaseDate) {
+        return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
+      }
+      return t;
+    }
+
+    // Parcelas futuras legítimas geradas com -p3, -p4, etc. e installmentNumber > 1 não devem ser retrocedidas
+    if (String(t.id).includes('-p') && t.installmentNumber && t.installmentNumber > 1) {
+      if (!t.dueDate || !t.purchaseDate) {
+        return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
+      }
+      return t;
+    }
+
+    const currentDueMonth = baseDueDate.slice(0, 7);
+    const purchaseMonth = basePurchaseDate.slice(0, 7);
+
+    // Procura se há um pagamento para este cartão referente a um mês anterior ao vencimento atual,
+    // onde a compra ocorreu no mês daquele pagamento (ou antes)
+    const matchingPayment = paymentTxs.find((p) => {
+      if (p.targetCardId !== t.cardId) return false;
+      return p.invoiceMonth < currentDueMonth && purchaseMonth <= p.invoiceMonth;
+    });
+
+    if (matchingPayment) {
+      // O item pertencia à fatura paga em matchingPayment.invoiceMonth!
+      const card = cards.find((c) => c.id === t.cardId);
+      const safeDueDay = card?.dueDay
+        ? String(Math.min(28, card.dueDay)).padStart(2, '0')
+        : (matchingPayment.date ? matchingPayment.date.slice(8, 10) : baseDueDate.slice(8, 10));
+      const healedDueDate = `${matchingPayment.invoiceMonth}-${safeDueDay}`;
+
+      hasChanges = true;
+      const healed = {
+        ...t,
+        date: healedDueDate,
+        dueDate: healedDueDate,
+        purchaseDate: basePurchaseDate,
+        status: 'REALIZADO',
+      };
+      changedTxs.push(healed);
+      return healed;
+    }
+
+    if (!t.dueDate || !t.purchaseDate) {
+      return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
+    }
+    return t;
+  });
+
+  return { healedTransactions, hasChanges, changedTxs };
 };

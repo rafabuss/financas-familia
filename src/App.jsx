@@ -30,7 +30,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  Check
+  Check,
+  Filter
 } from 'lucide-react';
 import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
@@ -336,8 +337,15 @@ export default function App() {
 
   // Filtros e Ordenação de Lançamentos
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('ALL');
-  const [filterStatus, setFilterStatus] = useState('ALL');
+  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'INCOME' | 'EXPENSE'
+  const [filterStatus, setFilterStatus] = useState('ALL'); // 'ALL' | 'OVERDUE' | 'REALIZADO' | 'COMPROMETIDO' | 'PREVISTO' | 'HIPOTETICO' | 'CANCELADO'
+  const [filterSource, setFilterSource] = useState('ALL'); // 'ALL' | 'ACCOUNTS_ONLY' | 'CARDS_ONLY' | 'acc-${id}' | 'card-${id}'
+  const [filterCategory, setFilterCategory] = useState('ALL'); // 'ALL' | catId
+  const [filterScope, setFilterScope] = useState('ALL'); // 'ALL' | 'FAMILY' | 'PERSONAL'
+  const [filterDatePreset, setFilterDatePreset] = useState('ALL'); // 'ALL' | 'THIS_MONTH' | 'LAST_MONTH' | 'NEXT_MONTH' | 'CUSTOM'
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+
   // Ordenação de Lançamentos (padrão: data mais próxima da data atual)
   const [txSort, setTxSort] = useState({ field: 'date', direction: 'closest' }); // 'closest' | 'asc' | 'desc'
 
@@ -350,6 +358,28 @@ export default function App() {
   // Mês de Referência para o Dashboard (padrão: mês atual 'YYYY-MM')
   const [dashboardMonth, setDashboardMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const currentActualMonth = useMemo(() => new Date().toISOString().slice(0, 7), []);
+
+  // Mês de Referência para a aba Faturas & Parcelas de Cartões (padrão: mês atual 'YYYY-MM')
+  const [invoiceSelectedMonth, setInvoiceSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  // Modal de Pagamento de Fatura de Cartão
+  const [invoicePaymentModal, setInvoicePaymentModal] = useState({
+    isOpen: false,
+    card: null,
+    monthKey: '',
+    totalCents: 0,
+    monthItems: [],
+    dueDateIso: '',
+  });
+
+  // Modal informativo para tentativa de quitação avulsa de compra de cartão
+  const [cardPaymentPromptModal, setCardPaymentPromptModal] = useState({
+    isOpen: false,
+    transaction: null,
+    card: null,
+    monthKey: '',
+    dueDateIso: '',
+  });
 
   const formatMonthLabel = (yearMonthStr) => {
     try {
@@ -366,6 +396,13 @@ export default function App() {
     const nextDate = new Date(y, m - 1 + offset, 1);
     const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
     setDashboardMonth(nextStr);
+  };
+
+  const changeInvoiceSelectedMonth = (offset) => {
+    const [y, m] = invoiceSelectedMonth.split('-').map(Number);
+    const nextDate = new Date(y, m - 1 + offset, 1);
+    const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+    setInvoiceSelectedMonth(nextStr);
   };
 
   // Controles dos Gráficos
@@ -659,10 +696,106 @@ export default function App() {
       };
     });
     return map;
-  }, [cards, visibleTransactions, dashboardMonth]);
+  }, [cards, visibleTransactions, dashboardMonth, getTxDueDate]);
 
   // Retrocompatibilidade para cardStats
   const cardStats = cardInvoices;
+
+  // Meses disponíveis com atividade de cartão (passado, presente e futuro até o horizonte de parcelas)
+  const availableInvoiceMonths = useMemo(() => {
+    const monthsSet = new Set();
+    const now = new Date();
+    // Garante presença do mês atual e meses ao redor (-3 a +12)
+    for (let i = -3; i <= 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      monthsSet.add(d.toISOString().slice(0, 7));
+    }
+    // Inclui todos os meses em que há qualquer vencimento de cartão registrado (inclusive financiamentos longos)
+    visibleTransactions.forEach((t) => {
+      if (t.cardId && t.status !== 'CANCELADO') {
+        const due = getTxDueDate(t) || t.date;
+        if (due && due.length >= 7) {
+          monthsSet.add(due.slice(0, 7));
+        }
+      }
+    });
+    return Array.from(monthsSet).sort();
+  }, [visibleTransactions, getTxDueDate]);
+
+  // Faturas dos Cartões de Crédito calculadas para o mês selecionado na aba Faturas
+  const faturasCardsData = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const map = {};
+
+    cards.forEach((card) => {
+      const allCardTxs = visibleTransactions.filter((t) => t.cardId === card.id && t.status !== 'CANCELADO');
+
+      // Limite total comprometido (soma de todas as parcelas ativas de qualquer época)
+      const committedTotalCents = allCardTxs.reduce((acc, t) => acc + (t.type === 'EXPENSE' ? t.amountCents : 0), 0);
+      const availableCents = Math.max(0, card.limitCents - committedTotalCents);
+
+      // Itens que vencem estritamente no mês selecionado
+      const monthItems = allCardTxs.filter((t) => {
+        const due = getTxDueDate(t) || t.date;
+        return due && due.startsWith(invoiceSelectedMonth);
+      });
+
+      monthItems.sort((a, b) => {
+        const dateA = a.purchaseDate || getTxDueDate(a) || a.date;
+        const dateB = b.purchaseDate || getTxDueDate(b) || b.date;
+        return dateA.localeCompare(dateB);
+      });
+
+      const invoiceExpensesCents = monthItems
+        .filter((t) => t.type === 'EXPENSE')
+        .reduce((acc, t) => acc + t.amountCents, 0);
+
+      // Procura pagamento registrado para este cartão nesta fatura
+      const paymentTx = visibleTransactions.find(
+        (t) => t.isInvoicePayment && t.targetCardId === card.id && t.invoiceMonth === invoiceSelectedMonth && t.status !== 'CANCELADO'
+      );
+
+      const paidItemsCents = monthItems
+        .filter((t) => t.type === 'EXPENSE' && t.status === 'REALIZADO')
+        .reduce((acc, t) => acc + t.amountCents, 0);
+
+      const allItemsRealizado = monthItems.length > 0 && monthItems.every((t) => t.status === 'REALIZADO');
+      const isPaid = Boolean(paymentTx || (monthItems.length > 0 && allItemsRealizado));
+
+      // Datas nominais de vencimento e fechamento
+      const dueDayPadded = String(Math.min(28, card.dueDay || 10)).padStart(2, '0');
+      const closingDayPadded = String(Math.min(28, card.closingDay || 3)).padStart(2, '0');
+      const dueDateIso = `${invoiceSelectedMonth}-${dueDayPadded}`;
+      const closingDateIso = `${invoiceSelectedMonth}-${closingDayPadded}`;
+
+      let invoiceStatus = 'ABERTA';
+      if (isPaid) {
+        invoiceStatus = 'PAGA';
+      } else if (todayStr > dueDateIso) {
+        invoiceStatus = 'EM ATRASO';
+      } else if (todayStr > closingDateIso) {
+        invoiceStatus = 'FECHADA';
+      } else {
+        invoiceStatus = 'ABERTA';
+      }
+
+      map[card.id] = {
+        card,
+        monthItems,
+        invoiceTotalCents: invoiceExpensesCents,
+        committedTotalCents,
+        availableCents,
+        isPaid,
+        paidCents: paymentTx ? paymentTx.amountCents : paidItemsCents,
+        paymentTx,
+        invoiceStatus,
+        dueDateIso,
+        closingDateIso,
+      };
+    });
+
+    return map;
+  }, [cards, visibleTransactions, invoiceSelectedMonth, getTxDueDate]);
 
   // Totais do Mês Selecionado (Dashboard)
   const monthSummary = useMemo(() => {
@@ -679,8 +812,24 @@ export default function App() {
       if (tx.type === 'INCOME') {
         income += tx.amountCents;
       } else {
-        expense += tx.amountCents;
-        if (tx.status === 'COMPROMETIDO') committed += tx.amountCents;
+        // Se houver transação de pagamento de fatura, ela representa a saída efetiva em dinheiro da conta bancária.
+        // Evitamos duplicar entre compras no cartão e a quitação da fatura:
+        if (tx.isInvoicePayment) {
+          expense += tx.amountCents;
+        } else if (tx.cardId) {
+          // Se a fatura deste cartão para este mês já tem quitação registrada via isInvoicePayment, não duplica
+          const hasInvoicePayment = visibleTransactions.some(
+            (p) => p.isInvoicePayment && p.targetCardId === tx.cardId && p.invoiceMonth === dashboardMonth && p.status !== 'CANCELADO'
+          );
+          if (!hasInvoicePayment) {
+            expense += tx.amountCents;
+            if (tx.status === 'COMPROMETIDO') committed += tx.amountCents;
+          }
+        } else {
+          // Despesas regulares em conta / dinheiro
+          expense += tx.amountCents;
+          if (tx.status === 'COMPROMETIDO') committed += tx.amountCents;
+        }
       }
     });
 
@@ -695,7 +844,7 @@ export default function App() {
       totalBankBalance,
       totalCardsAvailable,
     };
-  }, [visibleTransactions, accountBalances, cardStats, dashboardMonth, cards]);
+  }, [visibleTransactions, accountBalances, cardStats, dashboardMonth, getTxDueDate]);
 
   // Maiores Gastos por Categoria no Mês do Dashboard
   const dashboardCategoryChartData = useMemo(() => {
@@ -707,6 +856,8 @@ export default function App() {
       const effectiveDate = getTxDueDate(tx) || tx.date;
       if (!effectiveDate || !effectiveDate.startsWith(dashboardMonth)) return;
       if (tx.type !== 'EXPENSE') return;
+      // Não duplica a transação de pagamento de fatura no gráfico analítico de categorias de consumo
+      if (tx.isInvoicePayment) return;
 
       expenseMap[tx.categoryId] = (expenseMap[tx.categoryId] || 0) + tx.amountCents;
       totalExpensesCents += tx.amountCents;
@@ -730,7 +881,7 @@ export default function App() {
       expensesList,
       totalExpensesCents,
     };
-  }, [visibleTransactions, dashboardMonth, categories, cards]);
+  }, [visibleTransactions, dashboardMonth, categories, getTxDueDate]);
 
   // Lançamentos em atraso (comprometidos com vencimento anterior a hoje)
   const overdueTransactions = useMemo(() => {
@@ -1310,7 +1461,131 @@ export default function App() {
     }
   };
 
+  // Abre o modal de pagamento da fatura consolidada de um cartão para um determinado mês
+  const openInvoicePaymentModal = (card, monthKey) => {
+    if (!card) return;
+    const allCardTxs = visibleTransactions.filter((t) => t.cardId === card.id && t.status !== 'CANCELADO');
+    const monthItems = allCardTxs.filter((t) => {
+      const due = getTxDueDate(t) || t.date;
+      return due && due.startsWith(monthKey);
+    });
+
+    const totalCents = monthItems
+      .filter((t) => t.type === 'EXPENSE')
+      .reduce((acc, t) => acc + t.amountCents, 0);
+
+    const dueDayPadded = String(Math.min(28, card.dueDay || 10)).padStart(2, '0');
+    const dueDateIso = `${monthKey}-${dueDayPadded}`;
+
+    setInvoicePaymentModal({
+      isOpen: true,
+      card,
+      monthKey,
+      totalCents,
+      monthItems,
+      dueDateIso,
+    });
+  };
+
+  // Confirmação do pagamento da fatura com débito da conta bancária e quitação dos lançamentos
+  const handleConfirmInvoicePayment = (e) => {
+    e.preventDefault();
+    const card = invoicePaymentModal.card;
+    if (!card) return;
+
+    const fd = new FormData(e.target);
+    const accountId = fd.get('accountId');
+    if (!accountId) {
+      alert('Selecione a conta bancária de onde o pagamento será debitado.');
+      return;
+    }
+
+    const paidAmount = parseFloat(fd.get('paidAmount') || '0');
+    const paidAmountCents = Math.round(paidAmount * 100);
+    if (paidAmountCents <= 0) {
+      alert('Informe um valor válido para o pagamento da fatura.');
+      return;
+    }
+
+    const paymentDate = fd.get('paymentDate') || new Date().toISOString().slice(0, 10);
+    const description =
+      fd.get('description') ||
+      `Pagamento Fatura ${card.name} (${formatMonthLabel(invoicePaymentModal.monthKey)})`;
+
+    // 1. Quitar todos os lançamentos vinculados a esta fatura
+    const monthItemIds = new Set(invoicePaymentModal.monthItems.map((i) => i.id));
+    const updatedMonthItems = [];
+
+    // 2. Transação de saída bancária para quitar a fatura
+    const paymentTx = {
+      id: `tx-invoice-pay-${card.id}-${invoicePaymentModal.monthKey}-${Date.now()}`,
+      description,
+      amountCents: paidAmountCents,
+      type: 'EXPENSE',
+      status: 'REALIZADO',
+      date: paymentDate,
+      dueDate: paymentDate,
+      accountId,
+      cardId: null,
+      targetCardId: card.id,
+      isInvoicePayment: true,
+      invoiceMonth: invoicePaymentModal.monthKey,
+      categoryId:
+        categories.find(
+          (c) =>
+            c.name.toLowerCase().includes('cart') ||
+            c.name.toLowerCase().includes('pagamento') ||
+            c.name.toLowerCase().includes('financ')
+        )?.id || categories[0]?.id || null,
+      scope: card.scope || 'FAMILY',
+      ownerId: card.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
+    };
+
+    const updatedTransactions = transactions.map((t) => {
+      if (monthItemIds.has(t.id)) {
+        const u = { ...t, status: 'REALIZADO' };
+        updatedMonthItems.push(u);
+        return u;
+      }
+      return t;
+    });
+
+    updatedTransactions.unshift(paymentTx);
+
+    setTransactions(updatedTransactions);
+    saveToLocalStorage('financas_transactions_v1', updatedTransactions);
+
+    // Sincronização
+    syncBatchTransactions([...updatedMonthItems, paymentTx]);
+
+    setInvoicePaymentModal({
+      isOpen: false,
+      card: null,
+      monthKey: '',
+      totalCents: 0,
+      monthItems: [],
+      dueDateIso: '',
+    });
+  };
+
+  // Alternador de situação do lançamento individual
   const toggleStatusPaid = (tx) => {
+    // Se o lançamento for de cartão de crédito, não permite quitação avulsa isolada
+    if (tx.cardId) {
+      const card = cards.find((c) => c.id === tx.cardId);
+      const effectiveDue = getTxDueDate(tx) || tx.date;
+      const monthKey = effectiveDue ? effectiveDue.slice(0, 7) : invoiceSelectedMonth;
+      setCardPaymentPromptModal({
+        isOpen: true,
+        transaction: tx,
+        card: card || { name: 'Cartão de Crédito', id: tx.cardId },
+        monthKey,
+        dueDateIso: effectiveDue,
+      });
+      return;
+    }
+
+    // Lançamentos normais de conta corrente / dinheiro
     const nextStatus = tx.status === 'REALIZADO' ? 'COMPROMETIDO' : 'REALIZADO';
     const updatedTx = { ...tx, status: nextStatus };
     const updated = transactions.map((t) => (t.id === tx.id ? updatedTx : t));
@@ -1579,25 +1854,134 @@ export default function App() {
     setActiveTab('faturas');
   };
 
+  // Manipulador de preset de intervalo de datas dos lançamentos
+  const handleDatePresetChange = (preset) => {
+    setFilterDatePreset(preset);
+    const now = new Date();
+    if (preset === 'ALL') {
+      setFilterStartDate('');
+      setFilterEndDate('');
+    } else if (preset === 'THIS_MONTH') {
+      const y = now.getFullYear();
+      const m = now.getMonth();
+      const start = new Date(y, m, 1).toISOString().slice(0, 10);
+      const end = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+      setFilterStartDate(start);
+      setFilterEndDate(end);
+    } else if (preset === 'LAST_MONTH') {
+      const y = now.getFullYear();
+      const m = now.getMonth() - 1;
+      const start = new Date(y, m, 1).toISOString().slice(0, 10);
+      const end = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+      setFilterStartDate(start);
+      setFilterEndDate(end);
+    } else if (preset === 'NEXT_MONTH') {
+      const y = now.getFullYear();
+      const m = now.getMonth() + 1;
+      const start = new Date(y, m, 1).toISOString().slice(0, 10);
+      const end = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+      setFilterStartDate(start);
+      setFilterEndDate(end);
+    }
+  };
+
+  const handleResetFilters = () => {
+    setSearchTerm('');
+    setFilterType('ALL');
+    setFilterStatus('ALL');
+    setFilterSource('ALL');
+    setFilterCategory('ALL');
+    setFilterScope('ALL');
+    setFilterDatePreset('ALL');
+    setFilterStartDate('');
+    setFilterEndDate('');
+  };
+
+  const isAnyFilterActive =
+    Boolean(searchTerm.trim()) ||
+    filterType !== 'ALL' ||
+    filterStatus !== 'ALL' ||
+    filterSource !== 'ALL' ||
+    filterCategory !== 'ALL' ||
+    filterScope !== 'ALL' ||
+    filterDatePreset !== 'ALL' ||
+    Boolean(filterStartDate) ||
+    Boolean(filterEndDate);
+
   // Filtragem e Ordenação de Lançamentos na tabela (incluindo simulações hipotéticas ativas)
   const filteredTransactions = useMemo(() => {
     const todayDate = new Date().toISOString().slice(0, 10);
     const todayTime = new Date(todayDate + 'T12:00:00').getTime();
 
     const list = allDisplayTransactions.filter((t) => {
-      const matchSearch =
-        t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.purchaseDate && formatDateBR(t.purchaseDate).includes(searchTerm)) ||
-        (t.dueDate && formatDateBR(t.dueDate).includes(searchTerm)) ||
-        (t.date && formatDateBR(t.date).includes(searchTerm));
-      const matchType = filterType === 'ALL' || t.type === filterType;
-      const matchStatus =
-        filterStatus === 'ALL'
-          ? true
-          : filterStatus === 'OVERDUE'
-          ? isTxOverdue(t, todayDate)
-          : t.status === filterStatus;
-      return matchSearch && matchType && matchStatus;
+      const effectiveDate = getTxDueDate(t) || t.date || '';
+
+      // 1. Busca por texto livre (descrição, categorias, contas, cartões, datas)
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const catName = categories.find((c) => c.id === t.categoryId)?.name?.toLowerCase() || '';
+        const accName = accounts.find((a) => a.id === t.accountId)?.name?.toLowerCase() || '';
+        const cardName = cards.find((c) => c.id === t.cardId)?.name?.toLowerCase() || '';
+        const desc = (t.description || '').toLowerCase();
+        const dateBR = formatDateBR(effectiveDate).toLowerCase();
+        const purchaseBR = t.purchaseDate ? formatDateBR(t.purchaseDate).toLowerCase() : '';
+
+        const match =
+          desc.includes(term) ||
+          catName.includes(term) ||
+          accName.includes(term) ||
+          cardName.includes(term) ||
+          effectiveDate.includes(term) ||
+          dateBR.includes(term) ||
+          purchaseBR.includes(term);
+
+        if (!match) return false;
+      }
+
+      // 2. Tipo (Receita / Despesa)
+      if (filterType !== 'ALL' && t.type !== filterType) {
+        return false;
+      }
+
+      // 3. Situação
+      if (filterStatus === 'OVERDUE') {
+        if (!isTxOverdue(t, todayDate)) return false;
+      } else if (filterStatus !== 'ALL') {
+        if (t.status !== filterStatus) return false;
+      }
+
+      // 4. Conta / Cartão
+      if (filterSource === 'ACCOUNTS_ONLY') {
+        if (!t.accountId || t.cardId) return false;
+      } else if (filterSource === 'CARDS_ONLY') {
+        if (!t.cardId) return false;
+      } else if (filterSource.startsWith('acc-')) {
+        const targetAccId = filterSource.replace('acc-', '');
+        if (t.accountId !== targetAccId) return false;
+      } else if (filterSource.startsWith('card-')) {
+        const targetCardId = filterSource.replace('card-', '');
+        if (t.cardId !== targetCardId) return false;
+      }
+
+      // 5. Categoria
+      if (filterCategory !== 'ALL' && t.categoryId !== filterCategory) {
+        return false;
+      }
+
+      // 6. Escopo (Familiar / Pessoal)
+      if (filterScope !== 'ALL' && t.scope !== filterScope) {
+        return false;
+      }
+
+      // 7. Filtro por Data Inicial / Final
+      if (filterStartDate && effectiveDate < filterStartDate) {
+        return false;
+      }
+      if (filterEndDate && effectiveDate > filterEndDate) {
+        return false;
+      }
+
+      return true;
     });
 
     return list.sort((a, b) => {
@@ -1664,7 +2048,23 @@ export default function App() {
 
       return 0;
     });
-  }, [allDisplayTransactions, searchTerm, filterType, filterStatus, txSort, categories, accounts, cards, getTxDueDate, isTxOverdue]);
+  }, [
+    allDisplayTransactions,
+    searchTerm,
+    filterType,
+    filterStatus,
+    filterSource,
+    filterCategory,
+    filterScope,
+    filterStartDate,
+    filterEndDate,
+    txSort,
+    categories,
+    accounts,
+    cards,
+    getTxDueDate,
+    isTxOverdue,
+  ]);
 
   // Alternador de ordenação de colunas da tabela de lançamentos
   const handleSortTransactions = (field) => {
@@ -2200,63 +2600,241 @@ export default function App() {
         {/* ===================== ABA: LANÇAMENTOS ===================== */}
         {activeTab === 'transactions' && (
           <div className="space-y-4">
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
-              <div className="relative w-full md:w-80">
-                <input
-                  type="text"
-                  placeholder="Pesquisar lançamentos..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-3 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
+            {/* Painel Avançado de Filtros e Busca */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              {/* Linha 1: Busca Livre, Período e Ações */}
+              <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+                <div className="relative flex-1">
+                  <Filter className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por descrição, valor, categoria, conta ou cartão..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
 
-              <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                <select
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="ALL">Todos os Tipos</option>
-                  <option value="INCOME">Receitas</option>
-                  <option value="EXPENSE">Despesas</option>
-                </select>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Seletor de Período Pré-definido */}
+                  <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <select
+                      value={filterDatePreset}
+                      onChange={(e) => handleDatePresetChange(e.target.value)}
+                      className="bg-transparent text-xs sm:text-sm font-medium text-slate-700 focus:outline-none cursor-pointer"
+                    >
+                      <option value="ALL">Todo o Período</option>
+                      <option value="THIS_MONTH">Este Mês</option>
+                      <option value="LAST_MONTH">Mês Passado</option>
+                      <option value="NEXT_MONTH">Próximo Mês</option>
+                      <option value="CUSTOM">Personalizado (De / Até)</option>
+                    </select>
+                  </div>
 
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="ALL">Todas as Situações</option>
-                  <option value="OVERDUE">🚨 Em Atraso {overdueTransactions.length > 0 ? `(${overdueTransactions.length})` : ''}</option>
-                  <option value="REALIZADO">Realizado</option>
-                  <option value="COMPROMETIDO">Comprometido</option>
-                  <option value="PREVISTO">Previsto</option>
-                  <option value="HIPOTETICO">Hipotético</option>
-                </select>
+                  {/* Campos de Data De/Até (exibidos quando personalizado ou com datas preenchidas) */}
+                  {(filterDatePreset === 'CUSTOM' || filterStartDate || filterEndDate) && (
+                    <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                      <span className="text-xs text-slate-400">De:</span>
+                      <input
+                        type="date"
+                        value={filterStartDate}
+                        onChange={(e) => {
+                          setFilterDatePreset('CUSTOM');
+                          setFilterStartDate(e.target.value);
+                        }}
+                        className="bg-transparent text-xs text-slate-700 focus:outline-none"
+                      />
+                      <span className="text-xs text-slate-400">Até:</span>
+                      <input
+                        type="date"
+                        value={filterEndDate}
+                        onChange={(e) => {
+                          setFilterDatePreset('CUSTOM');
+                          setFilterEndDate(e.target.value);
+                        }}
+                        className="bg-transparent text-xs text-slate-700 focus:outline-none"
+                      />
+                    </div>
+                  )}
 
-                {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
+                  {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
+                    <button
+                      type="button"
+                      onClick={handleClearOnlyDemo}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1 transition"
+                      title="Excluir apenas lançamentos fictícios de exemplo"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Limpar Exemplos</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={handleClearOnlyDemo}
-                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 transition ml-auto"
-                    title="Excluir apenas lançamentos fictícios de exemplo (seus dados reais são preservados)"
+                    onClick={() => openTransactionModal('create')}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95 ml-auto sm:ml-0"
                   >
-                    <Trash2 className="w-4 h-4" />
-                    <span className="hidden sm:inline">Limpar Exemplos</span>
+                    <Plus className="w-4 h-4" />
+                    <span>Novo Lançamento</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Linha 2: Filtros por Conta/Cartão, Situação, Categoria, Escopo e Tipo */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-2 border-t border-slate-100">
+                {/* Conta / Cartão */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Conta / Cartão
+                  </label>
+                  <select
+                    value={filterSource}
+                    onChange={(e) => setFilterSource(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+                  >
+                    <option value="ALL">Todas as Contas & Cartões</option>
+                    <option value="ACCOUNTS_ONLY">🏦 Apenas Contas</option>
+                    <option value="CARDS_ONLY">💳 Apenas Cartões</option>
+                    <optgroup label="Contas Bancárias">
+                      {accounts.map((a) => (
+                        <option key={a.id} value={`acc-${a.id}`}>
+                          Conta: {a.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Cartões de Crédito">
+                      {cards.map((c) => (
+                        <option key={c.id} value={`card-${c.id}`}>
+                          Cartão: {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Situação */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Situação
+                  </label>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="ALL">Todas as Situações</option>
+                    <option value="OVERDUE">🚨 Em Atraso ({overdueTransactions.length})</option>
+                    <option value="REALIZADO">✅ Realizado</option>
+                    <option value="COMPROMETIDO">⏳ Comprometido</option>
+                    <option value="PREVISTO">📅 Previsto</option>
+                    <option value="HIPOTETICO">✨ Hipotético</option>
+                    <option value="CANCELADO">🚫 Cancelado</option>
+                  </select>
+                </div>
+
+                {/* Categoria */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Categoria
+                  </label>
+                  <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+                  >
+                    <option value="ALL">Todas as Categorias</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Escopo */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Escopo
+                  </label>
+                  <select
+                    value={filterScope}
+                    onChange={(e) => setFilterScope(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="ALL">Todos os Escopos</option>
+                    <option value="FAMILY">Familiar</option>
+                    <option value="PERSONAL">Pessoal / Individual</option>
+                  </select>
+                </div>
+
+                {/* Tipo */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Tipo
+                  </label>
+                  <select
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="ALL">Todos os Tipos</option>
+                    <option value="INCOME">Receitas (+)</option>
+                    <option value="EXPENSE">Despesas (-)</option>
+                  </select>
+                </div>
+
+                {/* Botão de Limpar / Reset */}
+                <div className="flex flex-col justify-end">
+                  {isAnyFilterActive ? (
+                    <button
+                      type="button"
+                      onClick={handleResetFilters}
+                      className="w-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg px-2.5 py-1.5 text-xs flex items-center justify-center space-x-1 transition active:scale-95"
+                      title="Resetar todos os filtros para o padrão"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Limpar Filtros</span>
+                    </button>
+                  ) : (
+                    <div className="text-[11px] text-slate-400 text-center py-1.5">
+                      Filtros desativados
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Barra de Contagem e Feedback dos Filtros Ativos */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
+                <div className="flex items-center space-x-2">
+                  <span>
+                    Exibindo <strong>{filteredTransactions.length}</strong> de <strong>{allDisplayTransactions.length}</strong> lançamentos
+                  </span>
+                  {isAnyFilterActive && (
+                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      Filtros ativos
+                    </span>
+                  )}
+                </div>
+
+                {isAnyFilterActive && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
+                  >
+                    Mostrar todos os lançamentos
                   </button>
                 )}
-
-                <button
-                  type="button"
-                  onClick={() => openTransactionModal('create')}
-                  className={`bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 ${
-                    transactions.some((t) => t.id.startsWith('demo-')) ? '' : 'ml-auto'
-                  }`}
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Novo</span>
-                </button>
               </div>
             </div>
 
@@ -2863,7 +3441,7 @@ export default function App() {
               <div>
                 <h2 className="text-xl font-bold text-slate-900 tracking-tight">Faturas & Parcelas de Cartões</h2>
                 <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                  Acompanhe o valor da fatura atual e o impacto das compras parceladas futuras de cada cartão.
+                  Acompanhe o valor da fatura de qualquer mês e confira o impacto de compras parceladas futuras.
                 </p>
               </div>
               <div className="flex items-center space-x-2">
@@ -2886,38 +3464,148 @@ export default function App() {
               </div>
             </div>
 
+            {/* Seletor Cronológico de Mês das Faturas */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center space-x-2 w-full sm:w-auto justify-between sm:justify-start">
+                <button
+                  type="button"
+                  onClick={() => changeInvoiceSelectedMonth(-1)}
+                  className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl transition active:scale-95 shadow-2xs"
+                  title="Ver fatura do mês anterior"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+
+                <div className="flex items-center space-x-2">
+                  <Calendar className="w-4 h-4 text-purple-600 hidden sm:inline" />
+                  <select
+                    value={invoiceSelectedMonth}
+                    onChange={(e) => setInvoiceSelectedMonth(e.target.value)}
+                    className="border border-slate-300 rounded-xl px-3 py-2 text-sm sm:text-base font-bold text-slate-800 bg-white focus:ring-2 focus:ring-purple-500 focus:outline-none cursor-pointer capitalize"
+                  >
+                    {availableInvoiceMonths.map((mKey) => (
+                      <option key={mKey} value={mKey}>
+                        {formatMonthLabel(mKey)} {mKey === currentActualMonth ? '★ (MÊS ATUAL)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => changeInvoiceSelectedMonth(1)}
+                  className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl transition active:scale-95 shadow-2xs"
+                  title="Ver fatura do próximo mês"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex items-center space-x-3 text-xs">
+                {invoiceSelectedMonth !== currentActualMonth && (
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceSelectedMonth(currentActualMonth)}
+                    className="font-semibold px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition"
+                  >
+                    Voltar para Mês Atual
+                  </button>
+                )}
+                <span className="text-slate-500">
+                  Fatura de competência: <strong className="text-slate-800 capitalize">{formatMonthLabel(invoiceSelectedMonth)}</strong>
+                </span>
+              </div>
+            </div>
+
             <div className="space-y-6">
               {cards.map((card) => {
-                const info = cardInvoices[card.id] || { items: [], invoiceTotalCents: 0, availableCents: card.limitCents };
+                const info = faturasCardsData[card.id] || {
+                  monthItems: [],
+                  invoiceTotalCents: 0,
+                  availableCents: card.limitCents,
+                  committedTotalCents: 0,
+                  isPaid: false,
+                  invoiceStatus: 'ABERTA',
+                  dueDateIso: '',
+                  closingDateIso: '',
+                };
+
                 return (
                   <div key={card.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                    <div className="flex flex-col sm:flex-row justify-between sm:items-center pb-4 border-b border-slate-100 gap-2">
+                    <div className="flex flex-col md:flex-row justify-between md:items-center pb-4 border-b border-slate-100 gap-4">
                       <div>
                         <div className="flex items-center space-x-2">
-                          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: card.color || '#1e293b' }} />
+                          <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: card.color || '#1e293b' }} />
                           <h3 className="text-base font-bold text-slate-900">{card.name}</h3>
                           <span className="text-xs text-slate-500">({card.bank} • {card.flag})</span>
+                          {/* Badge de Situação da Fatura */}
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex items-center space-x-1 border ${
+                              info.invoiceStatus === 'PAGA'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                : info.invoiceStatus === 'EM ATRASO'
+                                ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                : info.invoiceStatus === 'FECHADA'
+                                ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                : 'bg-blue-100 text-blue-800 border-blue-300'
+                            }`}
+                          >
+                            {info.invoiceStatus === 'PAGA' && <CheckCircle2 className="w-3 h-3" />}
+                            {info.invoiceStatus === 'EM ATRASO' && <AlertTriangle className="w-3 h-3 text-rose-600" />}
+                            {info.invoiceStatus === 'FECHADA' && <Clock className="w-3 h-3 text-amber-600" />}
+                            {info.invoiceStatus === 'ABERTA' && <Clock className="w-3 h-3 text-blue-600" />}
+                            <span>FATURA {info.invoiceStatus}</span>
+                          </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">
                           Fechamento todo dia <strong>{card.closingDay}</strong> • Vencimento todo dia <strong>{card.dueDay}</strong>
+                          {info.dueDateIso && (
+                            <span className="ml-2 font-medium text-slate-600">
+                              (Vence em: {formatDateBR(info.dueDateIso)})
+                            </span>
+                          )}
                         </p>
                       </div>
 
-                      <div className="text-left sm:text-right">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                          VALOR DA FATURA ATUAL
-                        </span>
-                        <span className="text-2xl font-bold text-slate-900">{formatMoney(info.invoiceTotalCents)}</span>
-                        <span className="text-xs text-emerald-600 font-semibold block mt-0.5">
-                          Disponível: {formatMoney(info.availableCents)} (de {formatMoney(card.limitCents)})
-                        </span>
+                      <div className="flex items-center space-x-4">
+                        <div className="text-left md:text-right">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            VALOR DESTA FATURA
+                          </span>
+                          <span className="text-2xl font-bold text-slate-900">{formatMoney(info.invoiceTotalCents)}</span>
+                          {info.isPaid ? (
+                            <span className="text-xs text-emerald-600 font-semibold block mt-0.5">
+                              ✓ Paga ({formatMoney(info.paidCents)})
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500 font-medium block mt-0.5">
+                              Disponível: {formatMoney(info.availableCents)} (de {formatMoney(card.limitCents)})
+                            </span>
+                          )}
+                        </div>
+
+                        {info.invoiceTotalCents > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => openInvoicePaymentModal(card, invoiceSelectedMonth)}
+                            className={`text-xs sm:text-sm font-semibold px-4 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 shadow-sm whitespace-nowrap ${
+                              info.isPaid
+                                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            }`}
+                            title="Efetuar débito na conta bancária e quitar faturas"
+                          >
+                            <CreditCard className="w-4 h-4" />
+                            <span>{info.isPaid ? 'Novo Pagamento' : 'Pagar Fatura'}</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     <div className="mt-4">
                       <div className="flex justify-between items-center mb-3">
                         <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                          LANÇAMENTOS E PARCELAS VINCULADAS A ESTE CARTÃO ({info.items.length}):
+                          LANÇAMENTOS E PARCELAS DESTA FATURA ({info.monthItems.length}):
                         </h4>
                         <button
                           type="button"
@@ -2929,11 +3617,13 @@ export default function App() {
                         </button>
                       </div>
 
-                      {info.items.length === 0 ? (
-                        <p className="text-xs text-slate-400 py-3">Nenhuma despesa ativa vinculada a esta fatura.</p>
+                      {info.monthItems.length === 0 ? (
+                        <p className="text-xs text-slate-400 py-4 bg-slate-50/60 rounded-xl text-center">
+                          Nenhuma despesa ou parcela vinculada a este cartão na fatura de {formatMonthLabel(invoiceSelectedMonth)}.
+                        </p>
                       ) : (
                         <div className="divide-y divide-slate-100">
-                          {info.items.map((item) => {
+                          {info.monthItems.map((item) => {
                             const cat = categories.find((c) => c.id === item.categoryId);
                             return (
                               <div key={item.id} className="py-3 flex items-center justify-between hover:bg-slate-50 px-2 rounded-lg transition">
@@ -2950,6 +3640,15 @@ export default function App() {
                                         {cat.name}
                                       </span>
                                     )}
+                                    <span
+                                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                                        item.status === 'REALIZADO'
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : 'bg-blue-100 text-blue-800'
+                                      }`}
+                                    >
+                                      {item.status === 'REALIZADO' ? 'Quitado' : 'Comprometido'}
+                                    </span>
                                   </div>
                                   <span className="text-xs text-slate-400 block mt-0.5">
                                     Vencimento: <strong className="text-slate-600 font-medium">{formatDateBR(getTxDueDate(item))}</strong>
@@ -2974,6 +3673,19 @@ export default function App() {
                           })}
                         </div>
                       )}
+
+                      {/* Rodapé informativo de limites do cartão */}
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+                        <span>
+                          Limite Total: <strong>{formatMoney(card.limitCents)}</strong>
+                        </span>
+                        <span>
+                          Total Comprometido (Todas as Parcelas): <strong className="text-slate-700">{formatMoney(info.committedTotalCents)}</strong>
+                        </span>
+                        <span className="text-emerald-600 font-semibold">
+                          Disponível Atual: {formatMoney(info.availableCents)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );
@@ -5124,6 +5836,276 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* Modal de Pagamento de Fatura de Cartão de Crédito */}
+      {invoicePaymentModal.isOpen && invoicePaymentModal.card && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Pagamento de Fatura do Cartão</h3>
+                  <p className="text-xs text-slate-500">
+                    {invoicePaymentModal.card.name} • Competência: {formatMonthLabel(invoicePaymentModal.monthKey)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setInvoicePaymentModal({
+                    isOpen: false,
+                    card: null,
+                    monthKey: '',
+                    totalCents: 0,
+                    monthItems: [],
+                    dueDateIso: '',
+                  })
+                }
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmInvoicePayment} className="space-y-4 pt-4">
+              {/* Box resumo da fatura */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Total da Fatura:</span>
+                  <span className="text-base font-bold text-slate-900">
+                    {formatMoney(invoicePaymentModal.totalCents)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Vencimento da Fatura:</span>
+                  <span className="font-semibold text-slate-700">
+                    {formatDateBR(invoicePaymentModal.dueDateIso)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Lançamentos Vinculados:</span>
+                  <span className="font-semibold text-slate-700">
+                    {invoicePaymentModal.monthItems.length} compras / parcelas
+                  </span>
+                </div>
+              </div>
+
+              {/* Conta Bancária para Débito */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Conta Bancária para Débito do Pagamento *
+                </label>
+                <select
+                  name="accountId"
+                  required
+                  defaultValue={accounts[0]?.id || ''}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  {accounts.length === 0 ? (
+                    <option value="">Nenhuma conta cadastrada</option>
+                  ) : (
+                    accounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.name} ({acc.bank}) — Saldo Atual: {formatMoney(accountBalances[acc.id] || 0)}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Data e Valor do Pagamento */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Data do Pagamento *
+                  </label>
+                  <input
+                    type="date"
+                    name="paymentDate"
+                    required
+                    defaultValue={new Date().toISOString().slice(0, 10)}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Valor Pago (R$) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="paidAmount"
+                    required
+                    defaultValue={(invoicePaymentModal.totalCents / 100).toFixed(2)}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                * Por padrão, traz o valor total da fatura. Você pode informar um valor menor para registrar um pagamento parcial.
+              </p>
+
+              {/* Descrição do Pagamento */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Descrição / Identificação do Pagamento
+                </label>
+                <input
+                  type="text"
+                  name="description"
+                  defaultValue={`Pagamento Fatura ${invoicePaymentModal.card.name} (${formatMonthLabel(invoicePaymentModal.monthKey)})`}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
+                <p className="font-semibold">Ao confirmar o pagamento:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                  <li>O valor informado será debitado da conta bancária selecionada.</li>
+                  <li>Todos os {invoicePaymentModal.monthItems.length} lançamentos desta fatura serão marcados como <strong>Realizado</strong>.</li>
+                  <li>A fatura passará para a situação <strong>Paga</strong>.</li>
+                </ul>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setInvoicePaymentModal({
+                      isOpen: false,
+                      card: null,
+                      monthKey: '',
+                      totalCents: 0,
+                      monthItems: [],
+                      dueDateIso: '',
+                    })
+                  }
+                  className="px-4 py-2 border border-slate-300 rounded-xl text-sm text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition active:scale-95 shadow-sm"
+                >
+                  Confirmar Pagamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Informativo para Quitação de Lançamentos de Cartão */}
+      {cardPaymentPromptModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100">
+            <div className="flex items-start space-x-3">
+              <div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl">
+                <CreditCard className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-bold text-slate-900">
+                  Pagamento de Despesa no Cartão
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Lançamento vinculado à fatura de cartão de crédito
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setCardPaymentPromptModal({
+                    isOpen: false,
+                    transaction: null,
+                    card: null,
+                    monthKey: '',
+                    dueDateIso: '',
+                  })
+                }
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Lançamento:</span>
+                  <span className="font-semibold text-slate-800">
+                    {cardPaymentPromptModal.transaction?.description}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Valor:</span>
+                  <span className="font-bold text-slate-900">
+                    {formatMoney(cardPaymentPromptModal.transaction?.amountCents || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Cartão:</span>
+                  <span className="font-semibold text-purple-700">
+                    {cardPaymentPromptModal.card?.name}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Vencimento da Fatura:</span>
+                  <span className="font-semibold text-slate-800">
+                    {formatDateBR(cardPaymentPromptModal.dueDateIso)}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Compras no cartão de crédito não são debitadas individualmente de uma conta bancária. Elas são quitadas através do <strong>pagamento da fatura consolidada</strong> do mês correspondente.
+              </p>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setCardPaymentPromptModal({
+                    isOpen: false,
+                    transaction: null,
+                    card: null,
+                    monthKey: '',
+                    dueDateIso: '',
+                  })
+                }
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const card = cardPaymentPromptModal.card;
+                  const monthKey = cardPaymentPromptModal.monthKey;
+                  setCardPaymentPromptModal({
+                    isOpen: false,
+                    transaction: null,
+                    card: null,
+                    monthKey: '',
+                    dueDateIso: '',
+                  });
+                  openInvoicePaymentModal(card, monthKey);
+                }}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition active:scale-95 shadow-sm flex items-center justify-center space-x-1.5"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Pagar Fatura deste Cartão</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Autenticação e Gestão de Perfis */}
       <AuthModal

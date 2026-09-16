@@ -1678,7 +1678,7 @@ export default function App() {
             { id: 'categories', label: 'Categorias', icon: Tags },
             { id: 'projections', label: 'Planejamento & Projeções', icon: Calendar },
             { id: 'scenarios', label: 'Cenários & Simulações', icon: Sliders },
-            { id: 'import', label: 'Importar Extrato', icon: UploadCloud },
+            { id: 'import', label: 'Importar Fatura / Extrato', icon: UploadCloud },
             { id: 'exports', label: 'Backup & Exportar', icon: Download },
           ].map((tab) => {
             const Icon = tab.icon;

@@ -97,17 +97,25 @@ const calculateCardDueDate = (dateStr, closingDay = 1, dueDay = 10) => {
   let month = parseInt(parts[1], 10);
   const day = parseInt(parts[2], 10);
 
-  // Se a compra ocorreu após o dia de fechamento, o vencimento vai para o mês seguinte
-  if (day > closingDay) {
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
+  const safeClosing = Math.min(Math.max(closingDay || 1, 1), 28);
+  const safeDue = Math.min(Math.max(dueDay || 10, 1), 28);
+
+  let monthsToAdd = 0;
+  if (safeDue < safeClosing) {
+    // Ex: Fecha dia 28, vence dia 10 do mês seguinte
+    monthsToAdd = day > safeClosing ? 2 : 1;
+  } else {
+    // Ex: Fecha dia 1, vence dia 10 do mesmo mês
+    monthsToAdd = day > safeClosing ? 1 : 0;
   }
 
-  const safeDueDay = Math.min(Math.max(dueDay || 10, 1), 28);
-  return `${year}-${String(month).padStart(2, '0')}-${String(safeDueDay).padStart(2, '0')}`;
+  month += monthsToAdd;
+  while (month > 12) {
+    month -= 12;
+    year += 1;
+  }
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(safeDue).padStart(2, '0')}`;
 };
 
 // Adiciona N meses a uma data ISO YYYY-MM-DD mantendo o dia seguro (máx 28 para fev/outros)
@@ -441,6 +449,7 @@ export default function App() {
   const [installmentValueMode, setInstallmentValueMode] = useState('TOTAL'); // 'TOTAL' | 'INSTALLMENT'
   const [formAmount, setFormAmount] = useState('');
   const [formInstallments, setFormInstallments] = useState(1);
+  const [formStartInstallment, setFormStartInstallment] = useState(1);
   const [formIsRecurring, setFormIsRecurring] = useState(false);
   const [formRecurringMonths, setFormRecurringMonths] = useState(12);
 
@@ -448,7 +457,7 @@ export default function App() {
   const [deleteModalState, setDeleteModalState] = useState({
     isOpen: false,
     transaction: null,
-    scope: 'single', // 'single' | 'future' | 'all'
+    scope: 'single', // 'single' | 'future' | 'past_only' | 'past_inclusive' | 'all'
   });
 
   // Estado dos Modais
@@ -463,12 +472,19 @@ export default function App() {
   // Função auxiliar para abrir o modal de lançamento inicializando os campos
   const openTransactionModal = (mode = 'create', data = null, scenarioId = null) => {
     const sType = data?.sourceType || (data?.cardId ? 'CARD' : 'ACCOUNT');
+    const isActualRec = Boolean(
+      data?.isRecurring ||
+      (data?.recurrenceRuleId &&
+        !String(data.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
+        !String(data.recurrenceRuleId).startsWith('INVOICE_PAY:'))
+    );
     setModalSourceType(sType);
     setEditScope('single');
     setFormAmount(data?.amountCents ? (data.amountCents / 100).toFixed(2) : '');
-    setFormInstallments(data?.installments || 1);
+    setFormInstallments(data?.installmentCount || data?.installments || 1);
+    setFormStartInstallment(data?.installmentNumber || 1);
     setInstallmentValueMode('TOTAL');
-    setFormIsRecurring(Boolean(data?.isRecurring || data?.recurrenceRuleId));
+    setFormIsRecurring(isActualRec);
     setFormRecurringMonths(12);
     setModalState({
       isOpen: true,
@@ -1319,103 +1335,108 @@ export default function App() {
     const original = modalState.data || {};
 
     const amount = Math.round(parseFloat(fd.get('amount') || '0') * 100);
-    const installments = parseInt(fd.get('installments') || '1');
-    const isRecurring = fd.get('isRecurring') === 'on';
+    const installments = parseInt(fd.get('installments') || '1', 10);
+    const isRecurring = formIsRecurring || fd.get('isRecurring') === 'on';
     const scope = fd.get('scope') || 'FAMILY';
     const ownerId = fd.get('ownerId') || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId);
 
+    const isActualRecurrence = Boolean(
+      original.recurrenceRuleId &&
+      !String(original.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
+      !String(original.recurrenceRuleId).startsWith('INVOICE_PAY:')
+    );
+
     if (isEditing) {
-      if (editScope === 'all' && (original.installmentGroupId || original.recurrenceRuleId)) {
+      if (editScope === 'all' && (original.installmentGroupId || isActualRecurrence)) {
         const matched = [];
-        const updated = transactions.map((t) => {
-          const isMatch =
-            (original.installmentGroupId && t.installmentGroupId === original.installmentGroupId) ||
-            (original.recurrenceRuleId && t.recurrenceRuleId === original.recurrenceRuleId);
-          if (!isMatch) return t;
-          const u = {
-            ...t,
-            description: t.installmentNumber
-              ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
-              : fd.get('description'),
-            amountCents: amount,
-            type: fd.get('type'),
-            categoryId: fd.get('categoryId'),
-            scope,
-            ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-          };
-          matched.push(u);
-          return u;
+        setTransactions((prev) => {
+          const updated = prev.map((t) => {
+            const isMatch =
+              (original.installmentGroupId && t.installmentGroupId === original.installmentGroupId) ||
+              (isActualRecurrence && t.recurrenceRuleId === original.recurrenceRuleId);
+            if (!isMatch) return t;
+            const u = {
+              ...t,
+              description: t.installmentNumber
+                ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
+                : fd.get('description'),
+              amountCents: amount,
+              type: fd.get('type'),
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+            };
+            matched.push(u);
+            return u;
+          });
+          saveToLocalStorage('financas_transactions_v1', updated);
+          return updated;
         });
-        setTransactions(updated);
-        saveToLocalStorage('financas_transactions_v1', updated);
         syncBatchTransactions(matched);
-      } else if (editScope === 'future' && (original.installmentGroupId || original.recurrenceRuleId)) {
+      } else if (editScope === 'future' && (original.installmentGroupId || isActualRecurrence)) {
         const matched = [];
-        const updated = transactions.map((t) => {
-          const isMatch =
-            (original.installmentGroupId &&
-              t.installmentGroupId === original.installmentGroupId &&
-              (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
-            (original.recurrenceRuleId &&
-              t.recurrenceRuleId === original.recurrenceRuleId &&
-              t.date >= original.date);
-          if (!isMatch) return t;
-          const u = {
-            ...t,
-            description: t.installmentNumber
-              ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
-              : fd.get('description'),
-            amountCents: amount,
-            type: fd.get('type'),
-            categoryId: fd.get('categoryId'),
-            scope,
-            ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-          };
-          matched.push(u);
-          return u;
+        setTransactions((prev) => {
+          const updated = prev.map((t) => {
+            const isMatch =
+              (original.installmentGroupId &&
+                t.installmentGroupId === original.installmentGroupId &&
+                (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
+              (isActualRecurrence &&
+                t.recurrenceRuleId === original.recurrenceRuleId &&
+                t.date >= original.date);
+            if (!isMatch) return t;
+            const u = {
+              ...t,
+              description: t.installmentNumber
+                ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
+                : fd.get('description'),
+              amountCents: amount,
+              type: fd.get('type'),
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+            };
+            matched.push(u);
+            return u;
+          });
+          saveToLocalStorage('financas_transactions_v1', updated);
+          return updated;
         });
-        setTransactions(updated);
-        saveToLocalStorage('financas_transactions_v1', updated);
         syncBatchTransactions(matched);
       } else {
-        if (isRecurring && !original.recurrenceRuleId && !original.installmentGroupId) {
+        if (isRecurring && !isActualRecurrence && !original.installmentGroupId) {
           // Converter um lançamento avulso existente em recorrente
-          const recurringHorizon = parseInt(fd.get('recurringHorizon') || '12', 10);
+          const recurringHorizon = parseInt(fd.get('recurringHorizon') || String(formRecurringMonths) || '12', 10);
           const ruleId = `rec-${Date.now()}`;
+          const baseDueDate = fd.get('date');
+          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
+
           const updatedTx = {
             ...original,
             description: fd.get('description'),
             amountCents: amount,
             type: fd.get('type'),
             status: fd.get('status'),
-            date: fd.get('date'),
-            dueDate: fd.get('date'),
-            purchaseDate: modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || fd.get('date')) : original.purchaseDate || fd.get('date'),
+            date: baseDueDate,
+            dueDate: baseDueDate,
+            purchaseDate: basePurchaseDate,
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
             accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
             isRecurring: true,
             recurrenceRuleId: ruleId,
           };
 
-          const selectedCard = modalSourceType === 'CARD' ? cards.find((c) => c.id === (fd.get('cardId') || original.cardId)) : null;
-          const basePurchaseDate = updatedTx.purchaseDate || updatedTx.date;
           const newFutureTxs = [];
-
           for (let i = 1; i < recurringHorizon; i++) {
-            let recPurchaseDate = addMonthsToIso(basePurchaseDate, i);
-            let recDueDate = recPurchaseDate;
-            if (modalSourceType === 'CARD' && selectedCard) {
-              recDueDate = calculateCardDueDate(recPurchaseDate, selectedCard.closingDay, selectedCard.dueDay);
-            } else {
-              recDueDate = addMonthsToIso(fd.get('date'), i);
-            }
+            const recDueDate = addMonthsToIso(baseDueDate, i);
+            const recPurchaseDate = modalSourceType === 'CARD' ? addMonthsToIso(basePurchaseDate, i) : recDueDate;
 
             newFutureTxs.push({
               id: `tx-${Date.now()}-${i + 1}`,
@@ -1425,31 +1446,36 @@ export default function App() {
               status: 'COMPROMETIDO',
               date: recDueDate,
               dueDate: recDueDate,
-              purchaseDate: modalSourceType === 'CARD' ? recPurchaseDate : recDueDate,
+              purchaseDate: recPurchaseDate,
               categoryId: fd.get('categoryId'),
               scope,
               ownerId,
               accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
               isRecurring: true,
               recurrenceRuleId: ruleId,
             });
           }
 
-          const updated = [...transactions.map((t) => (t.id === original.id ? updatedTx : t)), ...newFutureTxs];
-          setTransactions(updated);
-          saveToLocalStorage('financas_transactions_v1', updated);
+          setTransactions((prev) => {
+            const updated = [...prev.map((t) => (t.id === original.id ? updatedTx : t)), ...newFutureTxs];
+            saveToLocalStorage('financas_transactions_v1', updated);
+            return updated;
+          });
           syncBatchTransactions([updatedTx, ...newFutureTxs]);
         } else {
+          const baseDueDate = fd.get('date');
+          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
+
           const updatedTx = {
             ...original,
             description: fd.get('description'),
             amountCents: amount,
             type: fd.get('type'),
             status: fd.get('status'),
-            date: fd.get('date'),
-            dueDate: fd.get('date'),
-            purchaseDate: modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || fd.get('date')) : original.purchaseDate || fd.get('date'),
+            date: baseDueDate,
+            dueDate: baseDueDate,
+            purchaseDate: basePurchaseDate,
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
@@ -1457,15 +1483,18 @@ export default function App() {
             cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
           };
 
-          const updated = transactions.map((t) => (t.id === original.id ? updatedTx : t));
-          setTransactions(updated);
-          saveToLocalStorage('financas_transactions_v1', updated);
+          setTransactions((prev) => {
+            const updated = prev.map((t) => (t.id === original.id ? updatedTx : t));
+            saveToLocalStorage('financas_transactions_v1', updated);
+            return updated;
+          });
           syncItem('transactions', updatedTx);
         }
       }
     } else {
       const installmentValueMode = fd.get('installmentValueMode') || 'TOTAL';
       if (installments > 1) {
+        const startNum = Math.min(installments, Math.max(1, parseInt(fd.get('startInstallment') || String(formStartInstallment) || '1', 10)));
         let installmentAmounts = [];
         if (installmentValueMode === 'INSTALLMENT') {
           // Repete o valor informado em todas as parcelas
@@ -1484,9 +1513,10 @@ export default function App() {
         const baseDueDate = fd.get('date');
         const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
 
-        for (let i = 1; i <= installments; i++) {
-          const installmentDueDate = addMonthsToIso(baseDueDate, i - 1);
-          const installmentPurchaseDate = addMonthsToIso(basePurchaseDate, i - 1);
+        for (let i = startNum; i <= installments; i++) {
+          const offset = i - startNum;
+          const installmentDueDate = addMonthsToIso(baseDueDate, offset);
+          const installmentPurchaseDate = addMonthsToIso(basePurchaseDate, offset);
 
           newTxs.push({
             id: `tx-${Date.now()}-${i}`,
@@ -1496,7 +1526,7 @@ export default function App() {
             status: fd.get('status') || 'COMPROMETIDO',
             date: installmentDueDate,
             dueDate: installmentDueDate,
-            purchaseDate: modalSourceType === 'CARD' ? (i === 1 ? basePurchaseDate : installmentPurchaseDate) : installmentDueDate,
+            purchaseDate: modalSourceType === 'CARD' ? installmentPurchaseDate : installmentDueDate,
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
@@ -1507,26 +1537,23 @@ export default function App() {
             installmentCount: installments,
           });
         }
-        const updated = [...transactions, ...newTxs];
-        setTransactions(updated);
-        saveToLocalStorage('financas_transactions_v1', updated);
+        setTransactions((prev) => {
+          const updated = [...prev, ...newTxs];
+          saveToLocalStorage('financas_transactions_v1', updated);
+          return updated;
+        });
         syncBatchTransactions(newTxs);
       } else if (isRecurring) {
         // Lançamento com repetição mensal (Recorrência) gerado para o horizonte escolhido (ex: 12, 24 ou 36 meses)
-        const recurringHorizon = parseInt(fd.get('recurringHorizon') || '12', 10);
+        const recurringHorizon = parseInt(fd.get('recurringHorizon') || String(formRecurringMonths) || '12', 10);
         const ruleId = `rec-${Date.now()}`;
+        const baseDueDate = fd.get('date');
         const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
-        const selectedCard = modalSourceType === 'CARD' ? cards.find((c) => c.id === fd.get('cardId')) : null;
         const newTxs = [];
 
         for (let i = 0; i < recurringHorizon; i++) {
-          let recPurchaseDate = addMonthsToIso(basePurchaseDate, i);
-          let recDueDate = recPurchaseDate;
-          if (modalSourceType === 'CARD' && selectedCard) {
-            recDueDate = calculateCardDueDate(recPurchaseDate, selectedCard.closingDay, selectedCard.dueDay);
-          } else {
-            recDueDate = addMonthsToIso(fd.get('date'), i);
-          }
+          const recDueDate = addMonthsToIso(baseDueDate, i);
+          const recPurchaseDate = modalSourceType === 'CARD' ? addMonthsToIso(basePurchaseDate, i) : recDueDate;
 
           newTxs.push({
             id: `tx-${Date.now()}-${i + 1}`,
@@ -1537,7 +1564,7 @@ export default function App() {
             status: i === 0 ? (fd.get('status') || 'COMPROMETIDO') : 'COMPROMETIDO',
             date: recDueDate,
             dueDate: recDueDate,
-            purchaseDate: modalSourceType === 'CARD' ? recPurchaseDate : recDueDate,
+            purchaseDate: recPurchaseDate,
             categoryId: fd.get('categoryId'),
             scope,
             ownerId,
@@ -1548,20 +1575,24 @@ export default function App() {
           });
         }
 
-        const updated = [...transactions, ...newTxs];
-        setTransactions(updated);
-        saveToLocalStorage('financas_transactions_v1', updated);
+        setTransactions((prev) => {
+          const updated = [...prev, ...newTxs];
+          saveToLocalStorage('financas_transactions_v1', updated);
+          return updated;
+        });
         syncBatchTransactions(newTxs);
       } else {
+        const baseDueDate = fd.get('date');
+        const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
         const newTx = {
           id: `tx-${Date.now()}`,
           description: fd.get('description'),
           amountCents: amount,
           type: fd.get('type'),
           status: fd.get('status'),
-          date: fd.get('date'),
-          dueDate: fd.get('date'),
-          purchaseDate: modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date'),
+          date: baseDueDate,
+          dueDate: baseDueDate,
+          purchaseDate: basePurchaseDate,
           categoryId: fd.get('categoryId'),
           scope,
           ownerId,
@@ -1570,9 +1601,11 @@ export default function App() {
           isRecurring: false,
           recurrenceRuleId: null,
         };
-        const updated = [...transactions, newTx];
-        setTransactions(updated);
-        saveToLocalStorage('financas_transactions_v1', updated);
+        setTransactions((prev) => {
+          const updated = [...prev, newTx];
+          saveToLocalStorage('financas_transactions_v1', updated);
+          return updated;
+        });
         syncItem('transactions', newTx);
       }
     }
@@ -1625,13 +1658,34 @@ export default function App() {
         }
         return t.id === tx.id;
       });
+    } else if (scope === 'past_only') {
+      toDelete = transactions.filter((t) => {
+        if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) {
+          return (t.installmentNumber || 0) < (tx.installmentNumber || 0);
+        }
+        if (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId) {
+          return t.date < tx.date;
+        }
+        return false;
+      });
+    } else if (scope === 'past_inclusive') {
+      toDelete = transactions.filter((t) => {
+        if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) {
+          return (t.installmentNumber || 0) <= (tx.installmentNumber || 0);
+        }
+        if (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId) {
+          return t.date <= tx.date;
+        }
+        return t.id === tx.id;
+      });
     }
 
     const deleteIds = new Set(toDelete.map((t) => t.id));
-    const updated = transactions.filter((t) => !deleteIds.has(t.id));
-
-    setTransactions(updated);
-    saveToLocalStorage('financas_transactions_v1', updated);
+    setTransactions((prev) => {
+      const updated = prev.filter((t) => !deleteIds.has(t.id));
+      saveToLocalStorage('financas_transactions_v1', updated);
+      return updated;
+    });
 
     if (toDelete.length === 1) {
       syncItem('transactions', toDelete[0], true);
@@ -6431,8 +6485,16 @@ export default function App() {
             )}
 
             {/* FORMULÁRIO: LANÇAMENTO COM ESCOPO FAMILIAR OU INDIVIDUAL */}
-            {modalState.type === 'transaction' && (
-              <form onSubmit={handleSaveTransaction} className="p-6 space-y-4 overflow-y-auto">
+            {modalState.type === 'transaction' && (() => {
+              const isActualRecurrence = Boolean(
+                modalState.data?.recurrenceRuleId &&
+                !String(modalState.data.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
+                !String(modalState.data.recurrenceRuleId).startsWith('INVOICE_PAY:')
+              );
+              const remainingInstallmentsCount = formInstallments - formStartInstallment + 1;
+
+              return (
+              <form key={modalState.data?.id || modalState.mode || 'new'} onSubmit={handleSaveTransaction} className="p-6 space-y-4 overflow-y-auto">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Descrição</label>
                   <input
@@ -6620,7 +6682,7 @@ export default function App() {
                 </div>
 
                 {/* Seletor de Escopo de Edição para parcelamentos e recorrências */}
-                {modalState.mode === 'edit' && (modalState.data?.installmentGroupId || modalState.data?.recurrenceRuleId) && (
+                {modalState.mode === 'edit' && (modalState.data?.installmentGroupId || isActualRecurrence) && (
                   <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
                     <label className="block text-xs font-bold text-amber-900">Aplicar alterações em:</label>
                     <div className="space-y-1.5 text-xs text-slate-700">
@@ -6668,21 +6730,58 @@ export default function App() {
 
                 {modalState.mode === 'create' && (
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="text-xs font-semibold text-slate-700">Parcelamento:</label>
-                      <div className="flex items-center space-x-1">
-                        <span className="text-xs text-slate-500">Número de Parcelas:</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="72"
-                          name="installments"
-                          value={formInstallments}
-                          onChange={(e) => setFormInstallments(Math.max(1, parseInt(e.target.value) || 1))}
-                          className="w-16 border border-slate-300 rounded px-2 py-1 text-xs text-center font-bold"
-                        />
+                      <div className="flex items-center space-x-3">
+                        <div className="flex items-center space-x-1">
+                          <span className="text-xs text-slate-500">Total de Parcelas:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="72"
+                            name="installments"
+                            value={formInstallments}
+                            onChange={(e) => {
+                              const val = Math.max(1, parseInt(e.target.value) || 1);
+                              setFormInstallments(val);
+                              if (formStartInstallment > val) setFormStartInstallment(val);
+                            }}
+                            className="w-14 border border-slate-300 rounded px-2 py-1 text-xs text-center font-bold"
+                          />
+                        </div>
+
+                        {formInstallments > 1 && (
+                          <div className="flex items-center space-x-1">
+                            <span className="text-xs text-slate-500">Começar na:</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max={formInstallments}
+                              name="startInstallment"
+                              value={formStartInstallment}
+                              onChange={(e) => {
+                                const val = Math.min(formInstallments, Math.max(1, parseInt(e.target.value) || 1));
+                                setFormStartInstallment(val);
+                              }}
+                              className="w-12 border border-blue-400 bg-blue-50 text-blue-900 rounded px-1.5 py-1 text-xs text-center font-bold"
+                            />
+                            <span className="text-xs text-slate-500">ª parcela</span>
+                          </div>
+                        )}
                       </div>
                     </div>
+
+                    {formInstallments > 1 && formStartInstallment > 1 && (
+                      <div className="p-2.5 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start space-x-2">
+                        <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="leading-snug">
+                          <strong className="block font-bold">Parcelamento em andamento ({formStartInstallment}ª a {formInstallments}ª)</strong>
+                          <span className="text-[11px] text-amber-800">
+                            Serão geradas apenas as <strong>{remainingInstallmentsCount} parcelas restantes</strong> (da {String(formStartInstallment).padStart(2, '0')}/{String(formInstallments).padStart(2, '0')} até {String(formInstallments).padStart(2, '0')}/{String(formInstallments).padStart(2, '0')}). As parcelas 1 a {formStartInstallment - 1} não serão criadas.
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     {formInstallments > 1 && (
                       <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-lg space-y-2.5">
@@ -6754,12 +6853,19 @@ export default function App() {
                               ({formInstallments}x)
                             </span>
                             <span className="text-slate-600">
-                              Total final:{' '}
+                              {formStartInstallment > 1 ? 'A lançar agora:' : 'Total final:'}{' '}
                               <strong className="text-slate-900 font-bold">
                                 {installmentValueMode === 'TOTAL'
-                                  ? formatMoney(Math.round((parseFloat(formAmount) || 0) * 100))
-                                  : formatMoney(Math.round((parseFloat(formAmount) || 0) * 100) * formInstallments)}
+                                  ? (formStartInstallment > 1
+                                      ? formatMoney(Math.floor(Math.round((parseFloat(formAmount) || 0) * 100) / formInstallments) * remainingInstallmentsCount)
+                                      : formatMoney(Math.round((parseFloat(formAmount) || 0) * 100)))
+                                  : formatMoney(Math.round((parseFloat(formAmount) || 0) * 100) * (formStartInstallment > 1 ? remainingInstallmentsCount : formInstallments))}
                               </strong>
+                              {formStartInstallment > 1 && (
+                                <span className="text-[10px] text-slate-400 block font-normal sm:inline sm:ml-1">
+                                  ({remainingInstallmentsCount} parcelas de {formInstallments})
+                                </span>
+                              )}
                             </span>
                           </div>
                         )}
@@ -6771,7 +6877,7 @@ export default function App() {
 
                 {/* Bloco de Recorrência (Repetir mensalmente) */}
                 {((modalState.mode === 'create' && formInstallments === 1) ||
-                  (modalState.mode === 'edit' && !modalState.data?.installmentGroupId && !modalState.data?.recurrenceRuleId)) && (
+                  (modalState.mode === 'edit' && !modalState.data?.installmentGroupId && !isActualRecurrence)) && (
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                     <div className="flex items-center space-x-2">
                       <input
@@ -6805,7 +6911,7 @@ export default function App() {
                         </div>
                         <p className="text-[11px] text-blue-700 leading-tight">
                           {modalSourceType === 'CARD'
-                            ? 'Gera as repetições mensais na fatura do cartão (ex: assinaturas, streamings, internet). O vencimento será calculado automaticamente conforme o fechamento/vencimento do cartão.'
+                            ? 'Gera as repetições mensais na fatura do cartão (ex: assinaturas, streamings, internet). Cada repetição será agendada para a fatura do mês seguinte.'
                             : 'Gera as repetições mensais para planejar contas fixas (ex: luz, água, aluguel). Você poderá editar ou excluir lançamentos individuais ou futuros em cascata a qualquer momento.'}
                         </p>
                       </div>
@@ -6847,7 +6953,8 @@ export default function App() {
                   </div>
                 </div>
               </form>
-            )}
+            );
+          })()}
           </div>
         </div>
       )}
@@ -6866,6 +6973,26 @@ export default function App() {
           return t.id === tx.id;
         }).length;
 
+        const pastOnlyCount = transactions.filter((t) => {
+          if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) {
+            return (t.installmentNumber || 0) < (tx.installmentNumber || 0);
+          }
+          if (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId) {
+            return t.date < tx.date;
+          }
+          return false;
+        }).length;
+
+        const pastInclusiveCount = transactions.filter((t) => {
+          if (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) {
+            return (t.installmentNumber || 0) <= (tx.installmentNumber || 0);
+          }
+          if (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId) {
+            return t.date <= tx.date;
+          }
+          return t.id === tx.id;
+        }).length;
+
         const allCount = transactions.filter((t) =>
           (tx.installmentGroupId && t.installmentGroupId === tx.installmentGroupId) ||
           (tx.recurrenceRuleId && t.recurrenceRuleId === tx.recurrenceRuleId)
@@ -6876,6 +7003,10 @@ export default function App() {
             ? allCount
             : deleteModalState.scope === 'future'
             ? futureCount
+            : deleteModalState.scope === 'past_only'
+            ? pastOnlyCount
+            : deleteModalState.scope === 'past_inclusive'
+            ? pastInclusiveCount
             : 1;
 
         return (
@@ -6990,6 +7121,70 @@ export default function App() {
                           </span>
                         </div>
                       </label>
+
+                      {pastOnlyCount > 0 && (
+                        <label
+                          className={`flex items-start space-x-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                            deleteModalState.scope === 'past_only'
+                              ? 'bg-white border-rose-500 shadow-xs ring-1 ring-rose-500'
+                              : 'bg-white/60 border-slate-200 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="deleteScopeRadio"
+                            value="past_only"
+                            checked={deleteModalState.scope === 'past_only'}
+                            onChange={() => setDeleteModalState((prev) => ({ ...prev, scope: 'past_only' }))}
+                            className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-slate-800">Apenas parcelas anteriores</span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded">
+                                {pastOnlyCount} {pastOnlyCount === 1 ? 'lançamento' : 'lançamentos'}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 block mt-0.5">
+                              {tx.installmentGroupId
+                                ? `Exclui as ${pastOnlyCount} parcela(s) anteriores (1 a ${Math.max(1, (tx.installmentNumber || 1) - 1)}). Mantém esta parcela ${tx.installmentNumber || ''} e as futuras ativas.`
+                                : 'Exclui as repetições passadas anteriores a esta data.'}
+                            </span>
+                          </div>
+                        </label>
+                      )}
+
+                      {pastInclusiveCount > 1 && (
+                        <label
+                          className={`flex items-start space-x-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                            deleteModalState.scope === 'past_inclusive'
+                              ? 'bg-white border-rose-500 shadow-xs ring-1 ring-rose-500'
+                              : 'bg-white/60 border-slate-200 hover:bg-white'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="deleteScopeRadio"
+                            value="past_inclusive"
+                            checked={deleteModalState.scope === 'past_inclusive'}
+                            onChange={() => setDeleteModalState((prev) => ({ ...prev, scope: 'past_inclusive' }))}
+                            className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-slate-800">Deste lançamento para trás</span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded">
+                                {pastInclusiveCount} {pastInclusiveCount === 1 ? 'lançamento' : 'lançamentos'}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 block mt-0.5">
+                              {tx.installmentGroupId
+                                ? `Exclui desde a parcela 1 até esta parcela (${tx.installmentNumber || ''}). Mantém apenas as parcelas seguintes.`
+                                : 'Exclui esta repetição e todas as anteriores.'}
+                            </span>
+                          </div>
+                        </label>
+                      )}
 
                       <label
                         className={`flex items-start space-x-2.5 p-2.5 rounded-lg border cursor-pointer transition ${

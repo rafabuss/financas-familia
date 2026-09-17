@@ -133,7 +133,7 @@ export const transactionToClient = (row) => {
     installmentCount: row.installment_count ? Number(row.installment_count) : null,
     isRecurring: Boolean(row.is_recurring ?? row.isRecurring),
     recurrenceRuleId:
-      isInvoicePayment || (typeof recRule === 'string' && recRule.startsWith('PURCHASE_DATE:'))
+      isInvoicePayment || (typeof recRule === 'string' && (recRule.startsWith('PURCHASE_DATE:') || recRule.startsWith('INVOICE_PAY:')))
         ? null
         : (row.recurrence_rule_id || row.recurrenceRuleId || null),
     isInvoicePayment,
@@ -483,6 +483,14 @@ export const healMigratedInvoiceTransactions = (txList, cards = []) => {
 
     // Parcelas futuras legítimas geradas com -p3, -p4, etc. e installmentNumber > 1 não devem ser retrocedidas
     if (String(t.id).includes('-p') && t.installmentNumber && t.installmentNumber > 1) {
+      if (!t.dueDate || !t.purchaseDate) {
+        return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
+      }
+      return t;
+    }
+
+    // Lançamentos recorrentes agendados para meses futuros nunca devem ser retrocedidos para um mês já pago
+    if (t.isRecurring || (t.recurrenceRuleId && !String(t.recurrenceRuleId).startsWith('PURCHASE_DATE:'))) {
       if (!t.dueDate || !t.purchaseDate) {
         return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
       }

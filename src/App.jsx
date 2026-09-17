@@ -7158,22 +7158,6 @@ export default function App() {
                       )
                       .reduce((acc, t) => acc + t.amountCents, 0);
 
-                    // Gastos habituais base do mês atual agrupados por categoria (sem parcelamentos futuros)
-                    const baseExpensesByCat = {};
-                    visibleTransactions
-                      .filter(
-                        (t) =>
-                          t.type === 'EXPENSE' &&
-                          t.status !== 'CANCELADO' &&
-                          !t.installmentGroupId &&
-                          t.date &&
-                          t.date.startsWith(currentYearMonth)
-                      )
-                      .forEach((t) => {
-                        const cid = t.categoryId || '__none__';
-                        baseExpensesByCat[cid] = (baseExpensesByCat[cid] || 0) + t.amountCents;
-                      });
-
                     for (let idx = 0; idx < projectionHorizon; idx++) {
                       const targetDate = new Date(startYear, startMonth + idx, 1);
                       const monthKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
@@ -7262,30 +7246,63 @@ export default function App() {
                           .reduce((a, t) => a + t.amountCents, 0);
 
                         // 3. Orçamento planejado base categoria a categoria:
-                        // Para categorias com envelope/teto (específico do mês ou padrão): Math.max(envelopeCap, schedCat).
-                        // Para categorias sem envelope: preserva a despesa habitual Math.max(baseCat, schedCat).
+                        // Respeita a hierarquia de categorias (Pais e Subcategorias) para evitar contagem dupla de limites.
+                        // Para categorias com teto de envelope (específico do mês ou padrão): Math.max(envelopeCap, scheduledExpenses).
+                        // Categorias sem envelope contribuem com o que estiver efetivamente agendado (evita projeções artificiais de gastos passados).
                         let finalBaseExpense = 0;
-                        categories
-                          .filter((c) => !c.archived && c.type === 'EXPENSE')
-                          .forEach((c) => {
-                            const specificEntry = monthlyEnvelopes.find(
-                              (m) => m.categoryId === c.id && m.monthKey === monthKey
-                            );
-                            const envelopeCap = specificEntry ? specificEntry.amountCents : (c.budgetLimitCents || 0);
-                            const schedCat = scheduledExpensesByCat[c.id] || 0;
-                            const baseCat = baseExpensesByCat[c.id] || 0;
 
-                            if (envelopeCap > 0) {
-                              finalBaseExpense += Math.max(envelopeCap, schedCat);
+                        const rootCategories = categories.filter((c) => !c.parentId && !c.archived && c.type === 'EXPENSE');
+                        const childCategories = categories.filter((c) => c.parentId && !c.archived && c.type === 'EXPENSE');
+                        const processedChildIds = new Set();
+
+                        rootCategories.forEach((parent) => {
+                          const children = childCategories.filter((ch) => ch.parentId === parent.id);
+                          const parentEnv = monthlyEnvelopes.find(
+                            (m) => m.categoryId === parent.id && m.monthKey === monthKey
+                          );
+                          const parentCap = parentEnv ? parentEnv.amountCents : (parent.budgetLimitCents || 0);
+                          const schedParent = scheduledExpensesByCat[parent.id] || 0;
+
+                          if (children.length > 0) {
+                            children.forEach((ch) => processedChildIds.add(ch.id));
+
+                            if (parentCap > 0) {
+                              // Categoria Pai com teto próprio representa o limite macro do grupo familiar
+                              const schedGroup = schedParent + children.reduce((acc, ch) => acc + (scheduledExpensesByCat[ch.id] || 0), 0);
+                              finalBaseExpense += Math.max(parentCap, schedGroup);
                             } else {
-                              finalBaseExpense += Math.max(baseCat, schedCat);
+                              // Categoria Pai sem teto próprio soma os tetos/agendamentos individuais de cada subcategoria
+                              children.forEach((ch) => {
+                                const chEnv = monthlyEnvelopes.find(
+                                  (m) => m.categoryId === ch.id && m.monthKey === monthKey
+                                );
+                                const chCap = chEnv ? chEnv.amountCents : (ch.budgetLimitCents || 0);
+                                const chSched = scheduledExpensesByCat[ch.id] || 0;
+                                finalBaseExpense += Math.max(chCap, chSched);
+                              });
+                              finalBaseExpense += schedParent;
                             }
-                          });
+                          } else {
+                            // Categoria independente (sem subcategorias)
+                            finalBaseExpense += Math.max(parentCap, schedParent);
+                          }
+                        });
+
+                        // Processa eventuais subcategorias órfãs
+                        childCategories.forEach((ch) => {
+                          if (!processedChildIds.has(ch.id)) {
+                            const chEnv = monthlyEnvelopes.find(
+                              (m) => m.categoryId === ch.id && m.monthKey === monthKey
+                            );
+                            const chCap = chEnv ? chEnv.amountCents : (ch.budgetLimitCents || 0);
+                            const chSched = scheduledExpensesByCat[ch.id] || 0;
+                            finalBaseExpense += Math.max(chCap, chSched);
+                          }
+                        });
 
                         // Lançamentos sem categoria definida
-                        const uncatBase = baseExpensesByCat['__none__'] || 0;
                         const uncatSched = scheduledExpensesByCat['__none__'] || 0;
-                        finalBaseExpense += Math.max(uncatBase, uncatSched);
+                        finalBaseExpense += uncatSched;
 
                         const finalBaseIncome = Math.max(baseIncomesCents, scheduledIncome);
 

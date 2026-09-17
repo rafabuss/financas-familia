@@ -497,6 +497,8 @@ export default function App() {
   const [chartFlowFilter, setChartFlowFilter] = useState('ALL'); // 'ALL' | 'EXPENSE' | 'INCOME'
   const [chartPeriodFilter, setChartPeriodFilter] = useState('DASHBOARD_MONTH'); // 'DASHBOARD_MONTH' | 'SPECIFIC_MONTH' | 'LAST_3_MONTHS' | 'LAST_6_MONTHS' | 'CURRENT_YEAR' | 'ALL'
   const [chartSpecificMonth, setChartSpecificMonth] = useState(dashboardMonth);
+  const [chartCategoryViewMode, setChartCategoryViewMode] = useState('hierarchical'); // 'hierarchical' | 'flat'
+  const [dashboardCategoryMode, setDashboardCategoryMode] = useState('parent'); // 'parent' | 'sub'
 
   // Controles da Importação de Faturas
   const [importSelectedCard, setImportSelectedCard] = useState('card-1');
@@ -872,7 +874,7 @@ export default function App() {
     return null; // 'ALL'
   }, [chartPeriodFilter, dashboardMonth, chartSpecificMonth]);
 
-  // Dados consolidados por categoria para os Gráficos (com visibilidade de Envelopes)
+  // Dados consolidados por categoria para os Gráficos (com visibilidade de Envelopes e Subcategorias)
   const categoryChartData = useMemo(() => {
     const expenseMap = {};
     const incomeMap = {};
@@ -892,38 +894,36 @@ export default function App() {
       }
     });
 
+    const getCatEnvelopeCap = (catId, cat) => {
+      if (activeChartMonth) {
+        const specificEntry = monthlyEnvelopes.find(
+          (m) => m.categoryId === catId && m.monthKey === activeChartMonth
+        );
+        if (specificEntry) return specificEntry.amountCents;
+        if (cat?.budgetLimitCents && cat.budgetLimitCents > 0) return cat.budgetLimitCents;
+      } else if (cat?.budgetLimitCents && cat.budgetLimitCents > 0) {
+        return cat.budgetLimitCents;
+      }
+      return 0;
+    };
+
     // Se estiver em mês único (ex: Outubro), garante que categorias com envelope planejado apareçam mesmo com R$ 0,00 de gastos
     if (activeChartMonth) {
       categories
         .filter((c) => !c.archived && c.type === 'EXPENSE')
         .forEach((cat) => {
-          const specificEntry = monthlyEnvelopes.find(
-            (m) => m.categoryId === cat.id && m.monthKey === activeChartMonth
-          );
-          let cap = 0;
-          if (specificEntry) cap = specificEntry.amountCents;
-          else if (cat.budgetLimitCents && cat.budgetLimitCents > 0) cap = cat.budgetLimitCents;
-
+          const cap = getCatEnvelopeCap(cat.id, cat);
           if (cap > 0 && expenseMap[cat.id] === undefined) {
             expenseMap[cat.id] = 0;
           }
         });
     }
 
+    // Lista plana de despesas (para modo lista)
     const expensesList = Object.entries(expenseMap)
       .map(([catId, amountCents]) => {
         const cat = categories.find((c) => c.id === catId);
-        let envelopeCap = 0;
-        if (activeChartMonth) {
-          const specificEntry = monthlyEnvelopes.find(
-            (m) => m.categoryId === catId && m.monthKey === activeChartMonth
-          );
-          if (specificEntry) envelopeCap = specificEntry.amountCents;
-          else if (cat?.budgetLimitCents && cat.budgetLimitCents > 0) envelopeCap = cat.budgetLimitCents;
-        } else if (cat?.budgetLimitCents && cat.budgetLimitCents > 0) {
-          envelopeCap = cat.budgetLimitCents;
-        }
-
+        const envelopeCap = getCatEnvelopeCap(catId, cat);
         const percentageOfTotal = totalExpensesCents > 0 ? ((amountCents / totalExpensesCents) * 100).toFixed(1) : '0.0';
         const envelopePercentage = envelopeCap > 0 ? ((amountCents / envelopeCap) * 100).toFixed(1) : null;
         const isOverBudget = envelopeCap > 0 && amountCents > envelopeCap;
@@ -945,6 +945,113 @@ export default function App() {
         return (b.envelopeCap || 0) - (a.envelopeCap || 0);
       });
 
+    // Construção da Visão Hierárquica (Categorias Pai agrupando suas Subcategorias)
+    const activeExpenseCats = categories.filter((c) => !c.archived && c.type === 'EXPENSE');
+    const parentCats = activeExpenseCats.filter((c) => !c.parentId || c.parentId === null);
+    const parentGroups = [];
+    const visitedChildIds = new Set();
+
+    parentCats.forEach((parent) => {
+      const childCategories = activeExpenseCats.filter((c) => c.parentId === parent.id);
+      const directSpent = expenseMap[parent.id] || 0;
+      const parentDirectCap = getCatEnvelopeCap(parent.id, parent);
+
+      const subList = childCategories.map((ch) => {
+        visitedChildIds.add(ch.id);
+        const chSpent = expenseMap[ch.id] || 0;
+        const chCap = getCatEnvelopeCap(ch.id, ch);
+        const chEnvPct = chCap > 0 ? ((chSpent / chCap) * 100).toFixed(1) : null;
+        return {
+          catId: ch.id,
+          name: ch.name,
+          color: ch.color || parent.color || '#ef4444',
+          amountCents: chSpent,
+          envelopeCap: chCap,
+          envelopePercentage: chEnvPct !== null ? parseFloat(chEnvPct) : null,
+          isOverBudget: chCap > 0 && chSpent > chCap,
+        };
+      });
+
+      const childrenSpentSum = subList.reduce((acc, s) => acc + s.amountCents, 0);
+      const totalGroupSpent = directSpent + childrenSpentSum;
+
+      const childrenCapSum = subList.reduce((acc, s) => acc + (s.envelopeCap || 0), 0);
+      const groupEnvelopeCap = parentDirectCap > 0 ? parentDirectCap : childrenCapSum;
+
+      // Se houver gastos diretos no pai E também subcategorias com gastos/tetos, adiciona entrada de gastos diretos
+      const finalSubList = [...subList];
+      if (directSpent > 0 && subList.length > 0) {
+        finalSubList.unshift({
+          catId: parent.id,
+          name: `${parent.name} (Lançamentos diretos)`,
+          color: parent.color,
+          amountCents: directSpent,
+          envelopeCap: 0,
+          envelopePercentage: null,
+          isOverBudget: false,
+          isDirect: true,
+        });
+      }
+
+      // Adiciona porcentagens relativas ao grupo Pai e ao Total Geral
+      const enrichedSubList = finalSubList
+        .map((sub) => ({
+          ...sub,
+          percentageOfParent: totalGroupSpent > 0 ? parseFloat(((sub.amountCents / totalGroupSpent) * 100).toFixed(1)) : 0,
+          percentageOfTotal: totalExpensesCents > 0 ? parseFloat(((sub.amountCents / totalExpensesCents) * 100).toFixed(1)) : 0,
+        }))
+        .filter((sub) => sub.amountCents > 0 || (sub.envelopeCap && sub.envelopeCap > 0))
+        .sort((a, b) => {
+          if (b.amountCents !== a.amountCents) return b.amountCents - a.amountCents;
+          return (b.envelopeCap || 0) - (a.envelopeCap || 0);
+        });
+
+      // Inclui o grupo se houver gasto ou se houver envelope planejado
+      if (totalGroupSpent > 0 || groupEnvelopeCap > 0) {
+        const groupEnvPct = groupEnvelopeCap > 0 ? ((totalGroupSpent / groupEnvelopeCap) * 100).toFixed(1) : null;
+        parentGroups.push({
+          catId: parent.id,
+          name: parent.name,
+          color: parent.color || '#ef4444',
+          totalAmountCents: totalGroupSpent,
+          directAmountCents: directSpent,
+          percentageOfTotal: totalExpensesCents > 0 ? parseFloat(((totalGroupSpent / totalExpensesCents) * 100).toFixed(1)) : 0,
+          envelopeCap: groupEnvelopeCap,
+          envelopePercentage: groupEnvPct !== null ? parseFloat(groupEnvPct) : null,
+          isOverBudget: groupEnvelopeCap > 0 && totalGroupSpent > groupEnvelopeCap,
+          subcategories: enrichedSubList,
+          hasSubcategories: enrichedSubList.length > 0,
+        });
+      }
+    });
+
+    // Subcategorias órfãs (caso tenham gasto mas o pai não tenha sido encontrado)
+    activeExpenseCats
+      .filter((c) => c.parentId && !visitedChildIds.has(c.id) && ((expenseMap[c.id] || 0) > 0 || getCatEnvelopeCap(c.id, c) > 0))
+      .forEach((orphan) => {
+        const orphanSpent = expenseMap[orphan.id] || 0;
+        const orphanCap = getCatEnvelopeCap(orphan.id, orphan);
+        const orphanEnvPct = orphanCap > 0 ? ((orphanSpent / orphanCap) * 100).toFixed(1) : null;
+        parentGroups.push({
+          catId: orphan.id,
+          name: orphan.name,
+          color: orphan.color || '#ef4444',
+          totalAmountCents: orphanSpent,
+          directAmountCents: orphanSpent,
+          percentageOfTotal: totalExpensesCents > 0 ? parseFloat(((orphanSpent / totalExpensesCents) * 100).toFixed(1)) : 0,
+          envelopeCap: orphanCap,
+          envelopePercentage: orphanEnvPct !== null ? parseFloat(orphanEnvPct) : null,
+          isOverBudget: orphanCap > 0 && orphanSpent > orphanCap,
+          subcategories: [],
+          hasSubcategories: false,
+        });
+      });
+
+    parentGroups.sort((a, b) => {
+      if (b.totalAmountCents !== a.totalAmountCents) return b.totalAmountCents - a.totalAmountCents;
+      return (b.envelopeCap || 0) - (a.envelopeCap || 0);
+    });
+
     const incomesList = Object.entries(incomeMap)
       .map(([catId, amountCents]) => {
         const cat = categories.find((c) => c.id === catId);
@@ -962,6 +1069,7 @@ export default function App() {
 
     return {
       expensesList,
+      hierarchicalExpenses: parentGroups,
       incomesList,
       totalExpensesCents,
       totalIncomesCents,
@@ -1178,7 +1286,11 @@ export default function App() {
 
           if (allocatedCents <= 0) return null;
 
-          const spentCents = spentByCat[cat.id] || 0;
+          // Se for categoria Pai, o gasto consolidado inclui os lançamentos diretos e os de todas as suas subcategorias
+          const childIds = !cat.parentId
+            ? categories.filter((c) => c.parentId === cat.id).map((c) => c.id)
+            : [];
+          const spentCents = (spentByCat[cat.id] || 0) + childIds.reduce((acc, cid) => acc + (spentByCat[cid] || 0), 0);
           const remainingCents = Math.max(0, allocatedCents - spentCents);
           const overspentCents = Math.max(0, spentCents - allocatedCents);
           const percentage = allocatedCents > 0 ? (spentCents / allocatedCents) * 100 : 0;
@@ -1211,10 +1323,17 @@ export default function App() {
         .filter(Boolean)
         .sort((a, b) => b.allocatedCents - a.allocatedCents);
 
-      const totalAllocatedCents = envelopeList.reduce((acc, e) => acc + e.allocatedCents, 0);
-      const totalSpentCents = envelopeList.reduce((acc, e) => acc + e.spentCents, 0);
-      const totalResidualCommittedCents = envelopeList.reduce((acc, e) => acc + e.remainingCents, 0);
-      const totalOverspentCents = envelopeList.reduce((acc, e) => acc + e.overspentCents, 0);
+      // Apenas envelopes de nível raiz entram na soma global do orçamento familiar para não duplicar valores
+      const rootEnvelopes = envelopeList.filter((e) => {
+        if (!e.category.parentId) return true;
+        const parentHasEnvelope = envelopeList.some((p) => p.category.id === e.category.parentId);
+        return !parentHasEnvelope;
+      });
+
+      const totalAllocatedCents = rootEnvelopes.reduce((acc, e) => acc + e.allocatedCents, 0);
+      const totalSpentCents = rootEnvelopes.reduce((acc, e) => acc + e.spentCents, 0);
+      const totalResidualCommittedCents = rootEnvelopes.reduce((acc, e) => acc + e.remainingCents, 0);
+      const totalOverspentCents = rootEnvelopes.reduce((acc, e) => acc + e.overspentCents, 0);
 
       return {
         targetMonth,
@@ -1328,6 +1447,63 @@ export default function App() {
       totalExpensesCents += tx.amountCents;
     });
 
+    const activeExpenseCats = categories.filter((c) => !c.archived && c.type === 'EXPENSE');
+    const parentCats = activeExpenseCats.filter((c) => !c.parentId || c.parentId === null);
+    const parentGroups = [];
+    const visitedChildIds = new Set();
+
+    parentCats.forEach((parent) => {
+      const childCategories = activeExpenseCats.filter((c) => c.parentId === parent.id);
+      const directSpent = expenseMap[parent.id] || 0;
+
+      const subList = childCategories
+        .map((ch) => {
+          visitedChildIds.add(ch.id);
+          const chSpent = expenseMap[ch.id] || 0;
+          return {
+            catId: ch.id,
+            name: ch.name,
+            color: ch.color || parent.color || '#ef4444',
+            amountCents: chSpent,
+          };
+        })
+        .filter((ch) => ch.amountCents > 0)
+        .sort((a, b) => b.amountCents - a.amountCents);
+
+      const childrenSpentSum = subList.reduce((acc, s) => acc + s.amountCents, 0);
+      const totalGroupSpent = directSpent + childrenSpentSum;
+
+      if (totalGroupSpent > 0) {
+        const percentage = totalExpensesCents > 0 ? ((totalGroupSpent / totalExpensesCents) * 100).toFixed(1) : 0;
+        parentGroups.push({
+          catId: parent.id,
+          name: parent.name,
+          color: parent.color || '#ef4444',
+          amountCents: totalGroupSpent,
+          percentage: parseFloat(percentage),
+          subcategories: subList,
+        });
+      }
+    });
+
+    // Subcategorias órfãs com gastos
+    activeExpenseCats
+      .filter((c) => c.parentId && !visitedChildIds.has(c.id) && (expenseMap[c.id] || 0) > 0)
+      .forEach((orphan) => {
+        const orphanSpent = expenseMap[orphan.id] || 0;
+        const percentage = totalExpensesCents > 0 ? ((orphanSpent / totalExpensesCents) * 100).toFixed(1) : 0;
+        parentGroups.push({
+          catId: orphan.id,
+          name: orphan.name,
+          color: orphan.color || '#ef4444',
+          amountCents: orphanSpent,
+          percentage: parseFloat(percentage),
+          subcategories: [],
+        });
+      });
+
+    parentGroups.sort((a, b) => b.amountCents - a.amountCents);
+
     const expensesList = Object.entries(expenseMap)
       .map(([catId, amountCents]) => {
         const cat = categories.find((c) => c.id === catId);
@@ -1344,6 +1520,7 @@ export default function App() {
 
     return {
       expensesList,
+      parentGroups,
       totalExpensesCents,
     };
   }, [visibleTransactions, dashboardMonth, categories, getTxDueDate]);
@@ -3285,25 +3462,77 @@ export default function App() {
     isTxOverdue,
   ]);
 
+  // Função auxiliar para obter apenas os itens da fatura que atendem aos filtros ativos (categoria, busca, etc.)
+  const getMatchingInvoiceItems = useCallback(
+    (tx, activeCategory = filterCategory, activeSearch = searchTerm) => {
+      if (!tx.isInvoiceMaster || !Array.isArray(tx.items)) return [];
+      const hasCatFilter = activeCategory !== 'ALL';
+      const hasSearch = Boolean(activeSearch && activeSearch.trim());
+
+      if (!hasCatFilter && !hasSearch) {
+        return tx.items;
+      }
+
+      const matchingCatIds = hasCatFilter
+        ? new Set([activeCategory, ...categories.filter((c) => c.parentId === activeCategory).map((c) => c.id)])
+        : null;
+      const term = hasSearch ? activeSearch.trim().toLowerCase() : '';
+
+      return tx.items.filter((item) => {
+        if (matchingCatIds && !matchingCatIds.has(item.categoryId)) {
+          return false;
+        }
+        if (term) {
+          const desc = (item.description || '').toLowerCase();
+          const catName = categories.find((c) => c.id === item.categoryId)?.name?.toLowerCase() || '';
+          const purchaseBR = item.purchaseDate ? formatDateBR(item.purchaseDate).toLowerCase() : '';
+          const matchesItem = desc.includes(term) || catName.includes(term) || purchaseBR.includes(term);
+          const matchesMaster = (tx.description || '').toLowerCase().includes(term) || (tx.card?.name || '').toLowerCase().includes(term);
+          if (!matchesItem && !matchesMaster) return false;
+        }
+        return true;
+      });
+    },
+    [filterCategory, searchTerm, categories]
+  );
+
   // Totais consolidados dos lançamentos filtrados para o mini-resumo
   const filteredTotals = useMemo(() => {
     let incomeCents = 0;
     let expenseCents = 0;
+    let totalCount = 0;
+    const isCategoryOrSearchActive = filterCategory !== 'ALL' || Boolean(searchTerm && searchTerm.trim());
+
     filteredTransactions.forEach((tx) => {
       if (tx.status === 'CANCELADO') return;
-      if (tx.type === 'INCOME') {
-        incomeCents += tx.amountCents;
-      } else if (tx.type === 'EXPENSE') {
-        expenseCents += tx.amountCents;
+
+      if (tx.isInvoiceMaster) {
+        if (isCategoryOrSearchActive) {
+          const matching = getMatchingInvoiceItems(tx);
+          const matchingSum = matching.reduce((acc, it) => acc + (it.amountCents || 0), 0);
+          expenseCents += matchingSum;
+          totalCount += matching.length;
+        } else {
+          expenseCents += tx.amountCents;
+          totalCount += 1;
+        }
+      } else {
+        if (tx.type === 'INCOME') {
+          incomeCents += tx.amountCents;
+        } else if (tx.type === 'EXPENSE') {
+          expenseCents += tx.amountCents;
+        }
+        totalCount += 1;
       }
     });
+
     return {
       incomeCents,
       expenseCents,
       netCents: incomeCents - expenseCents,
-      count: filteredTransactions.length,
+      count: totalCount,
     };
-  }, [filteredTransactions]);
+  }, [filteredTransactions, filterCategory, searchTerm, getMatchingInvoiceItems]);
 
   // Alternador de ordenação de colunas da tabela de lançamentos
   const handleSortTransactions = (field) => {
@@ -3886,24 +4115,44 @@ export default function App() {
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">Onde o orçamento deste mês está concentrado</p>
                     </div>
-                    <button onClick={() => setActiveTab('charts')} className="text-xs font-semibold text-blue-600 hover:underline">
-                      Ver Análise
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setDashboardCategoryMode('parent')}
+                          className={`px-2 py-0.5 rounded-md transition ${dashboardCategoryMode === 'parent' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-800'}`}
+                          title="Agrupar por Categoria Pai (ex: Alimentação)"
+                        >
+                          Grupos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDashboardCategoryMode('sub')}
+                          className={`px-2 py-0.5 rounded-md transition ${dashboardCategoryMode === 'sub' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-800'}`}
+                          title="Listar subcategorias individuais (ex: Supermercado, Restaurante)"
+                        >
+                          Subcategorias
+                        </button>
+                      </div>
+                      <button onClick={() => setActiveTab('charts')} className="text-xs font-semibold text-blue-600 hover:underline">
+                        Ver Análise
+                      </button>
+                    </div>
                   </div>
 
-                  {dashboardCategoryChartData.expensesList.length === 0 ? (
+                  {(dashboardCategoryMode === 'parent' ? dashboardCategoryChartData.parentGroups : dashboardCategoryChartData.expensesList).length === 0 ? (
                     <p className="text-xs text-slate-400 py-6 text-center">Nenhuma despesa para exibir no mês de {formatMonthLabel(dashboardMonth)}.</p>
                   ) : (
                     <div className="space-y-3">
-                      {dashboardCategoryChartData.expensesList.slice(0, 4).map((item) => (
+                      {(dashboardCategoryMode === 'parent' ? dashboardCategoryChartData.parentGroups : dashboardCategoryChartData.expensesList).slice(0, 4).map((item) => (
                         <div
                           key={item.catId}
                           onClick={() => handleDrillDownToTransactions(item.catId, dashboardMonth)}
-                          className="group p-1.5 -mx-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer space-y-1"
+                          className="group p-2 -mx-1.5 rounded-xl hover:bg-slate-50 transition cursor-pointer space-y-1.5 border border-transparent hover:border-slate-200"
                           title={`Clique para ver os lançamentos de "${item.name}" em ${formatMonthLabel(dashboardMonth)}`}
                         >
                           <div className="flex justify-between text-xs font-semibold">
-                            <span className="text-slate-700 group-hover:text-blue-600 flex items-center space-x-1.5 transition-colors">
+                            <span className="text-slate-800 group-hover:text-blue-600 flex items-center space-x-1.5 transition-colors">
                               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                               <span>{item.name}</span>
                               <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
@@ -3913,6 +4162,26 @@ export default function App() {
                           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                             <div className="h-full rounded-full transition-all duration-300" style={{ width: `${item.percentage}%`, backgroundColor: item.color }} />
                           </div>
+                          {dashboardCategoryMode === 'parent' && item.subcategories && item.subcategories.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {item.subcategories.map((sub) => (
+                                <button
+                                  key={sub.catId}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDrillDownToTransactions(sub.catId, dashboardMonth);
+                                  }}
+                                  className="text-[10px] bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 text-slate-600 px-2 py-0.5 rounded-md transition flex items-center gap-1 border border-slate-200/60"
+                                  title={`Filtrar apenas lançamentos de "${sub.name}" em ${formatMonthLabel(dashboardMonth)}`}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
+                                  <span>{sub.name}:</span>
+                                  <span className="font-bold text-slate-800">{formatMoney(sub.amountCents)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -4845,24 +5114,11 @@ export default function App() {
                         if (tx.isInvoiceMaster) {
                           const isOverdue = tx.status === 'EM ATRASO';
                           const isExpanded = Boolean(expandedInvoices[tx.id]) || (filterCategory !== 'ALL') || Boolean(searchTerm.trim());
+                          const isCategoryOrSearchActive = filterCategory !== 'ALL' || Boolean(searchTerm && searchTerm.trim());
 
                           // Filtra os itens exibidos dentro da fatura respeitando os filtros ativos e subcategorias
-                          const itemsToDisplay = tx.items.filter((item) => {
-                            if (filterCategory !== 'ALL') {
-                              const matchingCatIds = new Set([filterCategory, ...categories.filter((c) => c.parentId === filterCategory).map((c) => c.id)]);
-                              if (!matchingCatIds.has(item.categoryId)) return false;
-                            }
-                            if (searchTerm.trim()) {
-                              const term = searchTerm.toLowerCase();
-                              const desc = (item.description || '').toLowerCase();
-                              const catName = categories.find((c) => c.id === item.categoryId)?.name?.toLowerCase() || '';
-                              const purchaseBR = item.purchaseDate ? formatDateBR(item.purchaseDate).toLowerCase() : '';
-                              const matchesItem = desc.includes(term) || catName.includes(term) || purchaseBR.includes(term);
-                              const matchesMaster = (tx.description || '').toLowerCase().includes(term) || (tx.card?.name || '').toLowerCase().includes(term);
-                              return matchesItem || matchesMaster;
-                            }
-                            return true;
-                          });
+                          const itemsToDisplay = getMatchingInvoiceItems(tx);
+                          const matchingAmountCents = itemsToDisplay.reduce((acc, it) => acc + (it.amountCents || 0), 0);
 
                           return (
                             <React.Fragment key={tx.id}>
@@ -4924,7 +5180,10 @@ export default function App() {
                                       className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-800 font-semibold px-2 py-0.5 rounded-full transition"
                                       title="Clique para expandir/recolher"
                                     >
-                                      {tx.items.length} {tx.items.length === 1 ? 'item' : 'itens'} {isExpanded ? '▲' : '▼'}
+                                      {isCategoryOrSearchActive
+                                        ? `${itemsToDisplay.length} de ${tx.items.length} ${tx.items.length === 1 ? 'item' : 'itens'}`
+                                        : `${tx.items.length} ${tx.items.length === 1 ? 'item' : 'itens'}`}{' '}
+                                      {isExpanded ? '▲' : '▼'}
                                     </button>
 
                                     {tx.isPaid && (
@@ -4946,7 +5205,7 @@ export default function App() {
                                 {/* 3. Categoria */}
                                 <td className="py-3 px-4 text-slate-600">
                                   <span className="inline-flex items-center space-x-1 text-xs font-semibold text-purple-700 bg-purple-100/70 border border-purple-200 px-2 py-0.5 rounded-md">
-                                    <CreditCard className="w-3 h-3 text-purple-600" />
+                                    <CreditCard className="w-3.5 h-3.5 text-purple-600" />
                                     <span>Fatura Consolidada</span>
                                   </span>
                                 </td>
@@ -4986,8 +5245,21 @@ export default function App() {
                                 </td>
 
                                 {/* 6. Valor */}
-                                <td className="py-3 px-4 text-right font-bold whitespace-nowrap text-purple-900 text-sm sm:text-base">
-                                  - {formatMoney(tx.amountCents)}
+                                <td className="py-3 px-4 text-right whitespace-nowrap">
+                                  {isCategoryOrSearchActive ? (
+                                    <div>
+                                      <div className="font-bold text-purple-900 text-sm sm:text-base">
+                                        - {formatMoney(matchingAmountCents)}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 font-normal">
+                                        de {formatMoney(tx.amountCents)} total da fatura
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="font-bold text-purple-900 text-sm sm:text-base">
+                                      - {formatMoney(tx.amountCents)}
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* 7. Ações */}
@@ -5462,10 +5734,184 @@ export default function App() {
                       </h3>
                       <p className="text-xs text-slate-400">Total considerado: {formatMoney(categoryChartData.totalExpensesCents)}</p>
                     </div>
+                    <div className="flex bg-slate-100 p-0.5 rounded-lg text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setChartCategoryViewMode('hierarchical')}
+                        className={`px-2.5 py-1 rounded-md transition ${chartCategoryViewMode === 'hierarchical' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-800'}`}
+                        title="Agrupar categorias pai e subcategorias"
+                      >
+                        📁 Grupos & Sub
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChartCategoryViewMode('flat')}
+                        className={`px-2.5 py-1 rounded-md transition ${chartCategoryViewMode === 'flat' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-800'}`}
+                        title="Lista de todas as categorias sem agrupamento"
+                      >
+                        🏷️ Lista Plana
+                      </button>
+                    </div>
                   </div>
 
-                  {categoryChartData.expensesList.length === 0 ? (
+                  {(chartCategoryViewMode === 'hierarchical' ? categoryChartData.hierarchicalExpenses : categoryChartData.expensesList).length === 0 ? (
                     <p className="text-xs text-slate-400 py-8 text-center">Nenhuma despesa para exibir nesta visão.</p>
+                  ) : chartCategoryViewMode === 'hierarchical' ? (
+                    <div className="space-y-3 pt-2">
+                      {categoryChartData.hierarchicalExpenses.map((group) => {
+                        const hasEnvelope = group.envelopeCap > 0;
+                        return (
+                          <div
+                            key={group.catId}
+                            className="p-3 rounded-xl border border-slate-200/70 bg-white hover:border-slate-300 transition-all space-y-2.5 shadow-2xs"
+                          >
+                            {/* Cabeçalho da Categoria Pai */}
+                            <div
+                              onClick={() => handleDrillDownToTransactions(group.catId, activeChartMonth || getChartDateRange())}
+                              className="group/parent cursor-pointer flex justify-between items-start text-xs gap-2"
+                              title={`Clique para filtrar todos os lançamentos de "${group.name}" e suas subcategorias`}
+                            >
+                              <div className="flex items-center space-x-2">
+                                <span className="w-3.5 h-3.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: group.color }} />
+                                <div>
+                                  <div className="font-bold text-slate-900 group-hover/parent:text-blue-600 transition-colors flex items-center gap-1.5 text-sm">
+                                    <span>{group.name}</span>
+                                    <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover/parent:opacity-100 text-blue-500 transition-opacity" />
+                                    {group.hasSubcategories && (
+                                      <span className="text-[10px] font-normal bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-full">
+                                        {group.subcategories.length} sub
+                                      </span>
+                                    )}
+                                  </div>
+                                  {hasEnvelope && (
+                                    <span className="text-[11px] text-slate-400 block font-normal">
+                                      ✉️ Teto do grupo: {formatMoney(group.envelopeCap)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <div className="text-slate-700">
+                                  <strong className="text-slate-900 font-bold text-sm">{formatMoney(group.totalAmountCents)}</strong>
+                                  <span className="text-slate-400 text-[11px] ml-1">({group.percentageOfTotal}% do total)</span>
+                                </div>
+                                {hasEnvelope && (
+                                  <div className="mt-0.5">
+                                    {group.isOverBudget ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                        ⚠️ +{formatMoney(group.totalAmountCents - group.envelopeCap)} ({group.envelopePercentage}%)
+                                      </span>
+                                    ) : group.totalAmountCents === 0 ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                        Envelope intacto (100% livre)
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                                        {group.envelopePercentage}% consumido
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Barra de Progresso Principal do Grupo */}
+                            {hasEnvelope ? (
+                              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    group.isOverBudget
+                                      ? 'bg-rose-500'
+                                      : (group.envelopePercentage || 0) >= 80
+                                      ? 'bg-amber-500'
+                                      : 'bg-blue-600'
+                                  }`}
+                                  style={{ width: `${Math.min(100, group.envelopePercentage || 0)}%` }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-300"
+                                  style={{ width: `${group.percentageOfTotal}%`, backgroundColor: group.color }}
+                                />
+                              </div>
+                            )}
+
+                            {/* Subcategorias Detalhadas */}
+                            {group.hasSubcategories && (
+                              <div className="pt-2 mt-1 border-t border-slate-100 space-y-1.5 pl-3 border-l-2 border-slate-200/80">
+                                {group.subcategories.map((sub) => {
+                                  const hasSubEnv = sub.envelopeCap > 0;
+                                  return (
+                                    <div
+                                      key={sub.catId + (sub.isDirect ? '-direct' : '')}
+                                      onClick={() => handleDrillDownToTransactions(sub.catId, activeChartMonth || getChartDateRange())}
+                                      className="group/sub p-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer space-y-1"
+                                      title={`Clique para filtrar lançamentos específicos de "${sub.name}"`}
+                                    >
+                                      <div className="flex justify-between items-center text-xs">
+                                        <div className="flex items-center space-x-1.5">
+                                          <span className="text-slate-300 font-mono text-[11px]">↳</span>
+                                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
+                                          <span className="font-semibold text-slate-700 group-hover/sub:text-blue-600 transition-colors flex items-center gap-1">
+                                            <span>{sub.name}</span>
+                                            <ArrowRight className="w-2.5 h-2.5 opacity-0 group-hover/sub:opacity-100 text-blue-500 transition-opacity" />
+                                          </span>
+                                          {hasSubEnv && (
+                                            <span className="text-[10px] text-slate-400 font-normal">
+                                              (Teto: {formatMoney(sub.envelopeCap)})
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="text-right flex items-center space-x-2">
+                                          <span className="font-bold text-slate-800">{formatMoney(sub.amountCents)}</span>
+                                          <span className="text-[10px] text-slate-400">
+                                            {sub.percentageOfParent}% de {group.name}
+                                          </span>
+                                          {hasSubEnv && (
+                                            sub.isOverBudget ? (
+                                              <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-rose-100 text-rose-700">
+                                                +{formatMoney(sub.amountCents - sub.envelopeCap)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-[9px] font-medium px-1 py-0.2 rounded bg-slate-100 text-slate-600">
+                                                {sub.envelopePercentage}%
+                                              </span>
+                                            )
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Micro barra da subcategoria */}
+                                      {hasSubEnv ? (
+                                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                          <div
+                                            className={`h-full rounded-full transition-all duration-300 ${
+                                              sub.isOverBudget ? 'bg-rose-500' : (sub.envelopePercentage || 0) >= 80 ? 'bg-amber-500' : 'bg-blue-500'
+                                            }`}
+                                            style={{ width: `${Math.min(100, sub.envelopePercentage || 0)}%` }}
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                                          <div
+                                            className="h-full rounded-full transition-all duration-300"
+                                            style={{ width: `${sub.percentageOfParent}%`, backgroundColor: sub.color }}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <div className="space-y-3 pt-2">
                       {categoryChartData.expensesList.map((item) => {
@@ -5518,7 +5964,7 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Barra de Progresso Inteligente: se tem envelope, exibe o percentual consumido do envelope */}
+                            {/* Barra de Progresso Inteligente */}
                             {hasEnvelope ? (
                               <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                                 <div

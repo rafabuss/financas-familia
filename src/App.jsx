@@ -5,6 +5,7 @@ import {
   Tags,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowRight,
   RefreshCw,
   Calendar,
   BarChart3,
@@ -202,6 +203,21 @@ export default function App() {
     isOpen: false,
     envelope: null,
     scope: 'this_only',
+  });
+
+  // Modal de validação e conflito de teto de envelopes (Pai vs Subcategoria)
+  const [categoryConflictModal, setCategoryConflictModal] = useState({
+    isOpen: false,
+    childName: '',
+    parentName: '',
+    parentId: '',
+    childId: '',
+    childAttemptedCents: 0,
+    currentSiblingsSum: 0,
+    parentCurrentCents: 0,
+    suggestedParentCents: 0,
+    maxAvailableChildCents: 0,
+    pendingCatData: null,
   });
 
   // Controle de Nuvem e Sessão de Usuário
@@ -820,7 +836,43 @@ export default function App() {
     return list;
   }, [visibleTransactions, hypotheticalTransactions, chartIncludeScenarios, chartPeriodFilter, chartSpecificMonth, dashboardMonth, currentMemberId, getTxDueDate]);
 
-  // Dados consolidados por categoria para os Gráficos
+  // Mês ativo de referência para gráficos quando em modo de mês único
+  const activeChartMonth = useMemo(() => {
+    if (chartPeriodFilter === 'DASHBOARD_MONTH') return dashboardMonth;
+    if (chartPeriodFilter === 'SPECIFIC_MONTH') return chartSpecificMonth;
+    return null;
+  }, [chartPeriodFilter, dashboardMonth, chartSpecificMonth]);
+
+  // Intervalo de datas calculado para o período do gráfico
+  const getChartDateRange = useCallback(() => {
+    const today = new Date();
+    const currentYear = String(today.getFullYear());
+
+    if (chartPeriodFilter === 'DASHBOARD_MONTH') {
+      return dashboardMonth;
+    }
+    if (chartPeriodFilter === 'SPECIFIC_MONTH') {
+      return chartSpecificMonth;
+    }
+    if (chartPeriodFilter === 'LAST_3_MONTHS') {
+      const d3 = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+      const last3Start = `${d3.getFullYear()}-${String(d3.getMonth() + 1).padStart(2, '0')}-01`;
+      const todayStr = today.toISOString().slice(0, 10);
+      return { startDate: last3Start, endDate: todayStr };
+    }
+    if (chartPeriodFilter === 'LAST_6_MONTHS') {
+      const d6 = new Date(today.getFullYear(), today.getMonth() - 5, 1);
+      const last6Start = `${d6.getFullYear()}-${String(d6.getMonth() + 1).padStart(2, '0')}-01`;
+      const todayStr = today.toISOString().slice(0, 10);
+      return { startDate: last6Start, endDate: todayStr };
+    }
+    if (chartPeriodFilter === 'CURRENT_YEAR') {
+      return { startDate: `${currentYear}-01-01`, endDate: `${currentYear}-12-31` };
+    }
+    return null; // 'ALL'
+  }, [chartPeriodFilter, dashboardMonth, chartSpecificMonth]);
+
+  // Dados consolidados por categoria para os Gráficos (com visibilidade de Envelopes)
   const categoryChartData = useMemo(() => {
     const expenseMap = {};
     const incomeMap = {};
@@ -840,19 +892,58 @@ export default function App() {
       }
     });
 
+    // Se estiver em mês único (ex: Outubro), garante que categorias com envelope planejado apareçam mesmo com R$ 0,00 de gastos
+    if (activeChartMonth) {
+      categories
+        .filter((c) => !c.archived && c.type === 'EXPENSE')
+        .forEach((cat) => {
+          const specificEntry = monthlyEnvelopes.find(
+            (m) => m.categoryId === cat.id && m.monthKey === activeChartMonth
+          );
+          let cap = 0;
+          if (specificEntry) cap = specificEntry.amountCents;
+          else if (cat.budgetLimitCents && cat.budgetLimitCents > 0) cap = cat.budgetLimitCents;
+
+          if (cap > 0 && expenseMap[cat.id] === undefined) {
+            expenseMap[cat.id] = 0;
+          }
+        });
+    }
+
     const expensesList = Object.entries(expenseMap)
       .map(([catId, amountCents]) => {
         const cat = categories.find((c) => c.id === catId);
-        const percentage = totalExpensesCents > 0 ? ((amountCents / totalExpensesCents) * 100).toFixed(1) : 0;
+        let envelopeCap = 0;
+        if (activeChartMonth) {
+          const specificEntry = monthlyEnvelopes.find(
+            (m) => m.categoryId === catId && m.monthKey === activeChartMonth
+          );
+          if (specificEntry) envelopeCap = specificEntry.amountCents;
+          else if (cat?.budgetLimitCents && cat.budgetLimitCents > 0) envelopeCap = cat.budgetLimitCents;
+        } else if (cat?.budgetLimitCents && cat.budgetLimitCents > 0) {
+          envelopeCap = cat.budgetLimitCents;
+        }
+
+        const percentageOfTotal = totalExpensesCents > 0 ? ((amountCents / totalExpensesCents) * 100).toFixed(1) : '0.0';
+        const envelopePercentage = envelopeCap > 0 ? ((amountCents / envelopeCap) * 100).toFixed(1) : null;
+        const isOverBudget = envelopeCap > 0 && amountCents > envelopeCap;
+
         return {
           catId,
           name: cat?.name || 'Geral',
           color: cat?.color || '#ef4444',
+          parentId: cat?.parentId || null,
           amountCents,
-          percentage: parseFloat(percentage),
+          percentage: parseFloat(percentageOfTotal),
+          envelopeCap,
+          envelopePercentage: envelopePercentage !== null ? parseFloat(envelopePercentage) : null,
+          isOverBudget,
         };
       })
-      .sort((a, b) => b.amountCents - a.amountCents);
+      .sort((a, b) => {
+        if (b.amountCents !== a.amountCents) return b.amountCents - a.amountCents;
+        return (b.envelopeCap || 0) - (a.envelopeCap || 0);
+      });
 
     const incomesList = Object.entries(incomeMap)
       .map(([catId, amountCents]) => {
@@ -862,6 +953,7 @@ export default function App() {
           catId,
           name: cat?.name || 'Geral',
           color: cat?.color || '#10b981',
+          parentId: cat?.parentId || null,
           amountCents,
           percentage: parseFloat(percentage),
         };
@@ -874,7 +966,7 @@ export default function App() {
       totalExpensesCents,
       totalIncomesCents,
     };
-  }, [chartTransactions, categories]);
+  }, [chartTransactions, categories, activeChartMonth, monthlyEnvelopes]);
 
   // Faturas dos Cartões de Crédito (Detalhamento, Itens, Status e Limites para o Mês do Dashboard)
   const cardInvoices = useMemo(() => {
@@ -1454,13 +1546,14 @@ export default function App() {
     setModalState({ isOpen: false, type: null, mode: 'create', data: null });
   };
 
-  // Salvar Categorias
+  // Salvar Categorias (com suporte a Subcategorias e Validação Inteligente de Teto Pai-Filho)
   const handleSaveCategory = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const id = modalState.mode === 'edit' ? modalState.data.id : `cat-${Date.now()}`;
     const budgetRaw = fd.get('budgetLimit');
     const budgetLimitCents = budgetRaw !== null && budgetRaw !== '' ? Math.max(0, Math.round(parseFloat(budgetRaw || '0') * 100)) : 0;
+    const parentId = fd.get('parentId') || null;
 
     const newCat = {
       id,
@@ -1469,7 +1562,49 @@ export default function App() {
       color: fd.get('color') || '#475569',
       archived: modalState.mode === 'edit' ? modalState.data.archived : false,
       budgetLimitCents,
+      parentId,
     };
+
+    // Validação 1: Se for Subcategoria com teto, valida contra o teto da Categoria Pai
+    if (parentId && budgetLimitCents > 0) {
+      const parentCat = categories.find((c) => c.id === parentId);
+      if (parentCat && parentCat.budgetLimitCents > 0) {
+        const siblings = categories.filter((c) => c.parentId === parentId && c.id !== id);
+        const currentSiblingsSum = siblings.reduce((acc, s) => acc + (s.budgetLimitCents || 0), 0);
+        const totalSum = currentSiblingsSum + budgetLimitCents;
+
+        if (totalSum > parentCat.budgetLimitCents) {
+          const maxAvailableChildCents = Math.max(0, parentCat.budgetLimitCents - currentSiblingsSum);
+          setCategoryConflictModal({
+            isOpen: true,
+            childName: newCat.name,
+            parentName: parentCat.name,
+            parentId: parentCat.id,
+            childId: id,
+            childAttemptedCents: budgetLimitCents,
+            currentSiblingsSum,
+            parentCurrentCents: parentCat.budgetLimitCents,
+            suggestedParentCents: totalSum,
+            maxAvailableChildCents,
+            pendingCatData: newCat,
+          });
+          return;
+        }
+      }
+    }
+
+    // Validação 2: Se for Categoria Pai sendo editada para teto menor que a soma das subcategorias
+    if (!parentId && modalState.mode === 'edit') {
+      const children = categories.filter((c) => c.parentId === id);
+      const childrenSum = children.reduce((acc, c) => acc + (c.budgetLimitCents || 0), 0);
+      if (children.length > 0 && budgetLimitCents > 0 && budgetLimitCents < childrenSum) {
+        if (!confirm(
+          `Atenção: O novo teto da categoria pai "${newCat.name}" (${formatMoney(budgetLimitCents)}) é inferior à soma dos tetos de suas subcategorias (${formatMoney(childrenSum)}).\n\nDeseja salvar mesmo assim?`
+        )) {
+          return;
+        }
+      }
+    }
 
     let updatedCategories;
     if (modalState.mode === 'edit') {
@@ -1478,9 +1613,46 @@ export default function App() {
       updatedCategories = [...categories, newCat];
     }
     setCategories(updatedCategories);
-    saveToLocalStorage('financas_categories_v1', updatedCategories);
+    saveToLocalStorage(STORAGE_KEYS.categories, updatedCategories);
     syncItem('categories', newCat);
 
+    setModalState({ isOpen: false, type: null, mode: 'create', data: null });
+  };
+
+  const handleResolveCategoryConflict = (choice) => {
+    const { pendingCatData, parentId, suggestedParentCents, maxAvailableChildCents } = categoryConflictModal;
+    if (!pendingCatData) {
+      setCategoryConflictModal((prev) => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    let finalCat = { ...pendingCatData };
+    let parentToUpdate = null;
+
+    if (choice === 'EXPAND_PARENT') {
+      const parentCat = categories.find((c) => c.id === parentId);
+      if (parentCat) {
+        parentToUpdate = { ...parentCat, budgetLimitCents: suggestedParentCents };
+      }
+    } else if (choice === 'ADJUST_CHILD') {
+      finalCat.budgetLimitCents = maxAvailableChildCents;
+    } else {
+      setCategoryConflictModal((prev) => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    let updatedCategories = categories.filter((c) => c.id !== finalCat.id);
+    if (parentToUpdate) {
+      updatedCategories = updatedCategories.map((c) => (c.id === parentToUpdate.id ? parentToUpdate : c));
+      syncItem('categories', parentToUpdate);
+    }
+    updatedCategories.push(finalCat);
+
+    setCategories(updatedCategories);
+    saveToLocalStorage(STORAGE_KEYS.categories, updatedCategories);
+    syncItem('categories', finalCat);
+
+    setCategoryConflictModal((prev) => ({ ...prev, isOpen: false }));
     setModalState({ isOpen: false, type: null, mode: 'create', data: null });
   };
 
@@ -1528,6 +1700,48 @@ export default function App() {
 
     let updatedList = [...monthlyEnvelopes];
     let ruleIdToUse = existingEnvelope?.envelopeEntry?.ruleId || null;
+
+    // Se a categoria tiver uma Categoria Pai, valida se o teto ultrapassa o da categoria pai
+    if (cat.parentId && amountCents > 0) {
+      const parentCat = categories.find((c) => c.id === cat.parentId);
+      if (parentCat) {
+        const parentEnv = monthlyEnvelopes.find((m) => m.categoryId === parentCat.id && m.monthKey === startMonth);
+        const parentCap = parentEnv ? parentEnv.amountCents : (parentCat.budgetLimitCents || 0);
+
+        if (parentCap > 0) {
+          const siblings = categories.filter((c) => c.parentId === parentCat.id && c.id !== cat.id);
+          const siblingsSum = siblings.reduce((acc, sib) => {
+            const sibEnv = monthlyEnvelopes.find((m) => m.categoryId === sib.id && m.monthKey === startMonth);
+            return acc + (sibEnv ? sibEnv.amountCents : (sib.budgetLimitCents || 0));
+          }, 0);
+
+          const totalChildSum = siblingsSum + amountCents;
+          if (totalChildSum > parentCap) {
+            const expandChoice = confirm(
+              `Atenção: O teto de ${formatMoney(amountCents)} para a subcategoria "${cat.name}" no mês ${formatMonthLabel(startMonth)} somado às outras subcategorias (${formatMoney(siblingsSum)}) totaliza ${formatMoney(totalChildSum)}, ultrapassando o teto da categoria pai "${parentCat.name}" (${formatMoney(parentCap)}).\n\n` +
+              `• Clique em [OK] para AUMENTAR o teto da categoria pai para ${formatMoney(totalChildSum)} neste mês.\n` +
+              `• Clique em [CANCELAR] para AJUSTAR o teto da subcategoria para o saldo disponível de ${formatMoney(Math.max(0, parentCap - siblingsSum))}.`
+            );
+
+            if (expandChoice) {
+              const parentIdx = updatedList.findIndex((m) => m.categoryId === parentCat.id && m.monthKey === startMonth);
+              const parentEntryData = {
+                id: parentIdx >= 0 ? updatedList[parentIdx].id : `menv_${Date.now()}_parent`,
+                categoryId: parentCat.id,
+                monthKey: startMonth,
+                amountCents: totalChildSum,
+                ruleId: parentIdx >= 0 ? updatedList[parentIdx].ruleId : null,
+              };
+              if (parentIdx >= 0) updatedList[parentIdx] = parentEntryData;
+              else updatedList.push(parentEntryData);
+              syncItem('monthlyEnvelopes', parentEntryData);
+            } else {
+              amountCents = Math.max(0, parentCap - siblingsSum);
+            }
+          }
+        }
+      }
+    }
 
     if (scope === 'this_only') {
       const existingIdx = updatedList.findIndex(
@@ -2182,12 +2396,28 @@ export default function App() {
 
   const handleDeleteCategory = (cat) => {
     const tiedCount = transactions.filter((t) => t.categoryId === cat.id).length;
+    const children = categories.filter((c) => c.parentId === cat.id);
     const warning =
       tiedCount > 0
         ? `\n\nAtenção: Esta categoria possui ${tiedCount} lançamento(s) associado(s). Eles ficarão sem categoria vinculada.`
         : '';
-    if (confirm(`Deseja realmente EXCLUIR DEFINITIVAMENTE a categoria "${cat.name}"?${warning}`)) {
-      const updatedCats = categories.filter((c) => c.id !== cat.id);
+    const childWarning =
+      children.length > 0
+        ? `\n\nAtenção: Esta categoria possui ${children.length} subcategoria(s) associada(s). Elas se tornarão categorias principais independentes.`
+        : '';
+
+    if (confirm(`Deseja realmente EXCLUIR DEFINITIVAMENTE a categoria "${cat.name}"?${warning}${childWarning}`)) {
+      let updatedCats = categories.filter((c) => c.id !== cat.id);
+      if (children.length > 0) {
+        updatedCats = updatedCats.map((c) => {
+          if (c.parentId === cat.id) {
+            const detached = { ...c, parentId: null };
+            syncItem('categories', detached);
+            return detached;
+          }
+          return c;
+        });
+      }
       setCategories(updatedCats);
       saveToLocalStorage(STORAGE_KEYS.categories, updatedCats);
       syncItem('categories', cat, true);
@@ -2793,6 +3023,31 @@ export default function App() {
     setFilterEndDate('');
   };
 
+  // Navegação interativa com Drill-Down direto para a aba de Lançamentos
+  const handleDrillDownToTransactions = useCallback((categoryId, dateRangeOrMonth = null) => {
+    setFilterCategory(categoryId);
+    if (typeof dateRangeOrMonth === 'string' && dateRangeOrMonth.match(/^\d{4}-\d{2}$/)) {
+      const [year, month] = dateRangeOrMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      setFilterStartDate(`${dateRangeOrMonth}-01`);
+      setFilterEndDate(`${dateRangeOrMonth}-${String(lastDay).padStart(2, '0')}`);
+      setFilterDatePreset('CUSTOM');
+    } else if (dateRangeOrMonth && typeof dateRangeOrMonth === 'object') {
+      if (dateRangeOrMonth.startDate) setFilterStartDate(dateRangeOrMonth.startDate);
+      if (dateRangeOrMonth.endDate) setFilterEndDate(dateRangeOrMonth.endDate);
+      setFilterDatePreset('CUSTOM');
+    } else {
+      setFilterDatePreset('ALL');
+      setFilterStartDate('');
+      setFilterEndDate('');
+    }
+    setSearchTerm('');
+    setFilterType('ALL');
+    setFilterStatus('ALL');
+    setFilterSource('ALL');
+    setActiveTab('transactions');
+  }, []);
+
   const isAnyFilterActive =
     Boolean(searchTerm.trim()) ||
     filterType !== 'ALL' ||
@@ -2820,6 +3075,11 @@ export default function App() {
   const filteredTransactions = useMemo(() => {
     const todayDate = new Date().toISOString().slice(0, 10);
     const todayTime = new Date(todayDate + 'T12:00:00').getTime();
+
+    // Conjunto de IDs de categoria correspondentes (inclui a categoria pai e todas as suas subcategorias)
+    const matchingCatIds = filterCategory !== 'ALL'
+      ? new Set([filterCategory, ...categories.filter((c) => c.parentId === filterCategory).map((c) => c.id)])
+      : null;
 
     const list = allDisplayTransactions.filter((t) => {
       const effectiveDate = getTxDueDate(t) || t.date || '';
@@ -2857,9 +3117,9 @@ export default function App() {
           if (t.accountId !== filterSource.replace('acc-', '')) return false;
         }
 
-        // 5. Categoria (fatura é exibida se contiver compras da categoria filtrada)
-        if (filterCategory !== 'ALL') {
-          const hasCatMatch = t.items.some((item) => item.categoryId === filterCategory);
+        // 5. Categoria (fatura é exibida se contiver compras da categoria filtrada ou de suas subcategorias)
+        if (matchingCatIds) {
+          const hasCatMatch = t.items.some((item) => matchingCatIds.has(item.categoryId));
           if (!hasCatMatch) return false;
         }
 
@@ -2922,8 +3182,8 @@ export default function App() {
         if (t.cardId !== targetCardId) return false;
       }
 
-      // 5. Categoria
-      if (filterCategory !== 'ALL' && t.categoryId !== filterCategory) {
+      // 5. Categoria (com suporte a subcategorias)
+      if (matchingCatIds && !matchingCatIds.has(t.categoryId)) {
         return false;
       }
 
@@ -3636,11 +3896,17 @@ export default function App() {
                   ) : (
                     <div className="space-y-3">
                       {dashboardCategoryChartData.expensesList.slice(0, 4).map((item) => (
-                        <div key={item.catId} className="space-y-1">
+                        <div
+                          key={item.catId}
+                          onClick={() => handleDrillDownToTransactions(item.catId, dashboardMonth)}
+                          className="group p-1.5 -mx-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer space-y-1"
+                          title={`Clique para ver os lançamentos de "${item.name}" em ${formatMonthLabel(dashboardMonth)}`}
+                        >
                           <div className="flex justify-between text-xs font-semibold">
-                            <span className="text-slate-700 flex items-center space-x-1.5">
-                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                            <span className="text-slate-700 group-hover:text-blue-600 flex items-center space-x-1.5 transition-colors">
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                               <span>{item.name}</span>
+                              <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
                             </span>
                             <span className="text-slate-900">{formatMoney(item.amountCents)} ({item.percentage}%)</span>
                           </div>
@@ -3714,11 +3980,17 @@ export default function App() {
                           const cat = env.category;
                           const barColor = env.isOver ? '#ef4444' : env.percentage >= 80 ? '#f59e0b' : '#10b981';
                           return (
-                            <div key={cat.id} className="space-y-1">
+                            <div
+                              key={cat.id}
+                              onClick={() => handleDrillDownToTransactions(cat.id, dashboardMonth)}
+                              className="group p-1.5 -mx-1.5 rounded-lg hover:bg-slate-50 transition cursor-pointer space-y-1"
+                              title={`Clique para ver os lançamentos de "${cat.name}" em ${formatMonthLabel(dashboardMonth)}`}
+                            >
                               <div className="flex justify-between items-center text-xs font-semibold">
-                                <span className="text-slate-800 flex items-center space-x-1.5">
+                                <span className="text-slate-800 group-hover:text-blue-600 flex items-center space-x-1.5 transition-colors">
                                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                                   <span>{cat.name}</span>
+                                  <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
                                 </span>
                                 <div className="flex items-center space-x-2">
                                   <span className="text-slate-500 font-medium">
@@ -4190,6 +4462,59 @@ export default function App() {
                   🏦 Contas
                 </button>
 
+                {/* Filtro Rápido por Categoria no Toolbar */}
+                <div className="relative inline-flex items-center">
+                  <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer max-w-[190px] truncate ${
+                      filterCategory !== 'ALL'
+                        ? 'bg-amber-100 text-amber-900 border-amber-300 font-semibold shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-transparent'
+                    }`}
+                    title="Filtrar por Categoria"
+                  >
+                    <option value="ALL">🏷️ Categoria: Todas</option>
+                    {categories
+                      .filter((c) => !c.parentId && !c.archived)
+                      .map((parent) => {
+                        const children = categories.filter((c) => c.parentId === parent.id && !c.archived);
+                        if (children.length === 0) {
+                          return (
+                            <option key={parent.id} value={parent.id}>
+                              {parent.name}
+                            </option>
+                          );
+                        }
+                        return (
+                          <optgroup key={parent.id} label={`📁 ${parent.name}`}>
+                            <option value={parent.id}>{parent.name} (Todos)</option>
+                            {children.map((child) => (
+                              <option key={child.id} value={child.id}>
+                                &nbsp;&nbsp;↳ {child.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                  </select>
+                </div>
+
+                {/* Badge ativo com remoção rápida (X) */}
+                {filterCategory !== 'ALL' && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-100 text-amber-900 border border-amber-300 animate-in fade-in">
+                    <span>🏷️ {categories.find((c) => c.id === filterCategory)?.name || 'Categoria'}</span>
+                    <button
+                      type="button"
+                      onClick={() => setFilterCategory('ALL')}
+                      className="hover:text-rose-700 p-0.5 rounded transition"
+                      title="Remover filtro de categoria"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+
                 {isAnyFilterActive && (
                   <button
                     type="button"
@@ -4283,11 +4608,28 @@ export default function App() {
                           className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
                         >
                           <option value="ALL">Todas as Categorias</option>
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
+                          {categories
+                            .filter((c) => !c.parentId && !c.archived)
+                            .map((parent) => {
+                              const children = categories.filter((c) => c.parentId === parent.id && !c.archived);
+                              if (children.length === 0) {
+                                return (
+                                  <option key={parent.id} value={parent.id}>
+                                    {parent.name}
+                                  </option>
+                                );
+                              }
+                              return (
+                                <optgroup key={parent.id} label={`📁 ${parent.name}`}>
+                                  <option value={parent.id}>{parent.name} (Todos)</option>
+                                  {children.map((child) => (
+                                    <option key={child.id} value={child.id}>
+                                      &nbsp;&nbsp;↳ {child.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              );
+                            })}
                         </select>
                       </div>
 
@@ -4502,11 +4844,14 @@ export default function App() {
                       filteredTransactions.map((tx) => {
                         if (tx.isInvoiceMaster) {
                           const isOverdue = tx.status === 'EM ATRASO';
-                          const isExpanded = Boolean(expandedInvoices[tx.id]);
+                          const isExpanded = Boolean(expandedInvoices[tx.id]) || (filterCategory !== 'ALL') || Boolean(searchTerm.trim());
 
-                          // Filtra os itens exibidos dentro da fatura respeitando os filtros ativos
+                          // Filtra os itens exibidos dentro da fatura respeitando os filtros ativos e subcategorias
                           const itemsToDisplay = tx.items.filter((item) => {
-                            if (filterCategory !== 'ALL' && item.categoryId !== filterCategory) return false;
+                            if (filterCategory !== 'ALL') {
+                              const matchingCatIds = new Set([filterCategory, ...categories.filter((c) => c.parentId === filterCategory).map((c) => c.id)]);
+                              if (!matchingCatIds.has(item.categoryId)) return false;
+                            }
                             if (searchTerm.trim()) {
                               const term = searchTerm.toLowerCase();
                               const desc = (item.description || '').toLowerCase();
@@ -4720,12 +5065,20 @@ export default function App() {
                                       {/* 3. Categoria */}
                                       <td className="py-2.5 px-4 text-slate-600">
                                         {itemCat ? (
-                                          <span className="inline-flex items-center space-x-1.5">
-                                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: itemCat.color }} />
-                                            <span>{itemCat.name}</span>
-                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setFilterCategory(itemCat.id);
+                                            }}
+                                            title={`Filtrar lançamentos por "${itemCat.name}"`}
+                                            className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md hover:bg-purple-100 transition-colors text-left group"
+                                          >
+                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: itemCat.color }} />
+                                            <span className="group-hover:underline group-hover:text-purple-700 font-medium">{itemCat.name}</span>
+                                          </button>
                                         ) : (
-                                          <span className="text-slate-400 italic">Sem Categoria</span>
+                                          <span className="text-slate-400 italic text-[11px]">Sem Categoria</span>
                                         )}
                                       </td>
 
@@ -4854,12 +5207,20 @@ export default function App() {
                             {/* 3. Categoria */}
                             <td className="py-3 px-4 text-slate-600">
                               {cat ? (
-                                <span className="inline-flex items-center space-x-1.5">
-                                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                                  <span>{cat.name}</span>
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFilterCategory(cat.id);
+                                  }}
+                                  title={`Filtrar lançamentos por "${cat.name}"`}
+                                  className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 transition-colors text-left group"
+                                >
+                                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                                  <span className="group-hover:underline group-hover:text-blue-600 font-medium">{cat.name}</span>
+                                </button>
                               ) : (
-                                <span className="text-slate-400 italic">Sem Categoria</span>
+                                <span className="text-slate-400 italic text-[11px]">Sem Categoria</span>
                               )}
                             </td>
 
@@ -5106,27 +5467,82 @@ export default function App() {
                   {categoryChartData.expensesList.length === 0 ? (
                     <p className="text-xs text-slate-400 py-8 text-center">Nenhuma despesa para exibir nesta visão.</p>
                   ) : (
-                    <div className="space-y-4 pt-2">
-                      {categoryChartData.expensesList.map((item) => (
-                        <div key={item.catId} className="space-y-1.5">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-semibold text-slate-800 flex items-center space-x-2">
-                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                              <span>{item.name}</span>
-                            </span>
-                            <span className="text-slate-600">
-                              <strong className="text-slate-900">{formatMoney(item.amountCents)}</strong> ({item.percentage}%)
-                            </span>
-                          </div>
+                    <div className="space-y-3 pt-2">
+                      {categoryChartData.expensesList.map((item) => {
+                        const hasEnvelope = item.envelopeCap > 0;
+                        return (
+                          <div
+                            key={item.catId}
+                            onClick={() => handleDrillDownToTransactions(item.catId, activeChartMonth || getChartDateRange())}
+                            className="group p-2.5 rounded-xl border border-transparent hover:border-slate-200 hover:bg-slate-50 transition-all cursor-pointer space-y-2"
+                            title={`Clique para filtrar lançamentos de "${item.name}" neste período`}
+                          >
+                            <div className="flex justify-between items-start text-xs gap-2">
+                              <div className="flex items-center space-x-2">
+                                <span className="w-3 h-3 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
+                                <div>
+                                  <span className="font-semibold text-slate-800 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
+                                    <span>{item.name}</span>
+                                    <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity" />
+                                  </span>
+                                  {hasEnvelope && (
+                                    <span className="text-[10px] text-slate-400 block font-normal">
+                                      ✉️ Teto planejado: {formatMoney(item.envelopeCap)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
 
-                          <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all duration-300"
-                              style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
-                            />
+                              <div className="text-right">
+                                <div className="text-slate-700">
+                                  <strong className="text-slate-900 font-bold">{formatMoney(item.amountCents)}</strong>
+                                  <span className="text-slate-400 text-[11px] ml-1">({item.percentage}% do total)</span>
+                                </div>
+                                {hasEnvelope && (
+                                  <div className="mt-0.5">
+                                    {item.isOverBudget ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                        ⚠️ +{formatMoney(item.amountCents - item.envelopeCap)} ({item.envelopePercentage}%)
+                                      </span>
+                                    ) : item.amountCents === 0 ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                        Envelope intacto (100% livre)
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                                        {item.envelopePercentage}% consumido
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Barra de Progresso Inteligente: se tem envelope, exibe o percentual consumido do envelope */}
+                            {hasEnvelope ? (
+                              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    item.isOverBudget
+                                      ? 'bg-rose-500'
+                                      : (item.envelopePercentage || 0) >= 80
+                                      ? 'bg-amber-500'
+                                      : 'bg-blue-600'
+                                  }`}
+                                  style={{ width: `${Math.min(100, item.envelopePercentage || 0)}%` }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-300"
+                                  style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
+                                />
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -5148,20 +5564,26 @@ export default function App() {
                   {categoryChartData.incomesList.length === 0 ? (
                     <p className="text-xs text-slate-400 py-8 text-center">Nenhuma receita para exibir nesta visão.</p>
                   ) : (
-                    <div className="space-y-4 pt-2">
+                    <div className="space-y-3 pt-2">
                       {categoryChartData.incomesList.map((item) => (
-                        <div key={item.catId} className="space-y-1.5">
+                        <div
+                          key={item.catId}
+                          onClick={() => handleDrillDownToTransactions(item.catId, activeChartMonth || getChartDateRange())}
+                          className="group p-2.5 rounded-xl border border-transparent hover:border-slate-200 hover:bg-slate-50 transition-all cursor-pointer space-y-1.5"
+                          title={`Clique para filtrar lançamentos de "${item.name}" neste período`}
+                        >
                           <div className="flex justify-between items-center text-xs">
-                            <span className="font-semibold text-slate-800 flex items-center space-x-2">
+                            <span className="font-semibold text-slate-800 group-hover:text-emerald-600 flex items-center space-x-2 transition-colors">
                               <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                               <span>{item.name}</span>
+                              <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 text-emerald-500 transition-opacity" />
                             </span>
                             <span className="text-slate-600">
                               <strong className="text-slate-900">{formatMoney(item.amountCents)}</strong> ({item.percentage}%)
                             </span>
                           </div>
 
-                          <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                          <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                             <div
                               className="h-full rounded-full transition-all duration-300"
                               style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
@@ -5947,51 +6369,134 @@ export default function App() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {categories.map((cat) => (
-                <div key={cat.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <span className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                    <div>
-                      <h4 className="font-semibold text-sm text-slate-900">{cat.name}</h4>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">
-                          {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
-                        </span>
-                        {cat.budgetLimitCents > 0 && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-50 text-blue-700 border border-blue-200 rounded">
-                            ✉️ {formatMoney(cat.budgetLimitCents)}/mês
-                          </span>
-                        )}
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {categories
+                  .filter((c) => !c.parentId)
+                  .map((cat) => {
+                    const subcategories = categories.filter((c) => c.parentId === cat.id);
+                    const subBudgetSum = subcategories.reduce((acc, s) => acc + (s.budgetLimitCents || 0), 0);
+
+                    return (
+                      <div
+                        key={cat.id}
+                        className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between space-y-3"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center space-x-3">
+                              <span className="w-4 h-4 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: cat.color }} />
+                              <div>
+                                <h4 className="font-bold text-sm sm:text-base text-slate-900">{cat.name}</h4>
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                  <span className="text-[10px] uppercase font-bold text-slate-400">
+                                    {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
+                                  </span>
+                                  {cat.budgetLimitCents > 0 && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-50 text-blue-700 border border-blue-200 rounded">
+                                      ✉️ Teto: {formatMoney(cat.budgetLimitCents)}/mês
+                                    </span>
+                                  )}
+                                  {subcategories.length > 0 && (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded">
+                                      {subcategories.length} subcategoria{subcategories.length > 1 ? 's' : ''}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'create', data: { parentId: cat.id, type: cat.type } })}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title="Adicionar Subcategoria sob esta categoria"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: cat })}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title="Editar Categoria"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleArchiveCategory(cat.id)}
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                                title={cat.archived ? 'Desarquivar' : 'Arquivar'}
+                              >
+                                <Archive className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCategory(cat)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                title="Excluir Definitivamente"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Lista Aninhada de Subcategorias */}
+                          {subcategories.length > 0 && (
+                            <div className="mt-3.5 pt-3 border-t border-slate-100 space-y-2">
+                              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                <span>Subcategorias</span>
+                                {cat.budgetLimitCents > 0 && (
+                                  <span className="text-[10px] text-slate-400 font-normal">
+                                    Subtotal alocado: {formatMoney(subBudgetSum)} / {formatMoney(cat.budgetLimitCents)}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1.5">
+                                {subcategories.map((sub) => (
+                                  <div
+                                    key={sub.id}
+                                    className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100 text-xs hover:bg-slate-100/70 transition"
+                                  >
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-slate-400 font-bold">↳</span>
+                                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
+                                      <span className="font-semibold text-slate-800">{sub.name}</span>
+                                      {sub.budgetLimitCents > 0 && (
+                                        <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-100/70 text-blue-800 rounded">
+                                          ✉️ {formatMoney(sub.budgetLimitCents)}/mês
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center space-x-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: sub })}
+                                        className="p-1 text-slate-400 hover:text-blue-600 rounded transition"
+                                        title="Editar Subcategoria"
+                                      >
+                                        <Edit2 className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteCategory(sub)}
+                                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                                        title="Excluir Subcategoria"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <button
-                      onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: cat })}
-                      className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg transition"
-                      title="Editar"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => toggleArchiveCategory(cat.id)}
-                      className="p-1.5 text-slate-500 hover:text-amber-600 rounded-lg transition"
-                      title={cat.archived ? 'Desarquivar' : 'Arquivar'}
-                    >
-                      <Archive className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCategory(cat)}
-                      className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                      title="Excluir Definitivamente"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                    );
+                  })}
+              </div>
             </div>
           </div>
         )}
@@ -7245,11 +7750,28 @@ export default function App() {
                       defaultValue={modalState.data?.categoryId || categories[0]?.id}
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     >
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
+                      {categories
+                        .filter((c) => !c.parentId && !c.archived)
+                        .map((parent) => {
+                          const children = categories.filter((c) => c.parentId === parent.id && !c.archived);
+                          if (children.length === 0) {
+                            return (
+                              <option key={parent.id} value={parent.id}>
+                                {parent.name}
+                              </option>
+                            );
+                          }
+                          return (
+                            <optgroup key={parent.id} label={`📁 ${parent.name}`}>
+                              <option value={parent.id}>{parent.name} (Geral / Principal)</option>
+                              {children.map((child) => (
+                                <option key={child.id} value={child.id}>
+                                  &nbsp;&nbsp;↳ {child.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          );
+                        })}
                     </select>
                   </div>
                   <div>
@@ -7555,6 +8077,29 @@ export default function App() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Categoria Pai (Opcional - para transformar em Subcategoria)
+                  </label>
+                  <select
+                    name="parentId"
+                    defaultValue={modalState.data?.parentId || ''}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="">Nenhuma (Categoria Principal)</option>
+                    {categories
+                      .filter((c) => !c.archived && !c.parentId && c.id !== modalState.data?.id)
+                      .map((parent) => (
+                        <option key={parent.id} value={parent.id}>
+                          📁 {parent.name} {parent.budgetLimitCents > 0 ? `(Teto atual: ${formatMoney(parent.budgetLimitCents)})` : ''}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Ao vincular a uma categoria pai, esta categoria funcionará como uma subcategoria subordinada (ex: Combustível dentro de Transporte).
+                  </p>
+                </div>
+
                 <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-bold text-slate-800">
@@ -7730,11 +8275,28 @@ export default function App() {
                       defaultValue={modalState.data?.categoryId || categories[0]?.id}
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     >
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
+                      {categories
+                        .filter((c) => !c.parentId && !c.archived)
+                        .map((parent) => {
+                          const children = categories.filter((c) => c.parentId === parent.id && !c.archived);
+                          if (children.length === 0) {
+                            return (
+                              <option key={parent.id} value={parent.id}>
+                                {parent.name}
+                              </option>
+                            );
+                          }
+                          return (
+                            <optgroup key={parent.id} label={`📁 ${parent.name}`}>
+                              <option value={parent.id}>{parent.name} (Geral / Principal)</option>
+                              {children.map((child) => (
+                                <option key={child.id} value={child.id}>
+                                  &nbsp;&nbsp;↳ {child.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          );
+                        })}
                     </select>
                   </div>
                   <div>
@@ -8839,12 +9401,27 @@ export default function App() {
                     required
                   >
                     {categories
-                      .filter((c) => !c.archived && c.type === 'EXPENSE')
-                      .map((cat) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.name}
-                        </option>
-                      ))}
+                      .filter((c) => !c.parentId && !c.archived && c.type === 'EXPENSE')
+                      .map((parent) => {
+                        const children = categories.filter((c) => c.parentId === parent.id && !c.archived && c.type === 'EXPENSE');
+                        if (children.length === 0) {
+                          return (
+                            <option key={parent.id} value={parent.id}>
+                              {parent.name}
+                            </option>
+                          );
+                        }
+                        return (
+                          <optgroup key={parent.id} label={`📁 ${parent.name}`}>
+                            <option value={parent.id}>{parent.name} (Geral / Categoria Principal)</option>
+                            {children.map((child) => (
+                              <option key={child.id} value={child.id}>
+                                &nbsp;&nbsp;↳ {child.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                   </select>
                 </div>
 
@@ -9176,6 +9753,94 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* Modal de Validação / Resolução de Conflito de Tetos (Categoria Pai x Subcategoria) */}
+      {categoryConflictModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center space-x-3 pb-3 border-b border-slate-100">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Ajuste de Teto do Envelope</h3>
+                <p className="text-xs text-slate-500">Regra de hierarquia entre Categoria Pai e Subcategoria</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <p>
+                O teto definido para a subcategoria <strong className="text-slate-900 font-semibold">{categoryConflictModal.childName}</strong> (<strong>{formatMoney(categoryConflictModal.childAttemptedCents)}</strong>), somado às outras subcategorias já cadastradas (<strong>{formatMoney(categoryConflictModal.currentSiblingsSum)}</strong>), totaliza <strong className="text-rose-700 font-bold">{formatMoney(categoryConflictModal.suggestedParentCents)}</strong>.
+              </p>
+              <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-1">
+                <div className="flex justify-between">
+                  <span>Categoria Pai:</span>
+                  <strong className="text-slate-800">{categoryConflictModal.parentName}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Teto atual da Categoria Pai:</span>
+                  <strong className="text-slate-800">{formatMoney(categoryConflictModal.parentCurrentCents)}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Saldo disponível restante para subcategorias:</span>
+                  <strong className="text-emerald-700 font-bold">{formatMoney(categoryConflictModal.maxAvailableChildCents)}</strong>
+                </div>
+              </div>
+              <p className="font-semibold text-slate-800">
+                Como você deseja definir os tetos dos envelopes?
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => handleResolveCategoryConflict('EXPAND_PARENT')}
+                className="w-full text-left p-3 rounded-xl border border-blue-200 hover:border-blue-400 bg-blue-50/60 hover:bg-blue-50 transition flex items-start space-x-3 group"
+              >
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                  A
+                </span>
+                <div className="text-xs">
+                  <strong className="text-blue-900 font-bold block group-hover:underline">
+                    Aumentar o teto da Categoria Pai para {formatMoney(categoryConflictModal.suggestedParentCents)}
+                  </strong>
+                  <span className="text-slate-600">
+                    Expande o limite de "{categoryConflictModal.parentName}" para comportar integralmente o novo teto desta subcategoria.
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleResolveCategoryConflict('ADJUST_CHILD')}
+                className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-slate-400 bg-slate-50 hover:bg-white transition flex items-start space-x-3 group"
+              >
+                <span className="w-6 h-6 rounded-full bg-slate-600 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                  B
+                </span>
+                <div className="text-xs">
+                  <strong className="text-slate-900 font-bold block group-hover:underline">
+                    Ajustar o teto da subcategoria para {formatMoney(categoryConflictModal.maxAvailableChildCents)}
+                  </strong>
+                  <span className="text-slate-600">
+                    Mantém o teto da categoria pai intacto e limita "{categoryConflictModal.childName}" ao saldo restante ainda disponível.
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setCategoryConflictModal({ isOpen: false })}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Autenticação e Gestão de Perfis */}
       <AuthModal

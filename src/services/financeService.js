@@ -70,6 +70,7 @@ export const categoryToClient = (row) => ({
   color: row.color || '#475569',
   archived: Boolean(row.archived),
   budgetLimitCents: Number(row.budget_limit_cents ?? row.budgetLimitCents ?? 0),
+  parentId: row.parent_id || row.parentId || null,
 });
 
 export const categoryToDb = (cat) => ({
@@ -79,6 +80,7 @@ export const categoryToDb = (cat) => ({
   color: cat.color,
   archived: cat.archived,
   budget_limit_cents: Number(cat.budgetLimitCents || 0),
+  parent_id: cat.parentId || null,
 });
 
 export const transactionToClient = (row) => {
@@ -267,13 +269,14 @@ export const loadInitialAppData = async (defaults = {}) => {
         cloudCats = defaults.categories;
       }
 
-      // Mescla com localStorage para preservar budgetLimitCents e tetos caso a coluna ainda não exista no Supabase
+      // Mescla com localStorage para preservar budgetLimitCents e parentId caso a coluna ainda não exista no Supabase
       const mergedCats = cloudCats.map((c) => {
         const local = localCatsMap.get(c.id);
         if (local) {
           return {
             ...c,
             budgetLimitCents: (c.budgetLimitCents && c.budgetLimitCents > 0) ? c.budgetLimitCents : (local.budgetLimitCents || 0),
+            parentId: c.parentId || local.parentId || null,
           };
         }
         return c;
@@ -475,8 +478,8 @@ export const syncItem = async (entity, item, isDelete = false) => {
         const res = await supabase.from(targetTable).upsert(dbData);
         if (res?.error) {
           console.warn(`Erro ao sincronizar ${targetTable} no Supabase:`, res.error.message);
-          // Se for categoria e o erro for coluna budget_limit_cents inexistente (ex: 42703), faz fallback salvando os campos essenciais para nunca perder a categoria
-          if (entity === 'categories' && (res.error.code === '42703' || String(res.error.message || '').includes('budget_limit_cents'))) {
+          // Se for categoria e o erro for coluna inexistente (ex: 42703), faz fallback salvando os campos suportados para nunca perder a categoria
+          if (entity === 'categories' && (res.error.code === '42703' || String(res.error.message || '').includes('budget_limit_cents') || String(res.error.message || '').includes('parent_id'))) {
             const fallbackData = {
               id: dbData.id,
               name: dbData.name,
@@ -484,9 +487,23 @@ export const syncItem = async (entity, item, isDelete = false) => {
               color: dbData.color,
               archived: dbData.archived,
             };
+            if (!String(res.error.message || '').includes('budget_limit_cents')) {
+              fallbackData.budget_limit_cents = dbData.budget_limit_cents;
+            }
+            if (!String(res.error.message || '').includes('parent_id') && dbData.parent_id) {
+              fallbackData.parent_id = dbData.parent_id;
+            }
             const retryRes = await supabase.from('categories').upsert(fallbackData);
             if (retryRes?.error) {
-              console.error('Falha no fallback de salvamento de categoria:', retryRes.error);
+              // Se ainda der erro, tenta com os campos essenciais básicos
+              const basicData = {
+                id: dbData.id,
+                name: dbData.name,
+                type: dbData.type,
+                color: dbData.color,
+                archived: dbData.archived,
+              };
+              await supabase.from('categories').upsert(basicData);
             }
           }
         }

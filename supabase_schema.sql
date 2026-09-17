@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS public.cards (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Tabela de Categorias Financeiras
+-- 4. Tabela de Categorias Financeiras (com suporte a Subcategorias e Tetos/Envelopes)
 CREATE TABLE IF NOT EXISTS public.categories (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -52,11 +52,14 @@ CREATE TABLE IF NOT EXISTS public.categories (
   color TEXT NOT NULL DEFAULT '#475569',
   archived BOOLEAN NOT NULL DEFAULT FALSE,
   budget_limit_cents BIGINT NOT NULL DEFAULT 0,
+  parent_id TEXT REFERENCES public.categories(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Garante a coluna budget_limit_cents em instalações prévias
+-- Garante as colunas budget_limit_cents e parent_id em instalações prévias
 ALTER TABLE public.categories ADD COLUMN IF NOT EXISTS budget_limit_cents BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.categories ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES public.categories(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON public.categories(parent_id);
 
 -- 5. Tabela de Lançamentos Financeiros (Transações)
 CREATE TABLE IF NOT EXISTS public.transactions (

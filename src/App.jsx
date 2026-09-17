@@ -4226,8 +4226,14 @@ export default function App() {
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">Acompanhe o consumo dos valores destinados por categoria</p>
                     </div>
-                    <button onClick={() => setActiveTab('envelopes')} className="text-xs font-semibold text-blue-600 hover:underline">
-                      Ver Todos
+                    <button
+                      onClick={() => {
+                        setEnvelopeSelectedMonth(dashboardMonth);
+                        setActiveTab('envelopes');
+                      }}
+                      className="text-xs font-semibold text-blue-600 hover:underline"
+                    >
+                      Ver Todos {dashboardEnvelopes.envelopes.length > 0 ? `(${dashboardEnvelopes.envelopes.length})` : ''}
                     </button>
                   </div>
 
@@ -4238,7 +4244,10 @@ export default function App() {
                       </p>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('envelopes')}
+                        onClick={() => {
+                          setEnvelopeSelectedMonth(dashboardMonth);
+                          setActiveTab('envelopes');
+                        }}
                         className="inline-flex items-center space-x-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -4269,9 +4278,9 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Lista resumida de até 3 envelopes */}
+                      {/* Lista resumida de até 6 envelopes */}
                       <div className="space-y-3 pt-1">
-                        {dashboardEnvelopes.envelopes.slice(0, 3).map((env) => {
+                        {dashboardEnvelopes.envelopes.slice(0, 6).map((env) => {
                           const cat = env.category;
                           const barColor = env.isOver ? '#ef4444' : env.percentage >= 80 ? '#f59e0b' : '#10b981';
                           return (
@@ -4316,14 +4325,22 @@ export default function App() {
                         })}
                       </div>
 
-                      {dashboardEnvelopes.envelopes.length > 3 && (
-                        <div className="text-center pt-1">
+                      {dashboardEnvelopes.envelopes.length > 6 && (
+                        <div className="text-center pt-2">
                           <button
                             type="button"
-                            onClick={() => setActiveTab('projections')}
-                            className="text-[11px] font-bold text-blue-600 hover:underline"
+                            onClick={() => {
+                              setEnvelopeSelectedMonth(dashboardMonth);
+                              setActiveTab('envelopes');
+                            }}
+                            className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center space-x-1"
                           >
-                            + {dashboardEnvelopes.envelopes.length - 3} outros envelopes em Planejamento & Projeções &gt;
+                            <span>
+                              + {dashboardEnvelopes.envelopes.length - 6}{' '}
+                              {dashboardEnvelopes.envelopes.length - 6 === 1 ? 'outro envelope' : 'outros envelopes'}{' '}
+                              em Envelopes & Categorias
+                            </span>
+                            <ArrowRight className="w-3 h-3" />
                           </button>
                         </div>
                       )}

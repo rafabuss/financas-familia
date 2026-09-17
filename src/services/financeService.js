@@ -68,6 +68,7 @@ export const categoryToClient = (row) => ({
   type: row.type || 'EXPENSE',
   color: row.color || '#475569',
   archived: Boolean(row.archived),
+  budgetLimitCents: Number(row.budget_limit_cents ?? row.budgetLimitCents ?? 0),
 });
 
 export const categoryToDb = (cat) => ({
@@ -76,6 +77,7 @@ export const categoryToDb = (cat) => ({
   type: cat.type,
   color: cat.color,
   archived: cat.archived,
+  budget_limit_cents: Number(cat.budgetLimitCents || 0),
 });
 
 export const transactionToClient = (row) => {

@@ -33,7 +33,9 @@ import {
   FileText,
   Check,
   Filter,
-  Search
+  Search,
+  Target,
+  Mail
 } from 'lucide-react';
 import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
@@ -411,6 +413,16 @@ export default function App() {
     const nextDate = new Date(y, m - 1 + offset, 1);
     const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
     setInvoiceSelectedMonth(nextStr);
+  };
+
+  // Mês de Referência para Envelopes & Metas de Gastos (padrão: mês atual 'YYYY-MM')
+  const [envelopeSelectedMonth, setEnvelopeSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  const changeEnvelopeSelectedMonth = (offset) => {
+    const [y, m] = envelopeSelectedMonth.split('-').map(Number);
+    const nextDate = new Date(y, m - 1 + offset, 1);
+    const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+    setEnvelopeSelectedMonth(nextStr);
   };
 
   // Estado de expansão das Faturas Mestres na tabela de lançamentos
@@ -999,6 +1011,73 @@ export default function App() {
     return map;
   }, [cards, visibleTransactions, invoiceSelectedMonth, getTxDueDate]);
 
+  // Função que calcula os envelopes e o comprometimento virtual para qualquer mês (Método dos Envelopes)
+  const getEnvelopesForMonth = useCallback(
+    (targetMonth) => {
+      const spentByCat = {};
+      visibleTransactions.forEach((tx) => {
+        if (tx.status === 'CANCELADO') return;
+        if (tx.type !== 'EXPENSE') return;
+        // Não duplica transações técnicas de pagamento de fatura
+        if (tx.isInvoicePayment) return;
+
+        const effectiveDate = getTxDueDate(tx) || tx.date;
+        if (!effectiveDate || !effectiveDate.startsWith(targetMonth)) return;
+
+        const catId = tx.categoryId || '__none__';
+        spentByCat[catId] = (spentByCat[catId] || 0) + tx.amountCents;
+      });
+
+      const envelopeList = categories
+        .filter((cat) => !cat.archived && cat.type === 'EXPENSE' && (cat.budgetLimitCents || 0) > 0)
+        .map((cat) => {
+          const allocatedCents = cat.budgetLimitCents || 0;
+          const spentCents = spentByCat[cat.id] || 0;
+          const remainingCents = Math.max(0, allocatedCents - spentCents);
+          const overspentCents = Math.max(0, spentCents - allocatedCents);
+          const percentage = allocatedCents > 0 ? (spentCents / allocatedCents) * 100 : 0;
+          const isOver = spentCents > allocatedCents;
+
+          let status = 'healthy';
+          if (isOver) status = 'over';
+          else if (spentCents === allocatedCents) status = 'limit';
+          else if (percentage >= 80) status = 'warning';
+
+          return {
+            category: cat,
+            allocatedCents,
+            spentCents,
+            remainingCents,
+            overspentCents,
+            percentage,
+            isOver,
+            status,
+          };
+        })
+        .sort((a, b) => b.allocatedCents - a.allocatedCents);
+
+      const totalAllocatedCents = envelopeList.reduce((acc, e) => acc + e.allocatedCents, 0);
+      const totalSpentCents = envelopeList.reduce((acc, e) => acc + e.spentCents, 0);
+      const totalResidualCommittedCents = envelopeList.reduce((acc, e) => acc + e.remainingCents, 0);
+      const totalOverspentCents = envelopeList.reduce((acc, e) => acc + e.overspentCents, 0);
+
+      return {
+        targetMonth,
+        envelopes: envelopeList,
+        totalAllocatedCents,
+        totalSpentCents,
+        totalResidualCommittedCents,
+        totalOverspentCents,
+        hasEnvelopes: envelopeList.length > 0,
+      };
+    },
+    [visibleTransactions, categories, getTxDueDate]
+  );
+
+  const dashboardEnvelopes = useMemo(() => {
+    return getEnvelopesForMonth(dashboardMonth);
+  }, [getEnvelopesForMonth, dashboardMonth]);
+
   // Totais do Mês Selecionado (Dashboard) e Projeção Consolidada
   const monthSummary = useMemo(() => {
     let incomeRealized = 0;
@@ -1055,6 +1134,8 @@ export default function App() {
     const totalBankBalance = Object.values(accountBalances).reduce((a, b) => a + b, 0);
     const totalCardsAvailable = Object.values(cardStats).reduce((a, b) => a + b.availableCents, 0);
     const projectedEndBalance = totalBankBalance + incomePending - expensePending;
+    const envelopesCommitted = dashboardEnvelopes.totalResidualCommittedCents;
+    const freeProjectedBalance = projectedEndBalance - envelopesCommitted;
 
     return {
       income: incomeTotal,
@@ -1067,11 +1148,13 @@ export default function App() {
       expensePending,
       balance: incomeTotal - expenseTotal,
       committed: expensePending,
+      envelopesCommitted,
+      freeProjectedBalance,
       totalBankBalance,
       totalCardsAvailable,
       projectedEndBalance,
     };
-  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate]);
+  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes]);
 
   // Maiores Gastos por Categoria no Mês do Dashboard
   const dashboardCategoryChartData = useMemo(() => {
@@ -1306,12 +1389,16 @@ export default function App() {
     e.preventDefault();
     const fd = new FormData(e.target);
     const id = modalState.mode === 'edit' ? modalState.data.id : `cat-${Date.now()}`;
+    const budgetRaw = fd.get('budgetLimit');
+    const budgetLimitCents = budgetRaw !== null && budgetRaw !== '' ? Math.max(0, Math.round(parseFloat(budgetRaw || '0') * 100)) : 0;
+
     const newCat = {
       id,
       name: fd.get('name'),
       type: fd.get('type'),
       color: fd.get('color') || '#475569',
       archived: modalState.mode === 'edit' ? modalState.data.archived : false,
+      budgetLimitCents,
     };
 
     let updatedCategories;
@@ -2961,6 +3048,18 @@ export default function App() {
                     <span className="text-rose-300">- A pagar:</span>
                     <span className="font-semibold text-rose-300">-{formatMoney(monthSummary.expensePending)}</span>
                   </div>
+                  {monthSummary.envelopesCommitted > 0 && (
+                    <div className="flex justify-between pt-1 border-t border-slate-700/40 text-amber-300 font-medium">
+                      <span>- Envelopes (reserva):</span>
+                      <span>-{formatMoney(monthSummary.envelopesCommitted)}</span>
+                    </div>
+                  )}
+                  {monthSummary.envelopesCommitted > 0 && (
+                    <div className="flex justify-between text-blue-200 font-bold">
+                      <span>= Saldo Livre Real:</span>
+                      <span>{formatMoney(monthSummary.freeProjectedBalance)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3063,41 +3162,157 @@ export default function App() {
               </button>
             </div>
 
-            {/* Widget Resumo de Gráficos na Visão Geral */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-              <div className="flex justify-between items-center mb-4">
+            {/* Grid de Widgets do Dashboard: Gráficos por Categoria & Envelopes de Orçamento */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Widget 1: Maiores Gastos por Categoria */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                    <PieChart className="w-4 h-4 text-blue-600" />
-                    <span>Maiores Gastos por Categoria ({formatMonthLabel(dashboardMonth)})</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Onde o orçamento deste mês está concentrado</p>
+                  <div className="flex justify-between items-center mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+                        <PieChart className="w-4 h-4 text-blue-600" />
+                        <span>Maiores Gastos por Categoria ({formatMonthLabel(dashboardMonth)})</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Onde o orçamento deste mês está concentrado</p>
+                    </div>
+                    <button onClick={() => setActiveTab('charts')} className="text-xs font-semibold text-blue-600 hover:underline">
+                      Ver Análise
+                    </button>
+                  </div>
+
+                  {dashboardCategoryChartData.expensesList.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-6 text-center">Nenhuma despesa para exibir no mês de {formatMonthLabel(dashboardMonth)}.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {dashboardCategoryChartData.expensesList.slice(0, 4).map((item) => (
+                        <div key={item.catId} className="space-y-1">
+                          <div className="flex justify-between text-xs font-semibold">
+                            <span className="text-slate-700 flex items-center space-x-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                              <span>{item.name}</span>
+                            </span>
+                            <span className="text-slate-900">{formatMoney(item.amountCents)} ({item.percentage}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-300" style={{ width: `${item.percentage}%`, backgroundColor: item.color }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => setActiveTab('charts')} className="text-xs font-semibold text-blue-600 hover:underline">
-                  Ver Análise Completa
-                </button>
               </div>
 
-              {dashboardCategoryChartData.expensesList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-3 text-center">Nenhuma despesa para exibir no mês de {formatMonthLabel(dashboardMonth)}.</p>
-              ) : (
-                <div className="space-y-3">
-                  {dashboardCategoryChartData.expensesList.slice(0, 3).map((item) => (
-                    <div key={item.catId} className="space-y-1">
-                      <div className="flex justify-between text-xs font-semibold">
-                        <span className="text-slate-700 flex items-center space-x-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                          <span>{item.name}</span>
-                        </span>
-                        <span className="text-slate-900">{formatMoney(item.amountCents)} ({item.percentage}%)</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full transition-all duration-300" style={{ width: `${item.percentage}%`, backgroundColor: item.color }} />
-                      </div>
+              {/* Widget 2: Envelopes de Gastos (Método dos Envelopes) */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+                        <Mail className="w-4 h-4 text-blue-600" />
+                        <span>Envelopes & Metas de Gastos ({formatMonthLabel(dashboardMonth)})</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Acompanhe o consumo dos valores destinados por categoria</p>
                     </div>
-                  ))}
+                    <button onClick={() => setActiveTab('projections')} className="text-xs font-semibold text-blue-600 hover:underline">
+                      Ver Todos
+                    </button>
+                  </div>
+
+                  {!dashboardEnvelopes.hasEnvelopes ? (
+                    <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl text-center space-y-2">
+                      <p className="text-xs text-slate-600">
+                        Você ainda não ativou o método dos envelopes. Destine um teto mensal (ex: R$ 800 para Combustível) para controlar os gastos do dia a dia com tranquilidade.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('categories')}
+                        className="inline-flex items-center space-x-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Definir Teto nas Categorias</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* Faixa resumo */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-[11px]">
+                        <div>
+                          <span className="text-slate-500">Destinado:</span>{' '}
+                          <strong className="text-slate-900">{formatMoney(dashboardEnvelopes.totalAllocatedCents)}</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Gasto:</span>{' '}
+                          <strong className="text-slate-900">{formatMoney(dashboardEnvelopes.totalSpentCents)}</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Disponível:</span>{' '}
+                          <strong className="text-emerald-700 font-bold">{formatMoney(dashboardEnvelopes.totalResidualCommittedCents)}</strong>
+                        </div>
+                        {dashboardEnvelopes.totalOverspentCents > 0 && (
+                          <div>
+                            <span className="text-rose-600 font-bold">🚨 Estouro:</span>{' '}
+                            <strong className="text-rose-700 font-bold">+{formatMoney(dashboardEnvelopes.totalOverspentCents)}</strong>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Lista resumida de até 3 envelopes */}
+                      <div className="space-y-3 pt-1">
+                        {dashboardEnvelopes.envelopes.slice(0, 3).map((env) => {
+                          const cat = env.category;
+                          const barColor = env.isOver ? '#ef4444' : env.percentage >= 80 ? '#f59e0b' : '#10b981';
+                          return (
+                            <div key={cat.id} className="space-y-1">
+                              <div className="flex justify-between items-center text-xs font-semibold">
+                                <span className="text-slate-800 flex items-center space-x-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                                  <span>{cat.name}</span>
+                                </span>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-slate-500 font-medium">
+                                    {formatMoney(env.spentCents)} de {formatMoney(env.allocatedCents)}
+                                  </span>
+                                  {env.isOver ? (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                                      + {formatMoney(env.overspentCents)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      {formatMoney(env.remainingCents)} livres
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-300"
+                                  style={{
+                                    width: `${Math.min(100, env.percentage)}%`,
+                                    backgroundColor: barColor,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {dashboardEnvelopes.envelopes.length > 3 && (
+                        <div className="text-center pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('projections')}
+                            className="text-[11px] font-bold text-blue-600 hover:underline"
+                          >
+                            + {dashboardEnvelopes.envelopes.length - 3} outros envelopes em Planejamento & Projeções &gt;
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Listas do Dashboard: Próximos Vencimentos e Cartões */}
@@ -4948,10 +5163,19 @@ export default function App() {
               {categories.map((cat) => (
                 <div key={cat.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
                   <div className="flex items-center space-x-3">
-                    <span className="w-4 h-4 rounded-full" style={{ backgroundColor: cat.color }} />
+                    <span className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                     <div>
                       <h4 className="font-semibold text-sm text-slate-900">{cat.name}</h4>
-                      <span className="text-[10px] uppercase font-bold text-slate-400">{cat.type === 'INCOME' ? 'Receita' : 'Despesa'}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                          {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
+                        </span>
+                        {cat.budgetLimitCents > 0 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-50 text-blue-700 border border-blue-200 rounded">
+                            ✉️ {formatMoney(cat.budgetLimitCents)}/mês
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center space-x-1">
@@ -4984,16 +5208,251 @@ export default function App() {
           </div>
         )}
 
-        {/* ===================== ABA: PLANEJAMENTO & PROJEÇÕES COM IMPACTO DOS CENÁRIOS ===================== */}
+        {/* ===================== ABA: PLANEJAMENTO & PROJEÇÕES COM IMPACTO DOS CENÁRIOS E ENVELOPES ===================== */}
         {activeTab === 'projections' && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 tracking-tight">Projeção do Fluxo de Caixa</h2>
-                <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                  Previsão acumulada considerando receitas, despesas/parcelas e o impacto dos cenários ativos.
-                </p>
-              </div>
+          <div className="space-y-6">
+            {/* ===================== SEÇÃO 1: ENVELOPES & METAS DE GASTOS (MÉTODO DOS ENVELOPES) ===================== */}
+            {(() => {
+              const currentEnvelopesData = getEnvelopesForMonth(envelopeSelectedMonth);
+
+              return (
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+                  {/* Topo: Título, Navegador de Mês e Ações */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xl">✉️</span>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+                          Envelopes de Gastos & Orçamento Mensal
+                        </h2>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                          Método dos Envelopes
+                        </span>
+                      </div>
+                      <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                        Destine limites de renda para categorias (ex: Combustível: R$ 800). O valor fica virtualmente comprometido e é consumido conforme você registra suas compras no mês.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Navegador de Mês do Envelope */}
+                      <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => changeEnvelopeSelectedMonth(-1)}
+                          className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition"
+                          title="Mês Anterior"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-slate-800 px-2 capitalize min-w-[120px] text-center">
+                          {formatMonthLabel(envelopeSelectedMonth)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => changeEnvelopeSelectedMonth(1)}
+                          className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition"
+                          title="Próximo Mês"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {envelopeSelectedMonth !== currentActualMonth && (
+                        <button
+                          type="button"
+                          onClick={() => setEnvelopeSelectedMonth(currentActualMonth)}
+                          className="text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-xl border border-blue-200 transition"
+                        >
+                          Mês Atual
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'create', data: null })}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 shadow-xs transition active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Novo Envelope</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Faixa com 4 Métricas Consolidadas do Mês */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70">
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                        Total Destinado
+                      </span>
+                      <div className="text-lg font-bold text-slate-900 mt-0.5">
+                        {formatMoney(currentEnvelopesData.totalAllocatedCents)}
+                      </div>
+                      <span className="text-[10px] text-slate-400">Soma dos tetos mensais</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-100">
+                      <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider block">
+                        Gasto Realizado
+                      </span>
+                      <div className="text-lg font-bold text-blue-900 mt-0.5">
+                        {formatMoney(currentEnvelopesData.totalSpentCents)}
+                      </div>
+                      <span className="text-[10px] text-blue-600">Lançamentos em conta/cartão</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80">
+                      <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider block">
+                        Reserva Restante
+                      </span>
+                      <div className="text-lg font-bold text-emerald-700 mt-0.5">
+                        {formatMoney(currentEnvelopesData.totalResidualCommittedCents)}
+                      </div>
+                      <span className="text-[10px] text-emerald-600">Disponível nos envelopes</span>
+                    </div>
+
+                    <div
+                      className={`p-3.5 rounded-xl border ${
+                        currentEnvelopesData.totalOverspentCents > 0
+                          ? 'bg-rose-50 border-rose-200'
+                          : 'bg-slate-50 border-slate-200/70'
+                      }`}
+                    >
+                      <span
+                        className={`text-[11px] font-semibold uppercase tracking-wider block ${
+                          currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-700' : 'text-slate-500'
+                        }`}
+                      >
+                        {currentEnvelopesData.totalOverspentCents > 0 ? '🚨 Total Extrapolado' : 'Estouro / Excesso'}
+                      </span>
+                      <div
+                        className={`text-lg font-bold mt-0.5 ${
+                          currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-700' : 'text-slate-400'
+                        }`}
+                      >
+                        {currentEnvelopesData.totalOverspentCents > 0
+                          ? `+${formatMoney(currentEnvelopesData.totalOverspentCents)}`
+                          : 'R$ 0,00'}
+                      </div>
+                      <span
+                        className={`text-[10px] ${
+                          currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-600 font-medium' : 'text-slate-400'
+                        }`}
+                      >
+                        {currentEnvelopesData.totalOverspentCents > 0 ? 'Além do teto planejado' : 'Dentro do orçamento'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Grade de Cards de Envelopes */}
+                  {!currentEnvelopesData.hasEnvelopes ? (
+                    <div className="p-8 border-2 border-dashed border-slate-200 rounded-2xl text-center space-y-3 bg-slate-50/50">
+                      <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto text-2xl">
+                        ✉️
+                      </div>
+                      <h3 className="font-bold text-slate-800 text-base">Nenhum envelope configurado</h3>
+                      <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto">
+                        O método dos envelopes permite destinar valores mensais para despesas frequentes (ex: Combustível: R$ 800, Supermercado: R$ 1.500, Lazer: R$ 400).
+                        O valor fica virtualmente reservado no saldo e diminui automaticamente conforme você insere compras em conta ou cartão.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('categories')}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm transition inline-flex items-center space-x-1.5"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Definir Teto nas Categorias</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {currentEnvelopesData.envelopes.map((env) => {
+                        const cat = env.category;
+                        const barColor = env.isOver ? '#ef4444' : env.percentage >= 80 ? '#f59e0b' : '#10b981';
+
+                        return (
+                          <div
+                            key={cat.id}
+                            className={`p-4 rounded-2xl border transition shadow-xs flex flex-col justify-between space-y-3 ${
+                              env.isOver
+                                ? 'bg-rose-50/40 border-rose-200 ring-1 ring-rose-200'
+                                : 'bg-white border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            {/* Topo do Card: Categoria e Botão de Editar Teto */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                                <h4 className="font-bold text-sm text-slate-900">{cat.name}</h4>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: cat })}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title="Ajustar teto mensal do envelope"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Barra de Progresso */}
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-xs font-semibold">
+                                <span className="text-slate-600">
+                                  Gasto: <strong className="text-slate-900">{formatMoney(env.spentCents)}</strong>
+                                </span>
+                                <span className="text-slate-500">
+                                  Teto: <strong className="text-slate-800">{formatMoney(env.allocatedCents)}</strong>
+                                </span>
+                              </div>
+                              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-300"
+                                  style={{
+                                    width: `${Math.min(100, env.percentage)}%`,
+                                    backgroundColor: barColor,
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Rodapé do Card: Situação / Restante / Alerta de Estouro */}
+                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {env.percentage.toFixed(0)}% consumido
+                              </span>
+                              {env.isOver ? (
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                                  🚨 Ultrapassou {formatMoney(env.overspentCents)}
+                                </span>
+                              ) : env.remainingCents === 0 ? (
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                  Teto Atingido
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  ✓ {formatMoney(env.remainingCents)} disponíveis
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ===================== SEÇÃO 2: PROJEÇÃO DO FLUXO DE CAIXA COM CENÁRIOS E ENVELOPES ===================== */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 tracking-tight">Projeção do Fluxo de Caixa</h2>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                    Previsão acumulada considerando receitas, despesas/parcelas, envelopes e o impacto dos cenários ativos.
+                  </p>
+                </div>
 
               <div className="flex flex-wrap items-center gap-3">
                 {activeScenariosMonthlyNet !== 0 ? (
@@ -5168,12 +5627,13 @@ export default function App() {
                       let totalExpense = 0;
 
                       if (idx === 0) {
-                        // Mês atual: soma exata de todos os lançamentos ativos deste mês
+                        // Mês atual: soma exata de todos os lançamentos ativos deste mês + reserva residual dos envelopes + cenários ativos
                         const currentTxs = visibleTransactions.filter(
                           (t) => t.status !== 'CANCELADO' && t.date && t.date.startsWith(monthKey)
                         );
+                        const curMonthEnvelopes = getEnvelopesForMonth(monthKey);
                         totalIncome = currentTxs.filter((t) => t.type === 'INCOME').reduce((a, t) => a + t.amountCents, 0) + scenInc;
-                        totalExpense = currentTxs.filter((t) => t.type === 'EXPENSE').reduce((a, t) => a + t.amountCents, 0) + scenExp;
+                        totalExpense = currentTxs.filter((t) => t.type === 'EXPENSE').reduce((a, t) => a + t.amountCents, 0) + curMonthEnvelopes.totalResidualCommittedCents + scenExp;
                       } else {
                         // Meses futuros:
                         // 1. Parcelas programadas que vencem especificamente neste mês
@@ -5222,7 +5682,12 @@ export default function App() {
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
 
-                        const finalBaseExpense = Math.max(baseExpensesCents, scheduledExpense);
+                        // 3. Orçamento planejado dos envelopes das categorias
+                        const envelopeAllocatedTotal = categories
+                          .filter((c) => !c.archived && c.type === 'EXPENSE' && (c.budgetLimitCents || 0) > 0)
+                          .reduce((acc, c) => acc + (c.budgetLimitCents || 0), 0);
+
+                        const finalBaseExpense = Math.max(baseExpensesCents, scheduledExpense, envelopeAllocatedTotal);
                         const finalBaseIncome = Math.max(baseIncomesCents, scheduledIncome);
 
                         totalIncome = finalBaseIncome + monthInstallmentIncome + scenInc;
@@ -5293,7 +5758,8 @@ export default function App() {
               </table>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {/* ===================== ABA: CENÁRIOS & SIMULAÇÕES (COM CADASTRO E CONVERSÃO) ===================== */}
         {activeTab === 'scenarios' && (
@@ -6467,6 +6933,32 @@ export default function App() {
                       className="w-full h-10 p-1 border border-slate-300 rounded-lg cursor-pointer"
                     />
                   </div>
+                </div>
+
+                <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-800">
+                      Teto Mensal do Envelope (Orçamento)
+                    </label>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full">
+                      ✉️ Método dos Envelopes
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-sm text-slate-500 font-bold">R$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="budgetLimit"
+                      defaultValue={modalState.data?.budgetLimitCents ? (modalState.data.budgetLimitCents / 100).toFixed(2) : ''}
+                      placeholder="0,00 (Sem teto definido)"
+                      className="w-full border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-tight">
+                    Destine um valor mensal para esta categoria (ex: 800 para Combustível). Conforme registrar compras na conta ou no cartão de crédito, o saldo disponível reduzirá automaticamente.
+                  </p>
                 </div>
 
                 <div className="pt-4 border-t border-slate-100 flex justify-end space-x-2">

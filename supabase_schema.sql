@@ -51,8 +51,12 @@ CREATE TABLE IF NOT EXISTS public.categories (
   type TEXT NOT NULL DEFAULT 'EXPENSE' CHECK (type IN ('INCOME', 'EXPENSE')),
   color TEXT NOT NULL DEFAULT '#475569',
   archived BOOLEAN NOT NULL DEFAULT FALSE,
+  budget_limit_cents BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Garante a coluna budget_limit_cents em instalações prévias
+ALTER TABLE public.categories ADD COLUMN IF NOT EXISTS budget_limit_cents BIGINT NOT NULL DEFAULT 0;
 
 -- 5. Tabela de Lançamentos Financeiros (Transações)
 CREATE TABLE IF NOT EXISTS public.transactions (
@@ -93,6 +97,16 @@ CREATE TABLE IF NOT EXISTS public.scenarios (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 7. Tabela de Envelopes Mensais e Tetos Planejados
+CREATE TABLE IF NOT EXISTS public.monthly_envelopes (
+  id TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL REFERENCES public.categories(id) ON DELETE CASCADE,
+  month_key TEXT NOT NULL,
+  amount_cents BIGINT NOT NULL DEFAULT 0,
+  rule_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Índices de performance para consultas frequentes
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions(date);
 CREATE INDEX IF NOT EXISTS idx_transactions_scope ON public.transactions(scope);
@@ -100,6 +114,8 @@ CREATE INDEX IF NOT EXISTS idx_transactions_owner ON public.transactions(owner_i
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON public.transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_card ON public.transactions(card_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_group ON public.transactions(installment_group_id);
+CREATE INDEX IF NOT EXISTS idx_monthly_envelopes_month ON public.monthly_envelopes(month_key);
+CREATE INDEX IF NOT EXISTS idx_monthly_envelopes_cat ON public.monthly_envelopes(category_id);
 
 -- ==============================================================================
 -- DADOS INICIAIS (SEEDS) - Executados se as tabelas estiverem vazias
@@ -140,6 +156,7 @@ ALTER TABLE public.cards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scenarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.monthly_envelopes ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para perfis
 CREATE POLICY "Permitir leitura de perfis para todos"
@@ -162,6 +179,12 @@ CREATE POLICY "Permitir acesso completo às transações para autenticados"
 
 CREATE POLICY "Permitir acesso completo aos cenários para autenticados"
   ON public.scenarios FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY "Permitir acesso completo aos envelopes para autenticados"
+  ON public.monthly_envelopes FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY "Permitir leitura e escrita de envelopes"
+  ON public.monthly_envelopes FOR ALL USING (true) WITH CHECK (true);
 
 -- Trigger para sincronização automática de novo usuário do Supabase Auth para a tabela profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()

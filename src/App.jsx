@@ -164,7 +164,18 @@ export default function App() {
 
   const [accounts, setAccounts] = useState([]);
   const [cards, setCards] = useState([]);
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState(() => {
+    try {
+      const stored = localStorage.getItem('financas_categories_v1');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_CATEGORIES;
+  });
   const [transactions, setTransactions] = useState([]);
   const [scenarios, setScenarios] = useState([]);
   const [monthlyEnvelopes, setMonthlyEnvelopes] = useState(() => {
@@ -1476,9 +1487,11 @@ export default function App() {
     };
     if (isMoreMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [isMoreMenuOpen]);
 
@@ -3144,8 +3157,8 @@ export default function App() {
         </div>
 
         {/* Abas Principais: 5 Módulos Principais + Menu Mais */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-800 flex items-center justify-between py-2">
-          <div className="flex space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5 scrollbar-none w-full sm:w-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-800 flex items-center justify-between py-2 relative">
+          <div className="flex space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5 scrollbar-none flex-1 min-w-0 pr-2">
             {/* 1. Visão Geral */}
             <button
               type="button"
@@ -3220,68 +3233,71 @@ export default function App() {
               <Calendar className="w-4 h-4" />
               <span>Projeções & Cenários</span>
             </button>
+          </div>
 
-            {/* 6. Menu Mais ▾ */}
-            <div className="relative" ref={moreMenuRef}>
-              <button
-                type="button"
-                onClick={() => setIsMoreMenuOpen((prev) => !prev)}
-                className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
-                  ['charts', 'import', 'exports'].includes(activeTab) || isMoreMenuOpen
-                    ? 'bg-blue-600/90 text-white shadow'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
+          {/* 6. Menu Mais ▾ (Posicionado fora do scroll horizontal para que o dropdown nunca seja recortado/clipado) */}
+          <div className="relative shrink-0 ml-1 sm:ml-2" ref={moreMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+              className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                ['charts', 'import', 'exports'].includes(activeTab) || isMoreMenuOpen
+                  ? 'bg-blue-600/90 text-white shadow'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <MoreHorizontal className="w-4 h-4" />
+              <span>Mais</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isMoreMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isMoreMenuOpen && (
+              <div
+                className="absolute right-0 top-full mt-1.5 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150"
+                style={{ minWidth: '220px' }}
               >
-                <MoreHorizontal className="w-4 h-4" />
-                <span>Mais</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isMoreMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isMoreMenuOpen && (
-                <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('charts');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
-                      activeTab === 'charts' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
-                    }`}
-                  >
-                    <PieChart className="w-4 h-4 text-blue-400" />
-                    <span>Gráficos & Análise</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('import');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
-                      activeTab === 'import' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
-                    }`}
-                  >
-                    <UploadCloud className="w-4 h-4 text-emerald-400" />
-                    <span>Importar Fatura / Extrato</span>
-                  </button>
-                  <div className="border-t border-slate-800 my-1" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('exports');
-                      setIsMoreMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
-                      activeTab === 'exports' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
-                    }`}
-                  >
-                    <Download className="w-4 h-4 text-amber-400" />
-                    <span>Backup & Exportar</span>
-                  </button>
-                </div>
-              )}
-            </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('charts');
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
+                    activeTab === 'charts' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
+                  }`}
+                >
+                  <PieChart className="w-4 h-4 text-blue-400" />
+                  <span>Gráficos & Análise</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('import');
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
+                    activeTab === 'import' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4 text-emerald-400" />
+                  <span>Importar Fatura / Extrato</span>
+                </button>
+                <div className="border-t border-slate-800 my-1" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('exports');
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
+                    activeTab === 'exports' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
+                  }`}
+                >
+                  <Download className="w-4 h-4 text-amber-400" />
+                  <span>Backup & Exportar</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -6152,7 +6168,9 @@ export default function App() {
                       )
                       .reduce((acc, t) => acc + t.amountCents, 0);
 
-                    const baseExpensesCents = visibleTransactions
+                    // Gastos habituais base do mês atual agrupados por categoria (sem parcelamentos futuros)
+                    const baseExpensesByCat = {};
+                    visibleTransactions
                       .filter(
                         (t) =>
                           t.type === 'EXPENSE' &&
@@ -6161,7 +6179,10 @@ export default function App() {
                           t.date &&
                           t.date.startsWith(currentYearMonth)
                       )
-                      .reduce((acc, t) => acc + t.amountCents, 0);
+                      .forEach((t) => {
+                        const cid = t.categoryId || '__none__';
+                        baseExpensesByCat[cid] = (baseExpensesByCat[cid] || 0) + t.amountCents;
+                      });
 
                     for (let idx = 0; idx < projectionHorizon; idx++) {
                       const targetDate = new Date(startYear, startMonth + idx, 1);
@@ -6216,8 +6237,9 @@ export default function App() {
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
 
-                        // 2. Lançamentos pontuais já agendados para este mês futuro
-                        const scheduledExpense = visibleTransactions
+                        // 2. Lançamentos pontuais já agendados para este mês futuro agrupados por categoria
+                        const scheduledExpensesByCat = {};
+                        visibleTransactions
                           .filter(
                             (t) =>
                               t.status !== 'CANCELADO' &&
@@ -6226,7 +6248,10 @@ export default function App() {
                               t.date &&
                               t.date.startsWith(monthKey)
                           )
-                          .reduce((a, t) => a + t.amountCents, 0);
+                          .forEach((t) => {
+                            const cid = t.categoryId || '__none__';
+                            scheduledExpensesByCat[cid] = (scheduledExpensesByCat[cid] || 0) + t.amountCents;
+                          });
 
                         const scheduledIncome = visibleTransactions
                           .filter(
@@ -6239,20 +6264,32 @@ export default function App() {
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
 
-                        // 3. Orçamento planejado dos envelopes das categorias (respeita tetos específicos por mês)
-                        const envelopeAllocatedTotal = categories
+                        // 3. Orçamento planejado base categoria a categoria:
+                        // Para categorias com envelope/teto (específico do mês ou padrão): Math.max(envelopeCap, schedCat).
+                        // Para categorias sem envelope: preserva a despesa habitual Math.max(baseCat, schedCat).
+                        let finalBaseExpense = 0;
+                        categories
                           .filter((c) => !c.archived && c.type === 'EXPENSE')
-                          .reduce((acc, c) => {
+                          .forEach((c) => {
                             const specificEntry = monthlyEnvelopes.find(
                               (m) => m.categoryId === c.id && m.monthKey === monthKey
                             );
-                            if (specificEntry) {
-                              return acc + specificEntry.amountCents;
-                            }
-                            return acc + (c.budgetLimitCents || 0);
-                          }, 0);
+                            const envelopeCap = specificEntry ? specificEntry.amountCents : (c.budgetLimitCents || 0);
+                            const schedCat = scheduledExpensesByCat[c.id] || 0;
+                            const baseCat = baseExpensesByCat[c.id] || 0;
 
-                        const finalBaseExpense = Math.max(baseExpensesCents, scheduledExpense, envelopeAllocatedTotal);
+                            if (envelopeCap > 0) {
+                              finalBaseExpense += Math.max(envelopeCap, schedCat);
+                            } else {
+                              finalBaseExpense += Math.max(baseCat, schedCat);
+                            }
+                          });
+
+                        // Lançamentos sem categoria definida
+                        const uncatBase = baseExpensesByCat['__none__'] || 0;
+                        const uncatSched = scheduledExpensesByCat['__none__'] || 0;
+                        finalBaseExpense += Math.max(uncatBase, uncatSched);
+
                         const finalBaseIncome = Math.max(baseIncomesCents, scheduledIncome);
 
                         totalIncome = finalBaseIncome + monthInstallmentIncome + scenInc;

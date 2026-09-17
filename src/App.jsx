@@ -1311,12 +1311,19 @@ export default function App() {
     };
   }, [importPreviewData]);
 
-  // Impacto mensal consolidado dos cenários ATIVOS
+  // Impacto mensal consolidado dos cenários ATIVOS para o mês selecionado no dashboard
   const activeScenariosMonthlyNet = useMemo(() => {
     return scenarios
-      .filter((s) => s.active)
+      .filter((s) => {
+        if (!s.active) return false;
+        const sStartMonth = s.startDate ? s.startDate.slice(0, 7) : dashboardMonth;
+        const [dY, dM] = dashboardMonth.split('-').map(Number);
+        const [sY, sM] = sStartMonth.split('-').map(Number);
+        const monthDiff = (dY - sY) * 12 + (dM - sM);
+        return monthDiff >= 0 && monthDiff < (s.months || 12);
+      })
       .reduce((acc, s) => acc + s.monthlyImpactCents, 0);
-  }, [scenarios]);
+  }, [scenarios, dashboardMonth]);
 
   // Handlers para Cadastrar/Editar Cenários
   const handleSaveScenario = (e) => {
@@ -6028,10 +6035,12 @@ export default function App() {
                 </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                {activeScenariosMonthlyNet !== 0 ? (
+                {scenarios.filter((s) => s.active).length > 0 ? (
                   <div className="text-xs font-semibold bg-blue-50 text-blue-800 border border-blue-200 px-3 py-1.5 rounded-lg flex items-center space-x-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Cenários Ativos ({formatMoney(activeScenariosMonthlyNet)}/mês)</span>
+                    <span>
+                      {scenarios.filter((s) => s.active).length} Cenário{scenarios.filter((s) => s.active).length > 1 ? 's' : ''} Ativo{scenarios.filter((s) => s.active).length > 1 ? 's' : ''}
+                    </span>
                   </div>
                 ) : (
                   <div className="text-xs text-slate-400 bg-slate-100 px-3 py-1.5 rounded-lg">
@@ -6149,7 +6158,7 @@ export default function App() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {(() => {
-                    let runningBalance = monthSummary.totalBankBalance;
+                    let runningBalance = 0;
                     const rows = [];
                     const now = new Date();
                     const startYear = now.getFullYear();
@@ -6189,13 +6198,22 @@ export default function App() {
                       const monthKey = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
                       const label = targetDate.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
 
-                      // Impacto dos cenários ativos para este mês
+                      // Impacto dos cenários ativos para este mês (respeita data de início do cenário e duração)
                       let scenInc = 0;
                       let scenExp = 0;
                       scenarios
-                        .filter((s) => s.active)
+                        .filter((s) => {
+                          if (!s.active) return false;
+                          if (currentMemberId === 'user-all') return true;
+                          return s.scope === 'FAMILY' || s.ownerId === currentMemberId;
+                        })
                         .forEach((s) => {
-                          if (idx < (s.months || 12)) {
+                          const sStartMonth = s.startDate ? s.startDate.slice(0, 7) : currentYearMonth;
+                          const [tY, tM] = monthKey.split('-').map(Number);
+                          const [sY, sM] = sStartMonth.split('-').map(Number);
+                          const monthDiff = (tY - sY) * 12 + (tM - sM);
+
+                          if (monthDiff >= 0 && monthDiff < (s.months || 12)) {
                             if (s.monthlyImpactCents > 0) scenInc += s.monthlyImpactCents;
                             else scenExp += Math.abs(s.monthlyImpactCents);
                           }
@@ -6205,13 +6223,11 @@ export default function App() {
                       let totalExpense = 0;
 
                       if (idx === 0) {
-                        // Mês atual: soma exata de todos os lançamentos ativos deste mês + reserva residual dos envelopes + cenários ativos
-                        const currentTxs = visibleTransactions.filter(
-                          (t) => t.status !== 'CANCELADO' && t.date && t.date.startsWith(monthKey)
-                        );
-                        const curMonthEnvelopes = getEnvelopesForMonth(monthKey);
-                        totalIncome = currentTxs.filter((t) => t.type === 'INCOME').reduce((a, t) => a + t.amountCents, 0) + scenInc;
-                        totalExpense = currentTxs.filter((t) => t.type === 'EXPENSE').reduce((a, t) => a + t.amountCents, 0) + curMonthEnvelopes.totalResidualCommittedCents + scenExp;
+                        // Mês atual:
+                        // Sincronizado integralmente com os totais apurados da Visão Geral (Dashboard)
+                        totalIncome = monthSummary.incomeTotal + scenInc;
+                        totalExpense = monthSummary.expenseTotal + monthSummary.envelopesCommitted + scenExp;
+                        runningBalance = monthSummary.freeProjectedBalance + scenInc - scenExp;
                       } else {
                         // Meses futuros:
                         // 1. Parcelas programadas que vencem especificamente neste mês
@@ -6294,10 +6310,12 @@ export default function App() {
 
                         totalIncome = finalBaseIncome + monthInstallmentIncome + scenInc;
                         totalExpense = finalBaseExpense + monthInstallmentExpense + scenExp;
+
+                        const netMonth = totalIncome - totalExpense;
+                        runningBalance += netMonth;
                       }
 
                       const netMonth = totalIncome - totalExpense;
-                      runningBalance += netMonth;
                       const isHealthy = runningBalance >= 0;
 
                       rows.push({

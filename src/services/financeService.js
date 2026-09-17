@@ -6,6 +6,7 @@ export const STORAGE_KEYS = {
   categories: 'financas_categories_v1',
   transactions: 'financas_transactions_v1',
   scenarios: 'financas_scenarios_v1',
+  monthlyEnvelopes: 'financas_monthly_envelopes_v1',
 };
 
 // ==========================================
@@ -206,12 +207,40 @@ export const scenarioToDb = (scen) => ({
   active: scen.active,
 });
 
+export const monthlyEnvelopeToClient = (row) => ({
+  id: row.id,
+  categoryId: row.category_id || row.categoryId,
+  monthKey: row.month_key || row.monthKey,
+  amountCents: Number(row.amount_cents ?? row.amountCents ?? 0),
+  ruleId: row.rule_id || row.ruleId || null,
+  createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+});
+
+export const monthlyEnvelopeToDb = (env) => ({
+  id: env.id,
+  category_id: env.categoryId,
+  month_key: env.monthKey,
+  amount_cents: env.amountCents,
+  rule_id: env.ruleId || null,
+});
+
 // ==========================================
 // CARREGAMENTO INICIAL UNIFICADO
 // ==========================================
 
 export const loadInitialAppData = async (defaults = {}) => {
   const isCloud = isSupabaseConfigured() && supabase;
+
+  // Fallback para LocalStorage (NUNCA gera transações de exemplo por padrão)
+  const getLocal = (key, fallback) => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored !== null) return JSON.parse(stored);
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  };
 
   if (isCloud) {
     try {
@@ -242,22 +271,12 @@ export const loadInitialAppData = async (defaults = {}) => {
         categories: ((catRes.data?.length ? catRes.data : defaults.categories) || []).map(categoryToClient),
         transactions: (txRes.data || []).map(transactionToClient),
         scenarios: (scenRes.data || []).map(scenarioToClient),
+        monthlyEnvelopes: getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient),
       };
     } catch (err) {
       console.warn('Falha ao conectar no Supabase. Usando armazenamento local:', err);
     }
   }
-
-  // Fallback para LocalStorage (NUNCA gera transações de exemplo por padrão)
-  const getLocal = (key, fallback) => {
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored !== null) return JSON.parse(stored);
-      return fallback;
-    } catch {
-      return fallback;
-    }
-  };
 
   return {
     isCloud: false,
@@ -266,6 +285,7 @@ export const loadInitialAppData = async (defaults = {}) => {
     categories: getLocal(STORAGE_KEYS.categories, defaults.categories || []),
     transactions: getLocal(STORAGE_KEYS.transactions, []).map(transactionToClient),
     scenarios: getLocal(STORAGE_KEYS.scenarios, []),
+    monthlyEnvelopes: getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient),
   };
 };
 
@@ -367,6 +387,7 @@ export const resetEntireSystem = async () => {
   localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify([]));
+  localStorage.setItem(STORAGE_KEYS.monthlyEnvelopes, JSON.stringify([]));
   localStorage.removeItem('financas_demo_loaded');
   localStorage.setItem('financas_initialized', 'true');
 
@@ -375,6 +396,7 @@ export const resetEntireSystem = async () => {
     scenarios: [],
     accounts: [],
     cards: [],
+    monthlyEnvelopes: [],
   };
 };
 
@@ -399,6 +421,7 @@ export const syncItem = async (entity, item, isDelete = false) => {
       else if (entity === 'categories') dbData = categoryToDb(item);
       else if (entity === 'transactions') dbData = transactionToDb(item);
       else if (entity === 'scenarios') dbData = scenarioToDb(item);
+      else if (entity === 'monthlyEnvelopes' || entity === 'monthly_envelopes') dbData = monthlyEnvelopeToDb(item);
 
       if (dbData) {
         await supabase.from(entity).upsert(dbData);
@@ -425,6 +448,24 @@ export const syncBatchTransactions = async (txList, isDelete = false) => {
     console.error('Erro ao sincronizar lote de transações:', err);
   }
 };
+
+export const syncBatchMonthlyEnvelopes = async (envList, isDelete = false) => {
+  const isCloud = isSupabaseConfigured() && supabase;
+  if (!isCloud || !envList?.length) return;
+
+  try {
+    if (isDelete) {
+      const ids = envList.map((e) => e.id);
+      await supabase.from('monthly_envelopes').delete().in('id', ids);
+    } else {
+      const dbList = envList.map(monthlyEnvelopeToDb);
+      await supabase.from('monthly_envelopes').upsert(dbList);
+    }
+  } catch (err) {
+    console.error('Erro ao sincronizar lote de envelopes no Supabase:', err);
+  }
+};
+
 
 export const saveToLocalStorage = (key, data) => {
   try {

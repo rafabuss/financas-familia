@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   Wallet,
   CreditCard,
@@ -35,7 +35,8 @@ import {
   Filter,
   Search,
   Target,
-  Mail
+  Mail,
+  MoreHorizontal
 } from 'lucide-react';
 import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
@@ -43,6 +44,7 @@ import {
   loadInitialAppData,
   syncItem,
   syncBatchTransactions,
+  syncBatchMonthlyEnvelopes,
   saveToLocalStorage,
   clearDemoDataOnly,
   resetEntireSystem,
@@ -165,6 +167,31 @@ export default function App() {
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [transactions, setTransactions] = useState([]);
   const [scenarios, setScenarios] = useState([]);
+  const [monthlyEnvelopes, setMonthlyEnvelopes] = useState(() => {
+    try {
+      const local = localStorage.getItem('financas_monthly_envelopes_v1');
+      return local ? JSON.parse(local) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+
+  const [envelopeModalState, setEnvelopeModalState] = useState({
+    isOpen: false,
+    mode: 'create',
+    category: null,
+    monthKey: '',
+    existingEnvelope: null,
+    scope: 'all',
+  });
+
+  const [deleteEnvelopeModalState, setDeleteEnvelopeModalState] = useState({
+    isOpen: false,
+    envelope: null,
+    scope: 'this_only',
+  });
 
   // Controle de Nuvem e Sessão de Usuário
   const [isCloudConnected, setIsCloudConnected] = useState(false);
@@ -246,6 +273,7 @@ export default function App() {
           }
         }
         if (res.scenarios) setScenarios(res.scenarios);
+        if (res.monthlyEnvelopes) setMonthlyEnvelopes(res.monthlyEnvelopes);
       }
     });
   }, [currentUser]);
@@ -1029,9 +1057,24 @@ export default function App() {
       });
 
       const envelopeList = categories
-        .filter((cat) => !cat.archived && cat.type === 'EXPENSE' && (cat.budgetLimitCents || 0) > 0)
+        .filter((cat) => !cat.archived && cat.type === 'EXPENSE')
         .map((cat) => {
-          const allocatedCents = cat.budgetLimitCents || 0;
+          const specificEntry = monthlyEnvelopes.find(
+            (m) => m.categoryId === cat.id && m.monthKey === targetMonth
+          );
+
+          let allocatedCents = 0;
+          let envelopeEntry = null;
+
+          if (specificEntry) {
+            allocatedCents = specificEntry.amountCents;
+            envelopeEntry = specificEntry;
+          } else if (cat.budgetLimitCents && cat.budgetLimitCents > 0) {
+            allocatedCents = cat.budgetLimitCents;
+          }
+
+          if (allocatedCents <= 0) return null;
+
           const spentCents = spentByCat[cat.id] || 0;
           const remainingCents = Math.max(0, allocatedCents - spentCents);
           const overspentCents = Math.max(0, spentCents - allocatedCents);
@@ -1043,6 +1086,11 @@ export default function App() {
           else if (spentCents === allocatedCents) status = 'limit';
           else if (percentage >= 80) status = 'warning';
 
+          const hasRecurringSchedule = Boolean(
+            envelopeEntry?.ruleId ||
+            monthlyEnvelopes.some((m) => m.categoryId === cat.id && m.ruleId)
+          );
+
           return {
             category: cat,
             allocatedCents,
@@ -1052,8 +1100,12 @@ export default function App() {
             percentage,
             isOver,
             status,
+            envelopeEntry,
+            hasRecurringSchedule,
+            monthKey: targetMonth,
           };
         })
+        .filter(Boolean)
         .sort((a, b) => b.allocatedCents - a.allocatedCents);
 
       const totalAllocatedCents = envelopeList.reduce((acc, e) => acc + e.allocatedCents, 0);
@@ -1071,7 +1123,7 @@ export default function App() {
         hasEnvelopes: envelopeList.length > 0,
       };
     },
-    [visibleTransactions, categories, getTxDueDate]
+    [visibleTransactions, categories, monthlyEnvelopes, getTxDueDate]
   );
 
   const dashboardEnvelopes = useMemo(() => {
@@ -1412,6 +1464,271 @@ export default function App() {
     syncItem('categories', newCat);
 
     setModalState({ isOpen: false, type: null, mode: 'create', data: null });
+  };
+
+  const moreMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    if (isMoreMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isMoreMenuOpen]);
+
+  const addMonthsToYearMonth = (ym, offset) => {
+    if (!ym || !ym.includes('-')) {
+      const now = new Date();
+      ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+    const [yearStr, monthStr] = ym.split('-');
+    let y = parseInt(yearStr, 10);
+    let m = parseInt(monthStr, 10) - 1 + offset;
+    const d = new Date(y, m, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const handleSaveEnvelopeSchedule = ({
+    categoryId,
+    amountCents,
+    startMonth,
+    durationMonths = 1,
+    scope = 'all_recurring',
+    existingEnvelope = null,
+  }) => {
+    if (!categoryId) return;
+    const cat = categories.find((c) => c.id === categoryId);
+    if (!cat) return;
+
+    let updatedList = [...monthlyEnvelopes];
+    let ruleIdToUse = existingEnvelope?.envelopeEntry?.ruleId || null;
+
+    if (scope === 'this_only') {
+      const existingIdx = updatedList.findIndex(
+        (m) => m.categoryId === categoryId && m.monthKey === startMonth
+      );
+      const entryData = {
+        id: existingIdx >= 0 ? updatedList[existingIdx].id : `menv_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        categoryId,
+        monthKey: startMonth,
+        amountCents,
+        ruleId: existingIdx >= 0 ? updatedList[existingIdx].ruleId : (ruleIdToUse || null),
+      };
+
+      if (existingIdx >= 0) {
+        updatedList[existingIdx] = entryData;
+      } else {
+        updatedList.push(entryData);
+      }
+      syncItem('monthlyEnvelopes', entryData);
+    } else if (scope === 'from_now_on') {
+      if (!ruleIdToUse) {
+        ruleIdToUse = `envrule_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      }
+
+      const count = Math.max(1, durationMonths);
+      const monthsToSet = new Set();
+      const itemsToSync = [];
+
+      for (let i = 0; i < count; i++) {
+        const mKey = addMonthsToYearMonth(startMonth, i);
+        monthsToSet.add(mKey);
+        const existingIdx = updatedList.findIndex(
+          (m) => m.categoryId === categoryId && m.monthKey === mKey
+        );
+        const entryData = {
+          id: existingIdx >= 0 ? updatedList[existingIdx].id : `menv_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+          categoryId,
+          monthKey: mKey,
+          amountCents,
+          ruleId: ruleIdToUse,
+        };
+        if (existingIdx >= 0) {
+          updatedList[existingIdx] = entryData;
+        } else {
+          updatedList.push(entryData);
+        }
+        itemsToSync.push(entryData);
+      }
+
+      updatedList = updatedList.map((m) => {
+        if (
+          m.categoryId === categoryId &&
+          m.monthKey >= startMonth &&
+          !monthsToSet.has(m.monthKey) &&
+          (existingEnvelope?.envelopeEntry?.ruleId ? m.ruleId === existingEnvelope.envelopeEntry.ruleId : true)
+        ) {
+          const upd = { ...m, amountCents, ruleId: ruleIdToUse };
+          itemsToSync.push(upd);
+          return upd;
+        }
+        return m;
+      });
+
+      syncBatchMonthlyEnvelopes(itemsToSync);
+    } else {
+      if (!ruleIdToUse) {
+        ruleIdToUse = `envrule_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      }
+
+      const count = Math.max(1, durationMonths);
+      const itemsToSync = [];
+
+      for (let i = 0; i < count; i++) {
+        const mKey = addMonthsToYearMonth(startMonth, i);
+        const existingIdx = updatedList.findIndex(
+          (m) => m.categoryId === categoryId && m.monthKey === mKey
+        );
+        const entryData = {
+          id: existingIdx >= 0 ? updatedList[existingIdx].id : `menv_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+          categoryId,
+          monthKey: mKey,
+          amountCents,
+          ruleId: ruleIdToUse,
+        };
+        if (existingIdx >= 0) {
+          updatedList[existingIdx] = entryData;
+        } else {
+          updatedList.push(entryData);
+        }
+        itemsToSync.push(entryData);
+      }
+
+      if (existingEnvelope?.envelopeEntry?.ruleId) {
+        updatedList = updatedList.map((m) => {
+          if (m.ruleId === existingEnvelope.envelopeEntry.ruleId) {
+            const upd = { ...m, amountCents, ruleId: ruleIdToUse };
+            itemsToSync.push(upd);
+            return upd;
+          }
+          return m;
+        });
+      }
+
+      const updatedCat = { ...cat, budgetLimitCents: amountCents };
+      const updatedCats = categories.map((c) => (c.id === categoryId ? updatedCat : c));
+      setCategories(updatedCats);
+      saveToLocalStorage('financas_categories_v1', updatedCats);
+      syncItem('categories', updatedCat);
+
+      syncBatchMonthlyEnvelopes(itemsToSync);
+    }
+
+    setMonthlyEnvelopes(updatedList);
+    saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, updatedList);
+
+    setEnvelopeModalState({
+      isOpen: false,
+      mode: 'create',
+      category: null,
+      monthKey: '',
+      existingEnvelope: null,
+      scope: 'all',
+    });
+  };
+
+  const handleConfirmDeleteEnvelope = () => {
+    const { envelope, scope } = deleteEnvelopeModalState;
+    if (!envelope) return;
+
+    const catId = envelope.category.id;
+    const targetMonth = envelope.monthKey;
+    const ruleId = envelope.envelopeEntry?.ruleId;
+
+    let updatedList = [...monthlyEnvelopes];
+    let removedItems = [];
+
+    if (scope === 'this_only') {
+      const cat = categories.find((c) => c.id === catId);
+      const existingIdx = updatedList.findIndex(
+        (m) => m.categoryId === catId && m.monthKey === targetMonth
+      );
+
+      if (cat?.budgetLimitCents > 0) {
+        const zeroEntry = {
+          id: existingIdx >= 0 ? updatedList[existingIdx].id : `menv_${Date.now()}_zero`,
+          categoryId: catId,
+          monthKey: targetMonth,
+          amountCents: 0,
+          ruleId: null,
+        };
+        if (existingIdx >= 0) {
+          updatedList[existingIdx] = zeroEntry;
+        } else {
+          updatedList.push(zeroEntry);
+        }
+        syncItem('monthlyEnvelopes', zeroEntry);
+      } else {
+        if (existingIdx >= 0) {
+          removedItems.push(updatedList[existingIdx]);
+          updatedList.splice(existingIdx, 1);
+        }
+      }
+    } else if (scope === 'from_now_on') {
+      removedItems = updatedList.filter((m) => {
+        if (m.categoryId !== catId) return false;
+        if (m.monthKey < targetMonth) return false;
+        if (ruleId && m.ruleId && m.ruleId !== ruleId) return false;
+        return true;
+      });
+
+      updatedList = updatedList.filter((m) => !removedItems.some((r) => r.id === m.id));
+
+      const cat = categories.find((c) => c.id === catId);
+      if (cat?.budgetLimitCents > 0) {
+        const updatedCat = { ...cat, budgetLimitCents: 0 };
+        const updatedCats = categories.map((c) => (c.id === catId ? updatedCat : c));
+        setCategories(updatedCats);
+        saveToLocalStorage('financas_categories_v1', updatedCats);
+        syncItem('categories', updatedCat);
+      }
+    } else if (scope === 'before_this') {
+      removedItems = updatedList.filter((m) => {
+        if (m.categoryId !== catId) return false;
+        if (m.monthKey >= targetMonth) return false;
+        if (ruleId && m.ruleId && m.ruleId !== ruleId) return false;
+        return true;
+      });
+
+      updatedList = updatedList.filter((m) => !removedItems.some((r) => r.id === m.id));
+    } else {
+      // scope === 'all_recurring'
+      removedItems = updatedList.filter((m) => {
+        if (m.categoryId !== catId) return false;
+        if (ruleId) return m.ruleId === ruleId;
+        return true;
+      });
+
+      updatedList = updatedList.filter((m) => !removedItems.some((r) => r.id === m.id));
+
+      const cat = categories.find((c) => c.id === catId);
+      if (cat?.budgetLimitCents > 0) {
+        const updatedCat = { ...cat, budgetLimitCents: 0 };
+        const updatedCats = categories.map((c) => (c.id === catId ? updatedCat : c));
+        setCategories(updatedCats);
+        saveToLocalStorage('financas_categories_v1', updatedCats);
+        syncItem('categories', updatedCat);
+      }
+    }
+
+    if (removedItems.length > 0) {
+      syncBatchMonthlyEnvelopes(removedItems, true);
+    }
+
+    setMonthlyEnvelopes(updatedList);
+    saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, updatedList);
+
+    setDeleteEnvelopeModalState({
+      isOpen: false,
+      envelope: null,
+      scope: 'this_only',
+    });
   };
 
   // Salvar Lançamentos
@@ -2826,35 +3143,146 @@ export default function App() {
           </div>
         </div>
 
-        {/* Abas Principais */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-800 flex space-x-1 overflow-x-auto py-2 scrollbar-none">
-          {[
-            { id: 'dashboard', label: 'Visão Geral', icon: BarChart3 },
-            { id: 'transactions', label: 'Lançamentos', icon: RefreshCw },
-            { id: 'charts', label: 'Gráficos & Análise', icon: PieChart },
-            { id: 'accounts', label: 'Contas & Cartões', icon: Wallet },
-            { id: 'faturas', label: 'Faturas', icon: CreditCard },
-            { id: 'categories', label: 'Categorias', icon: Tags },
-            { id: 'projections', label: 'Planejamento & Projeções', icon: Calendar },
-            { id: 'scenarios', label: 'Cenários & Simulações', icon: Sliders },
-            { id: 'import', label: 'Importar Fatura / Extrato', icon: UploadCloud },
-            { id: 'exports', label: 'Backup & Exportar', icon: Download },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
+        {/* Abas Principais: 5 Módulos Principais + Menu Mais */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-800 flex items-center justify-between py-2">
+          <div className="flex space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5 scrollbar-none w-full sm:w-auto">
+            {/* 1. Visão Geral */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('dashboard');
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Visão Geral</span>
+            </button>
+
+            {/* 2. Lançamentos */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('transactions');
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                activeTab === 'transactions' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Lançamentos</span>
+            </button>
+
+            {/* 3. Contas & Faturas */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!['accounts', 'faturas'].includes(activeTab)) setActiveTab('accounts');
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                ['accounts', 'faturas'].includes(activeTab) ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>Contas & Faturas</span>
+            </button>
+
+            {/* 4. Envelopes & Categorias */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!['envelopes', 'categories'].includes(activeTab)) setActiveTab('envelopes');
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                ['envelopes', 'categories'].includes(activeTab) ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Mail className="w-4 h-4" />
+              <span>Envelopes & Categorias</span>
+            </button>
+
+            {/* 5. Projeções & Cenários */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!['projections', 'scenarios'].includes(activeTab)) setActiveTab('projections');
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                ['projections', 'scenarios'].includes(activeTab) ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              <span>Projeções & Cenários</span>
+            </button>
+
+            {/* 6. Menu Mais ▾ */}
+            <div className="relative" ref={moreMenuRef}>
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
-                  active ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                type="button"
+                onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+                className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                  ['charts', 'import', 'exports'].includes(activeTab) || isMoreMenuOpen
+                    ? 'bg-blue-600/90 text-white shadow'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
+                <MoreHorizontal className="w-4 h-4" />
+                <span>Mais</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isMoreMenuOpen ? 'rotate-180' : ''}`} />
               </button>
-            );
-          })}
+
+              {isMoreMenuOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('charts');
+                      setIsMoreMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
+                      activeTab === 'charts' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <PieChart className="w-4 h-4 text-blue-400" />
+                    <span>Gráficos & Análise</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('import');
+                      setIsMoreMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
+                      activeTab === 'import' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <UploadCloud className="w-4 h-4 text-emerald-400" />
+                    <span>Importar Fatura / Extrato</span>
+                  </button>
+                  <div className="border-t border-slate-800 my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('exports');
+                      setIsMoreMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center space-x-2.5 px-3.5 py-2.5 text-xs sm:text-sm text-left transition ${
+                      activeTab === 'exports' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <Download className="w-4 h-4 text-amber-400" />
+                    <span>Backup & Exportar</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
@@ -3214,7 +3642,7 @@ export default function App() {
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">Acompanhe o consumo dos valores destinados por categoria</p>
                     </div>
-                    <button onClick={() => setActiveTab('projections')} className="text-xs font-semibold text-blue-600 hover:underline">
+                    <button onClick={() => setActiveTab('envelopes')} className="text-xs font-semibold text-blue-600 hover:underline">
                       Ver Todos
                     </button>
                   </div>
@@ -3226,11 +3654,11 @@ export default function App() {
                       </p>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('categories')}
+                        onClick={() => setActiveTab('envelopes')}
                         className="inline-flex items-center space-x-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>Definir Teto nas Categorias</span>
+                        <span>Definir Teto nos Envelopes</span>
                       </button>
                     </div>
                   ) : (
@@ -4726,6 +5154,32 @@ export default function App() {
           </div>
         )}
 
+        {/* ===================== SUB-ABAS DO MÓDULO: CONTAS & FATURAS ===================== */}
+        {['accounts', 'faturas'].includes(activeTab) && (
+          <div className="flex items-center space-x-1.5 bg-slate-200/80 p-1 rounded-xl w-fit mb-6 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('accounts')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'accounts' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>Contas & Cartões</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('faturas')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'faturas' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>Faturas dos Cartões</span>
+            </button>
+          </div>
+        )}
+
         {/* ===================== ABA: CONTAS & CARTÕES ===================== */}
         {activeTab === 'accounts' && (
           <div className="space-y-8">
@@ -5142,6 +5596,317 @@ export default function App() {
           </div>
         )}
 
+        {/* ===================== SUB-ABAS DO MÓDULO: ENVELOPES & CATEGORIAS ===================== */}
+        {['envelopes', 'categories'].includes(activeTab) && (
+          <div className="flex items-center space-x-1.5 bg-slate-200/80 p-1 rounded-xl w-fit mb-6 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('envelopes')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'envelopes' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Mail className="w-4 h-4" />
+              <span>✉️ Envelopes de Gastos</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('categories')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'categories' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Tags className="w-4 h-4" />
+              <span>🏷️ Categorias & Tetos</span>
+            </button>
+          </div>
+        )}
+
+        {/* ===================== ABA: ENVELOPES DE GASTOS & ORÇAMENTO ===================== */}
+        {activeTab === 'envelopes' && (() => {
+          const currentEnvelopesData = getEnvelopesForMonth(envelopeSelectedMonth);
+
+          return (
+            <div className="space-y-6">
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+                {/* Topo: Título, Navegador de Mês e Ação Novo Envelope */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xl">✉️</span>
+                      <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+                        Envelopes de Gastos & Orçamento Mensal
+                      </h2>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                        Método dos Envelopes
+                      </span>
+                    </div>
+                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                      Destine limites de renda para categorias (ex: Combustível: R$ 800). O valor fica virtualmente comprometido e é consumido conforme você registra suas compras no mês.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Navegador de Mês do Envelope */}
+                    <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => changeEnvelopeSelectedMonth(-1)}
+                        className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition"
+                        title="Mês Anterior"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <span className="text-xs font-bold text-slate-800 px-2 capitalize min-w-[120px] text-center">
+                        {formatMonthLabel(envelopeSelectedMonth)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => changeEnvelopeSelectedMonth(1)}
+                        className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition"
+                        title="Próximo Mês"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {envelopeSelectedMonth !== currentActualMonth && (
+                      <button
+                        type="button"
+                        onClick={() => setEnvelopeSelectedMonth(currentActualMonth)}
+                        className="text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-xl border border-blue-200 transition"
+                      >
+                        Mês Atual
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEnvelopeModalState({
+                          isOpen: true,
+                          mode: 'create',
+                          category: null,
+                          monthKey: envelopeSelectedMonth,
+                          existingEnvelope: null,
+                          scope: 'all_recurring',
+                        })
+                      }
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 shadow-xs transition active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Programar Teto / Envelope</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Faixa com 4 Métricas Consolidadas do Mês */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70">
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                      Total Destinado
+                    </span>
+                    <div className="text-lg font-bold text-slate-900 mt-0.5">
+                      {formatMoney(currentEnvelopesData.totalAllocatedCents)}
+                    </div>
+                    <span className="text-[10px] text-slate-400">Soma dos tetos mensais</span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-100">
+                    <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider block">
+                      Gasto Realizado
+                    </span>
+                    <div className="text-lg font-bold text-blue-900 mt-0.5">
+                      {formatMoney(currentEnvelopesData.totalSpentCents)}
+                    </div>
+                    <span className="text-[10px] text-blue-600">Lançamentos em conta/cartão</span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80">
+                    <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider block">
+                      Reserva Restante
+                    </span>
+                    <div className="text-lg font-bold text-emerald-700 mt-0.5">
+                      {formatMoney(currentEnvelopesData.totalResidualCommittedCents)}
+                    </div>
+                    <span className="text-[10px] text-emerald-600">Disponível nos envelopes</span>
+                  </div>
+
+                  <div
+                    className={`p-3.5 rounded-xl border ${
+                      currentEnvelopesData.totalOverspentCents > 0
+                        ? 'bg-rose-50 border-rose-200'
+                        : 'bg-slate-50 border-slate-200/70'
+                    }`}
+                  >
+                    <span
+                      className={`text-[11px] font-semibold uppercase tracking-wider block ${
+                        currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-700' : 'text-slate-500'
+                      }`}
+                    >
+                      {currentEnvelopesData.totalOverspentCents > 0 ? '🚨 Total Extrapolado' : 'Estouro / Excesso'}
+                    </span>
+                    <div
+                      className={`text-lg font-bold mt-0.5 ${
+                        currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-700' : 'text-slate-400'
+                      }`}
+                    >
+                      {currentEnvelopesData.totalOverspentCents > 0
+                        ? `+${formatMoney(currentEnvelopesData.totalOverspentCents)}`
+                        : 'R$ 0,00'}
+                    </div>
+                    <span
+                      className={`text-[10px] ${
+                        currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-600 font-medium' : 'text-slate-400'
+                      }`}
+                    >
+                      {currentEnvelopesData.totalOverspentCents > 0 ? 'Além do teto planejado' : 'Dentro do orçamento'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Grade de Cards de Envelopes */}
+                {!currentEnvelopesData.hasEnvelopes ? (
+                  <div className="p-8 border-2 border-dashed border-slate-200 rounded-2xl text-center space-y-3 bg-slate-50/50">
+                    <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto text-2xl">
+                      ✉️
+                    </div>
+                    <h3 className="font-bold text-slate-800 text-base">Nenhum envelope configurado para este mês</h3>
+                    <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto">
+                      O método dos envelopes permite destinar valores mensais para despesas frequentes (ex: Combustível: R$ 800, Supermercado: R$ 1.500, Lazer: R$ 400).
+                      Você pode programar um teto para 3, 6, 12, 24 ou 36 meses, e o valor reservado diminui conforme suas compras acontecem.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEnvelopeModalState({
+                          isOpen: true,
+                          mode: 'create',
+                          category: null,
+                          monthKey: envelopeSelectedMonth,
+                          existingEnvelope: null,
+                          scope: 'all_recurring',
+                        })
+                      }
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm transition inline-flex items-center space-x-1.5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Programar Primeiro Envelope</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {currentEnvelopesData.envelopes.map((env) => {
+                      const cat = env.category;
+                      const barColor = env.isOver ? '#ef4444' : env.percentage >= 80 ? '#f59e0b' : '#10b981';
+
+                      return (
+                        <div
+                          key={cat.id}
+                          className={`p-4 rounded-2xl border transition shadow-xs flex flex-col justify-between space-y-3 ${
+                            env.isOver
+                              ? 'bg-rose-50/40 border-rose-200 ring-1 ring-rose-200'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          {/* Topo do Card: Categoria, Tag de Recorrência e Botões */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                              <div>
+                                <h4 className="font-bold text-sm text-slate-900">{cat.name}</h4>
+                                {env.hasRecurringSchedule && (
+                                  <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100 inline-block">
+                                    🗓️ Programado
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEnvelopeModalState({
+                                    isOpen: true,
+                                    mode: 'edit',
+                                    category: cat,
+                                    monthKey: envelopeSelectedMonth,
+                                    existingEnvelope: env,
+                                    scope: env.hasRecurringSchedule ? 'all_recurring' : 'this_only',
+                                  })
+                                }
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title="Ajustar teto / programação do envelope"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteEnvelopeModalState({
+                                    isOpen: true,
+                                    envelope: env,
+                                    scope: env.hasRecurringSchedule ? 'all_recurring' : 'this_only',
+                                  })
+                                }
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                title="Excluir envelope deste mês ou da programação"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Barra de Progresso */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-xs font-semibold">
+                              <span className="text-slate-600">
+                                Gasto: <strong className="text-slate-900">{formatMoney(env.spentCents)}</strong>
+                              </span>
+                              <span className="text-slate-500">
+                                Teto: <strong className="text-slate-800">{formatMoney(env.allocatedCents)}</strong>
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-300"
+                                style={{
+                                  width: `${Math.min(100, env.percentage)}%`,
+                                  backgroundColor: barColor,
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Rodapé do Card: Situação / Restante / Alerta de Estouro */}
+                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-slate-500">
+                              {env.percentage.toFixed(0)}% consumido
+                            </span>
+                            {env.isOver ? (
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                                🚨 Ultrapassou {formatMoney(env.overspentCents)}
+                              </span>
+                            ) : env.remainingCents === 0 ? (
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                Teto Atingido
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                ✓ {formatMoney(env.remainingCents)} disponíveis
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ===================== ABA: CATEGORIAS ===================== */}
         {activeTab === 'categories' && (
           <div className="space-y-6">
@@ -5208,243 +5973,35 @@ export default function App() {
           </div>
         )}
 
-        {/* ===================== ABA: PLANEJAMENTO & PROJEÇÕES COM IMPACTO DOS CENÁRIOS E ENVELOPES ===================== */}
+        {/* ===================== SUB-ABAS DO MÓDULO: PROJEÇÕES & CENÁRIOS ===================== */}
+        {['projections', 'scenarios'].includes(activeTab) && (
+          <div className="flex items-center space-x-1.5 bg-slate-200/80 p-1 rounded-xl w-fit mb-6 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('projections')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'projections' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              <span>📅 Projeção do Fluxo de Caixa</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('scenarios')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'scenarios' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span>✨ Cenários & Simulações</span>
+            </button>
+          </div>
+        )}
+
+        {/* ===================== ABA: PLANEJAMENTO & PROJEÇÃO DO FLUXO DE CAIXA ===================== */}
         {activeTab === 'projections' && (
           <div className="space-y-6">
-            {/* ===================== SEÇÃO 1: ENVELOPES & METAS DE GASTOS (MÉTODO DOS ENVELOPES) ===================== */}
-            {(() => {
-              const currentEnvelopesData = getEnvelopesForMonth(envelopeSelectedMonth);
-
-              return (
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
-                  {/* Topo: Título, Navegador de Mês e Ações */}
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xl">✉️</span>
-                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                          Envelopes de Gastos & Orçamento Mensal
-                        </h2>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
-                          Método dos Envelopes
-                        </span>
-                      </div>
-                      <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                        Destine limites de renda para categorias (ex: Combustível: R$ 800). O valor fica virtualmente comprometido e é consumido conforme você registra suas compras no mês.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Navegador de Mês do Envelope */}
-                      <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 p-1 rounded-xl">
-                        <button
-                          type="button"
-                          onClick={() => changeEnvelopeSelectedMonth(-1)}
-                          className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition"
-                          title="Mês Anterior"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <span className="text-xs font-bold text-slate-800 px-2 capitalize min-w-[120px] text-center">
-                          {formatMonthLabel(envelopeSelectedMonth)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => changeEnvelopeSelectedMonth(1)}
-                          className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 rounded-lg transition"
-                          title="Próximo Mês"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {envelopeSelectedMonth !== currentActualMonth && (
-                        <button
-                          type="button"
-                          onClick={() => setEnvelopeSelectedMonth(currentActualMonth)}
-                          className="text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-xl border border-blue-200 transition"
-                        >
-                          Mês Atual
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'create', data: null })}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 shadow-xs transition active:scale-95"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Novo Envelope</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Faixa com 4 Métricas Consolidadas do Mês */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70">
-                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
-                        Total Destinado
-                      </span>
-                      <div className="text-lg font-bold text-slate-900 mt-0.5">
-                        {formatMoney(currentEnvelopesData.totalAllocatedCents)}
-                      </div>
-                      <span className="text-[10px] text-slate-400">Soma dos tetos mensais</span>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-100">
-                      <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider block">
-                        Gasto Realizado
-                      </span>
-                      <div className="text-lg font-bold text-blue-900 mt-0.5">
-                        {formatMoney(currentEnvelopesData.totalSpentCents)}
-                      </div>
-                      <span className="text-[10px] text-blue-600">Lançamentos em conta/cartão</span>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80">
-                      <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider block">
-                        Reserva Restante
-                      </span>
-                      <div className="text-lg font-bold text-emerald-700 mt-0.5">
-                        {formatMoney(currentEnvelopesData.totalResidualCommittedCents)}
-                      </div>
-                      <span className="text-[10px] text-emerald-600">Disponível nos envelopes</span>
-                    </div>
-
-                    <div
-                      className={`p-3.5 rounded-xl border ${
-                        currentEnvelopesData.totalOverspentCents > 0
-                          ? 'bg-rose-50 border-rose-200'
-                          : 'bg-slate-50 border-slate-200/70'
-                      }`}
-                    >
-                      <span
-                        className={`text-[11px] font-semibold uppercase tracking-wider block ${
-                          currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-700' : 'text-slate-500'
-                        }`}
-                      >
-                        {currentEnvelopesData.totalOverspentCents > 0 ? '🚨 Total Extrapolado' : 'Estouro / Excesso'}
-                      </span>
-                      <div
-                        className={`text-lg font-bold mt-0.5 ${
-                          currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-700' : 'text-slate-400'
-                        }`}
-                      >
-                        {currentEnvelopesData.totalOverspentCents > 0
-                          ? `+${formatMoney(currentEnvelopesData.totalOverspentCents)}`
-                          : 'R$ 0,00'}
-                      </div>
-                      <span
-                        className={`text-[10px] ${
-                          currentEnvelopesData.totalOverspentCents > 0 ? 'text-rose-600 font-medium' : 'text-slate-400'
-                        }`}
-                      >
-                        {currentEnvelopesData.totalOverspentCents > 0 ? 'Além do teto planejado' : 'Dentro do orçamento'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Grade de Cards de Envelopes */}
-                  {!currentEnvelopesData.hasEnvelopes ? (
-                    <div className="p-8 border-2 border-dashed border-slate-200 rounded-2xl text-center space-y-3 bg-slate-50/50">
-                      <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto text-2xl">
-                        ✉️
-                      </div>
-                      <h3 className="font-bold text-slate-800 text-base">Nenhum envelope configurado</h3>
-                      <p className="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto">
-                        O método dos envelopes permite destinar valores mensais para despesas frequentes (ex: Combustível: R$ 800, Supermercado: R$ 1.500, Lazer: R$ 400).
-                        O valor fica virtualmente reservado no saldo e diminui automaticamente conforme você insere compras em conta ou cartão.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('categories')}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm transition inline-flex items-center space-x-1.5"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Definir Teto nas Categorias</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {currentEnvelopesData.envelopes.map((env) => {
-                        const cat = env.category;
-                        const barColor = env.isOver ? '#ef4444' : env.percentage >= 80 ? '#f59e0b' : '#10b981';
-
-                        return (
-                          <div
-                            key={cat.id}
-                            className={`p-4 rounded-2xl border transition shadow-xs flex flex-col justify-between space-y-3 ${
-                              env.isOver
-                                ? 'bg-rose-50/40 border-rose-200 ring-1 ring-rose-200'
-                                : 'bg-white border-slate-200 hover:border-slate-300'
-                            }`}
-                          >
-                            {/* Topo do Card: Categoria e Botão de Editar Teto */}
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-2">
-                                <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                                <h4 className="font-bold text-sm text-slate-900">{cat.name}</h4>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: cat })}
-                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                                title="Ajustar teto mensal do envelope"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-
-                            {/* Barra de Progresso */}
-                            <div className="space-y-1.5">
-                              <div className="flex justify-between text-xs font-semibold">
-                                <span className="text-slate-600">
-                                  Gasto: <strong className="text-slate-900">{formatMoney(env.spentCents)}</strong>
-                                </span>
-                                <span className="text-slate-500">
-                                  Teto: <strong className="text-slate-800">{formatMoney(env.allocatedCents)}</strong>
-                                </span>
-                              </div>
-                              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full rounded-full transition-all duration-300"
-                                  style={{
-                                    width: `${Math.min(100, env.percentage)}%`,
-                                    backgroundColor: barColor,
-                                  }}
-                                />
-                              </div>
-                            </div>
-
-                            {/* Rodapé do Card: Situação / Restante / Alerta de Estouro */}
-                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                              <span className="text-[11px] font-bold text-slate-500">
-                                {env.percentage.toFixed(0)}% consumido
-                              </span>
-                              {env.isOver ? (
-                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
-                                  🚨 Ultrapassou {formatMoney(env.overspentCents)}
-                                </span>
-                              ) : env.remainingCents === 0 ? (
-                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                                  Teto Atingido
-                                </span>
-                              ) : (
-                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  ✓ {formatMoney(env.remainingCents)} disponíveis
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* ===================== SEÇÃO 2: PROJEÇÃO DO FLUXO DE CAIXA COM CENÁRIOS E ENVELOPES ===================== */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
                 <div>
@@ -5682,10 +6239,18 @@ export default function App() {
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
 
-                        // 3. Orçamento planejado dos envelopes das categorias
+                        // 3. Orçamento planejado dos envelopes das categorias (respeita tetos específicos por mês)
                         const envelopeAllocatedTotal = categories
-                          .filter((c) => !c.archived && c.type === 'EXPENSE' && (c.budgetLimitCents || 0) > 0)
-                          .reduce((acc, c) => acc + (c.budgetLimitCents || 0), 0);
+                          .filter((c) => !c.archived && c.type === 'EXPENSE')
+                          .reduce((acc, c) => {
+                            const specificEntry = monthlyEnvelopes.find(
+                              (m) => m.categoryId === c.id && m.monthKey === monthKey
+                            );
+                            if (specificEntry) {
+                              return acc + specificEntry.amountCents;
+                            }
+                            return acc + (c.budgetLimitCents || 0);
+                          }, 0);
 
                         const finalBaseExpense = Math.max(baseExpensesCents, scheduledExpense, envelopeAllocatedTotal);
                         const finalBaseIncome = Math.max(baseIncomesCents, scheduledIncome);
@@ -8129,6 +8694,433 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Modal de Programação de Teto / Envelope */}
+      {envelopeModalState.isOpen && (() => {
+        const isEditing = envelopeModalState.mode === 'edit';
+        const initialCatId =
+          envelopeModalState.category?.id ||
+          categories.find((c) => !c.archived && c.type === 'EXPENSE')?.id ||
+          '';
+        const initialMonth =
+          envelopeModalState.monthKey || envelopeSelectedMonth || currentActualMonth;
+        const initialAmount = envelopeModalState.existingEnvelope
+          ? (envelopeModalState.existingEnvelope.allocatedCents / 100).toFixed(2)
+          : envelopeModalState.category?.budgetLimitCents
+          ? (envelopeModalState.category.budgetLimitCents / 100).toFixed(2)
+          : '';
+
+        const hasRecurrence =
+          envelopeModalState.existingEnvelope?.hasRecurringSchedule ||
+          Boolean(envelopeModalState.existingEnvelope?.envelopeEntry?.ruleId);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 text-lg">
+                    ✉️
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">
+                      {isEditing ? 'Ajustar Teto do Envelope' : 'Programar Teto / Envelope'}
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Defina um limite mensal e programe por múltiplos meses
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEnvelopeModalState({
+                      isOpen: false,
+                      mode: 'create',
+                      category: null,
+                      monthKey: '',
+                      existingEnvelope: null,
+                      scope: 'all',
+                    })
+                  }
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.target);
+                  const categoryId = fd.get('categoryId');
+                  const amountRaw = fd.get('amount');
+                  const amountCents = Math.round(parseFloat(amountRaw || '0') * 100);
+                  const startMonth = fd.get('startMonth');
+                  const durationMonths = parseInt(fd.get('durationMonths') || '1', 10);
+                  const scope = fd.get('scope') || 'all_recurring';
+
+                  handleSaveEnvelopeSchedule({
+                    categoryId,
+                    amountCents,
+                    startMonth,
+                    durationMonths,
+                    scope,
+                    existingEnvelope: envelopeModalState.existingEnvelope,
+                  });
+                }}
+                className="pt-4 space-y-4"
+              >
+                {/* Seleção de Categoria */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Categoria Despesa
+                  </label>
+                  <select
+                    name="categoryId"
+                    defaultValue={initialCatId}
+                    disabled={isEditing}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none transition disabled:opacity-75"
+                    required
+                  >
+                    {categories
+                      .filter((c) => !c.archived && c.type === 'EXPENSE')
+                      .map((cat) => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Mês Inicial e Valor do Teto */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Mês de Referência
+                    </label>
+                    <input
+                      type="month"
+                      name="startMonth"
+                      defaultValue={initialMonth}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Teto Mensal (R$)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      name="amount"
+                      defaultValue={initialAmount}
+                      placeholder="Ex: 800.00"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Duração / Período da Programação */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Programar por Quanto Tempo?
+                  </label>
+                  <select
+                    name="durationMonths"
+                    defaultValue={isEditing ? '1' : '12'}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+                  >
+                    <option value="1">Apenas no mês selecionado (1 mês)</option>
+                    <option value="3">Próximos 3 Meses</option>
+                    <option value="6">Próximos 6 Meses</option>
+                    <option value="12">12 Meses (1 Ano)</option>
+                    <option value="24">24 Meses (2 Anos)</option>
+                    <option value="36">36 Meses (3 Anos)</option>
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Gera tetos automáticos para os meses selecionados, permitindo que as projeções financeiras reflitam esse compromisso.
+                  </p>
+                </div>
+
+                {/* Opções de Escopo se estiver editando */}
+                {isEditing && (
+                  <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+                    <label className="block text-xs font-bold text-blue-950 uppercase tracking-wider">
+                      Aplicar alteração para:
+                    </label>
+                    <div className="space-y-1.5 text-xs">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="scope"
+                          value="this_only"
+                          defaultChecked={!hasRecurrence}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-slate-800 font-medium">
+                          Apenas neste mês ({formatMonthLabel(initialMonth)})
+                        </span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="scope"
+                          value="from_now_on"
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-slate-800 font-medium">
+                          Deste mês ({formatMonthLabel(initialMonth)}) em diante
+                        </span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="scope"
+                          value="all_recurring"
+                          defaultChecked={hasRecurrence}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-slate-800 font-medium">
+                          Todos os meses da programação
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEnvelopeModalState({
+                        isOpen: false,
+                        mode: 'create',
+                        category: null,
+                        monthKey: '',
+                        existingEnvelope: null,
+                        scope: 'all',
+                      })
+                    }
+                    className="px-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition active:scale-95 shadow-sm"
+                  >
+                    {isEditing ? 'Salvar Alterações' : 'Salvar Programação'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal de Exclusão de Envelope com Escopo em Lote */}
+      {deleteEnvelopeModalState.isOpen && deleteEnvelopeModalState.envelope && (() => {
+        const env = deleteEnvelopeModalState.envelope;
+        const cat = env.category;
+        const targetMonth = env.monthKey;
+        const ruleId = env.envelopeEntry?.ruleId;
+
+        const totalEntriesCount = monthlyEnvelopes.filter(
+          (m) => m.categoryId === cat.id && (ruleId ? m.ruleId === ruleId : true)
+        ).length;
+
+        const isMultiMonth = totalEntriesCount > 1 || Boolean(ruleId) || (cat.budgetLimitCents > 0);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Excluir Envelope</h3>
+                    <p className="text-xs text-slate-500">
+                      {cat.name} • {formatMonthLabel(targetMonth)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDeleteEnvelopeModalState({
+                      isOpen: false,
+                      envelope: null,
+                      scope: 'this_only',
+                    })
+                  }
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="pt-4 space-y-4">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Categoria:</span>
+                    <strong className="text-slate-800">{cat.name}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Teto Atual:</span>
+                    <strong className="text-slate-900">{formatMoney(env.allocatedCents)}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Mês de Referência:</span>
+                    <span className="font-semibold text-slate-700 capitalize">
+                      {formatMonthLabel(targetMonth)}
+                    </span>
+                  </div>
+                </div>
+
+                {isMultiMonth ? (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Escolha o escopo da exclusão:
+                    </label>
+                    <div className="space-y-2">
+                      <label className="flex items-start space-x-2.5 p-2.5 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
+                        <input
+                          type="radio"
+                          name="deleteEnvelopeScope"
+                          value="this_only"
+                          checked={deleteEnvelopeModalState.scope === 'this_only'}
+                          onChange={(e) =>
+                            setDeleteEnvelopeModalState((prev) => ({
+                              ...prev,
+                              scope: e.target.value,
+                            }))
+                          }
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="text-xs">
+                          <strong className="text-slate-900 block">
+                            Apenas neste mês ({formatMonthLabel(targetMonth)})
+                          </strong>
+                          <span className="text-slate-500">
+                            Zera o envelope deste mês sem alterar os outros meses programados.
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start space-x-2.5 p-2.5 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
+                        <input
+                          type="radio"
+                          name="deleteEnvelopeScope"
+                          value="from_now_on"
+                          checked={deleteEnvelopeModalState.scope === 'from_now_on'}
+                          onChange={(e) =>
+                            setDeleteEnvelopeModalState((prev) => ({
+                              ...prev,
+                              scope: e.target.value,
+                            }))
+                          }
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="text-xs">
+                          <strong className="text-slate-900 block">Deste mês em diante</strong>
+                          <span className="text-slate-500">
+                            Exclui os tetos deste mês e de todos os meses futuros.
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start space-x-2.5 p-2.5 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
+                        <input
+                          type="radio"
+                          name="deleteEnvelopeScope"
+                          value="before_this"
+                          checked={deleteEnvelopeModalState.scope === 'before_this'}
+                          onChange={(e) =>
+                            setDeleteEnvelopeModalState((prev) => ({
+                              ...prev,
+                              scope: e.target.value,
+                            }))
+                          }
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="text-xs">
+                          <strong className="text-slate-900 block">
+                            Apenas os meses anteriores
+                          </strong>
+                          <span className="text-slate-500">
+                            Apaga os registros passados, mantendo este mês e os futuros intactos.
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start space-x-2.5 p-2.5 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
+                        <input
+                          type="radio"
+                          name="deleteEnvelopeScope"
+                          value="all_recurring"
+                          checked={deleteEnvelopeModalState.scope === 'all_recurring'}
+                          onChange={(e) =>
+                            setDeleteEnvelopeModalState((prev) => ({
+                              ...prev,
+                              scope: e.target.value,
+                            }))
+                          }
+                          className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                        />
+                        <div className="text-xs">
+                          <strong className="text-slate-900 block">
+                            Toda a programação (todos os meses)
+                          </strong>
+                          <span className="text-slate-500">
+                            Remove completamente o teto programado para esta categoria.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-600">
+                    Tem certeza de que deseja remover o envelope desta categoria para o mês de{' '}
+                    {formatMonthLabel(targetMonth)}?
+                  </p>
+                )}
+
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDeleteEnvelopeModalState({
+                        isOpen: false,
+                        envelope: null,
+                        scope: 'this_only',
+                      })
+                    }
+                    className="px-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDeleteEnvelope}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition active:scale-95 shadow-sm flex items-center space-x-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirmar Exclusão</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal de Autenticação e Gestão de Perfis */}
       <AuthModal

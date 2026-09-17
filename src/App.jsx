@@ -976,7 +976,10 @@ export default function App() {
       const totalGroupSpent = directSpent + childrenSpentSum;
 
       const childrenCapSum = subList.reduce((acc, s) => acc + (s.envelopeCap || 0), 0);
-      const groupEnvelopeCap = parentDirectCap > 0 ? parentDirectCap : childrenCapSum;
+      // O teto do grupo Pai só existe se a categoria Pai possuir um teto explicitamente estabelecido.
+      // Se não foi dado teto à categoria pai, ela NÃO deve herdar a soma das filhas como se fosse seu teto nem sofrer avaliação de estouro.
+      const hasExplicitParentCap = parentDirectCap > 0;
+      const groupEnvelopeCap = hasExplicitParentCap ? parentDirectCap : 0;
 
       // Se houver gastos diretos no pai E também subcategorias com gastos/tetos, adiciona entrada de gastos diretos
       const finalSubList = [...subList];
@@ -1006,9 +1009,9 @@ export default function App() {
           return (b.envelopeCap || 0) - (a.envelopeCap || 0);
         });
 
-      // Inclui o grupo se houver gasto ou se houver envelope planejado
-      if (totalGroupSpent > 0 || groupEnvelopeCap > 0) {
-        const groupEnvPct = groupEnvelopeCap > 0 ? ((totalGroupSpent / groupEnvelopeCap) * 100).toFixed(1) : null;
+      // Inclui o grupo se houver gasto, se o pai tiver teto ou se alguma subcategoria tiver teto planejado
+      if (totalGroupSpent > 0 || hasExplicitParentCap || childrenCapSum > 0) {
+        const groupEnvPct = hasExplicitParentCap ? ((totalGroupSpent / groupEnvelopeCap) * 100).toFixed(1) : null;
         parentGroups.push({
           catId: parent.id,
           name: parent.name,
@@ -1017,8 +1020,10 @@ export default function App() {
           directAmountCents: directSpent,
           percentageOfTotal: totalExpensesCents > 0 ? parseFloat(((totalGroupSpent / totalExpensesCents) * 100).toFixed(1)) : 0,
           envelopeCap: groupEnvelopeCap,
+          hasExplicitEnvelope: hasExplicitParentCap,
+          plannedSubcategoriesCap: childrenCapSum,
           envelopePercentage: groupEnvPct !== null ? parseFloat(groupEnvPct) : null,
-          isOverBudget: groupEnvelopeCap > 0 && totalGroupSpent > groupEnvelopeCap,
+          isOverBudget: hasExplicitParentCap && totalGroupSpent > groupEnvelopeCap,
           subcategories: enrichedSubList,
           hasSubcategories: enrichedSubList.length > 0,
         });
@@ -1040,6 +1045,8 @@ export default function App() {
           directAmountCents: orphanSpent,
           percentageOfTotal: totalExpensesCents > 0 ? parseFloat(((orphanSpent / totalExpensesCents) * 100).toFixed(1)) : 0,
           envelopeCap: orphanCap,
+          hasExplicitEnvelope: orphanCap > 0,
+          plannedSubcategoriesCap: 0,
           envelopePercentage: orphanEnvPct !== null ? parseFloat(orphanEnvPct) : null,
           isOverBudget: orphanCap > 0 && orphanSpent > orphanCap,
           subcategories: [],
@@ -1915,6 +1922,25 @@ export default function App() {
             } else {
               amountCents = Math.max(0, parentCap - siblingsSum);
             }
+          }
+        }
+      }
+    }
+
+    // Se a categoria for Pai e tiver subcategorias com tetos estabelecidos:
+    if (!cat.parentId && amountCents > 0) {
+      const children = categories.filter((c) => c.parentId === cat.id);
+      if (children.length > 0) {
+        const childrenSum = children.reduce((acc, sib) => {
+          const sibEnv = monthlyEnvelopes.find((m) => m.categoryId === sib.id && m.monthKey === startMonth);
+          return acc + (sibEnv ? sibEnv.amountCents : (sib.budgetLimitCents || 0));
+        }, 0);
+
+        if (childrenSum > 0 && amountCents < childrenSum) {
+          if (!confirm(
+            `Atenção: O teto de ${formatMoney(amountCents)} para a categoria pai "${cat.name}" no mês ${formatMonthLabel(startMonth)} é inferior à soma dos tetos das suas subcategorias (${formatMoney(childrenSum)}).\n\nDeseja salvar mesmo assim?`
+          )) {
+            return;
           }
         }
       }
@@ -5759,7 +5785,7 @@ export default function App() {
                   ) : chartCategoryViewMode === 'hierarchical' ? (
                     <div className="space-y-3 pt-2">
                       {categoryChartData.hierarchicalExpenses.map((group) => {
-                        const hasEnvelope = group.envelopeCap > 0;
+                        const hasEnvelope = Boolean(group.hasExplicitEnvelope && group.envelopeCap > 0);
                         return (
                           <div
                             key={group.catId}
@@ -5783,11 +5809,15 @@ export default function App() {
                                       </span>
                                     )}
                                   </div>
-                                  {hasEnvelope && (
+                                  {hasEnvelope ? (
                                     <span className="text-[11px] text-slate-400 block font-normal">
                                       ✉️ Teto do grupo: {formatMoney(group.envelopeCap)}
                                     </span>
-                                  )}
+                                  ) : group.plannedSubcategoriesCap > 0 ? (
+                                    <span className="text-[11px] text-slate-400 block font-normal">
+                                      ✉️ Subcategorias planejadas: {formatMoney(group.plannedSubcategoriesCap)} (sem teto global no grupo)
+                                    </span>
+                                  ) : null}
                                 </div>
                               </div>
 

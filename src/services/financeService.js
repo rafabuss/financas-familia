@@ -9,6 +9,34 @@ export const STORAGE_KEYS = {
   monthlyEnvelopes: 'financas_monthly_envelopes_v1',
 };
 
+export const markCategoryPending = (catId) => {
+  if (!catId) return;
+  try {
+    const list = JSON.parse(localStorage.getItem('financas_pending_categories') || '[]');
+    if (!list.includes(catId)) {
+      list.push(catId);
+      localStorage.setItem('financas_pending_categories', JSON.stringify(list));
+    }
+  } catch {}
+};
+
+export const clearCategoryPending = (catId) => {
+  if (!catId) return;
+  try {
+    const list = JSON.parse(localStorage.getItem('financas_pending_categories') || '[]');
+    const filtered = list.filter((id) => id !== catId);
+    localStorage.setItem('financas_pending_categories', JSON.stringify(filtered));
+  } catch {}
+};
+
+export const getPendingCategories = () => {
+  try {
+    return JSON.parse(localStorage.getItem('financas_pending_categories') || '[]');
+  } catch {
+    return [];
+  }
+};
+
 // ==========================================
 // CONVERSORES DE FORMATO (CAMELCASE <-> SNAKE_CASE)
 // ==========================================
@@ -278,6 +306,28 @@ export const loadInitialAppData = async (defaults = {}) => {
         cloudCats = localCats;
       }
 
+      // Identificar categorias locais que estão pendentes de sincronização OU em uso por transações locais
+      const pendingCategoryIds = new Set(getPendingCategories());
+      const localTxs = getLocal(STORAGE_KEYS.transactions, []);
+      const usedCatIds = new Set((localTxs || []).map((t) => t.categoryId).filter(Boolean));
+      const cloudCatIds = new Set(cloudCats.map((c) => c.id));
+
+      const preservedLocalCats = (localCats || []).filter(
+        (c) => !cloudCatIds.has(c.id) && (pendingCategoryIds.has(c.id) || usedCatIds.has(c.id))
+      );
+
+      // Auto-sincronizar categorias locais pendentes/em uso no Supabase para garantir integridade referencial
+      if (preservedLocalCats.length > 0) {
+        try {
+          for (const pCat of preservedLocalCats) {
+            await supabase.from('categories').upsert(categoryToDb(pCat));
+            clearCategoryPending(pCat.id);
+          }
+        } catch (e) {
+          console.warn('Erro ao auto-sincronizar categorias preservadas:', e);
+        }
+      }
+
       // Mescla com localStorage apenas para preservar budgetLimitCents e parentId de categorias existentes
       const mergedCats = cloudCats.map((c) => {
         const local = localCatsMap.get(c.id);
@@ -291,10 +341,11 @@ export const loadInitialAppData = async (defaults = {}) => {
         return c;
       });
 
+      const allMergedCats = [...mergedCats, ...preservedLocalCats];
+
       // Se a nuvem respondeu com sucesso, atualiza o cache local com as categorias autoritativas.
-      // NUNCA ressuscite categorias que foram excluídas em outro dispositivo!
       if (isCatSuccess) {
-        localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(mergedCats));
+        localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(allMergedCats));
       }
 
       // 2. Envelopes mensais: segue estritamente a nuvem sem ressuscitar envelopes excluídos
@@ -329,7 +380,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         isCloud: true,
         accounts,
         cards,
-        categories: mergedCats,
+        categories: allMergedCats,
         transactions,
         scenarios,
         monthlyEnvelopes: mergedEnvelopes,
@@ -471,13 +522,17 @@ export const clearAllDemoData = clearDemoDataOnly;
 
 export const syncItem = async (entity, item, isDelete = false) => {
   const isCloud = isSupabaseConfigured() && supabase;
-  if (!isCloud) return;
+  if (!isCloud) return { success: true };
 
   try {
     const targetTable = (entity === 'monthlyEnvelopes' || entity === 'monthly_envelopes') ? 'monthly_envelopes' : entity;
 
     if (isDelete) {
       await supabase.from(targetTable).delete().eq('id', item.id);
+      if (entity === 'categories') {
+        clearCategoryPending(item.id);
+      }
+      return { success: true };
     } else {
       let dbData;
       if (entity === 'accounts') dbData = accountToDb(item);
@@ -488,27 +543,32 @@ export const syncItem = async (entity, item, isDelete = false) => {
       else if (entity === 'monthlyEnvelopes' || entity === 'monthly_envelopes') dbData = monthlyEnvelopeToDb(item);
 
       if (dbData) {
-        const res = await supabase.from(targetTable).upsert(dbData);
+        let res = await supabase.from(targetTable).upsert(dbData);
         if (res?.error) {
           console.warn(`Erro ao sincronizar ${targetTable} no Supabase:`, res.error.message);
-          // Se for categoria e o erro for coluna inexistente (ex: 42703), faz fallback salvando os campos suportados para nunca perder a categoria
-          if (entity === 'categories' && (res.error.code === '42703' || String(res.error.message || '').includes('budget_limit_cents') || String(res.error.message || '').includes('parent_id'))) {
-            const fallbackData = {
-              id: dbData.id,
-              name: dbData.name,
-              type: dbData.type,
-              color: dbData.color,
-              archived: dbData.archived,
-            };
-            if (!String(res.error.message || '').includes('budget_limit_cents')) {
-              fallbackData.budget_limit_cents = dbData.budget_limit_cents;
-            }
-            if (!String(res.error.message || '').includes('parent_id') && dbData.parent_id) {
-              fallbackData.parent_id = dbData.parent_id;
-            }
-            const retryRes = await supabase.from('categories').upsert(fallbackData);
-            if (retryRes?.error) {
-              // Se ainda der erro, tenta com os campos essenciais básicos
+
+          // 1. Fallback para categorias caso colunas opcionais faltem no Supabase
+          if (entity === 'categories') {
+            markCategoryPending(item.id);
+            if (res.error.code === '42703' || String(res.error.message || '').includes('budget_limit_cents') || String(res.error.message || '').includes('parent_id')) {
+              const fallbackData = {
+                id: dbData.id,
+                name: dbData.name,
+                type: dbData.type,
+                color: dbData.color,
+                archived: dbData.archived,
+              };
+              if (!String(res.error.message || '').includes('budget_limit_cents')) {
+                fallbackData.budget_limit_cents = dbData.budget_limit_cents;
+              }
+              if (!String(res.error.message || '').includes('parent_id') && dbData.parent_id) {
+                fallbackData.parent_id = dbData.parent_id;
+              }
+              const retryRes = await supabase.from('categories').upsert(fallbackData);
+              if (!retryRes?.error) {
+                clearCategoryPending(item.id);
+                return { success: true };
+              }
               const basicData = {
                 id: dbData.id,
                 name: dbData.name,
@@ -516,31 +576,96 @@ export const syncItem = async (entity, item, isDelete = false) => {
                 color: dbData.color,
                 archived: dbData.archived,
               };
-              await supabase.from('categories').upsert(basicData);
+              const basicRes = await supabase.from('categories').upsert(basicData);
+              if (!basicRes?.error) {
+                clearCategoryPending(item.id);
+                return { success: true };
+              }
+            }
+            return { success: false, error: res.error };
+          }
+
+          // 2. Auto-cura de Chave Estrangeira para Transações: se o erro for 23503 ou menção a category
+          if (entity === 'transactions' && (res.error.code === '23503' || String(res.error.message || '').includes('category') || String(res.error.message || '').includes('foreign key'))) {
+            try {
+              const localCats = JSON.parse(localStorage.getItem(STORAGE_KEYS.categories) || '[]');
+              const catObj = localCats.find((c) => c.id === dbData.category_id);
+              if (catObj) {
+                console.log(`Auto-sincronizando categoria "${catObj.name}" (${catObj.id}) no Supabase para resolver chave estrangeira da transação...`);
+                await supabase.from('categories').upsert(categoryToDb(catObj));
+                clearCategoryPending(catObj.id);
+                const retryRes = await supabase.from('transactions').upsert(dbData);
+                if (!retryRes?.error) {
+                  console.log('Transação sincronizada com sucesso após auto-cura da categoria!');
+                  return { success: true };
+                }
+                res = retryRes;
+              }
+            } catch (healErr) {
+              console.warn('Falha na auto-cura de categoria para transação:', healErr);
             }
           }
+
+          return { success: false, error: res.error };
+        } else {
+          if (entity === 'categories') {
+            clearCategoryPending(item.id);
+          }
+          return { success: true };
         }
       }
+      return { success: true };
     }
   } catch (err) {
     console.error(`Erro ao sincronizar ${entity} no Supabase:`, err);
+    return { success: false, error: err };
   }
 };
 
 export const syncBatchTransactions = async (txList, isDelete = false) => {
   const isCloud = isSupabaseConfigured() && supabase;
-  if (!isCloud || !txList?.length) return;
+  if (!isCloud || !txList?.length) return { success: true };
 
   try {
     if (isDelete) {
       const ids = txList.map((t) => t.id);
       await supabase.from('transactions').delete().in('id', ids);
+      return { success: true };
     } else {
       const dbList = txList.map(transactionToDb);
-      await supabase.from('transactions').upsert(dbList);
+      let res = await supabase.from('transactions').upsert(dbList);
+      if (res?.error) {
+        console.warn('Erro ao sincronizar lote de transações no Supabase:', res.error.message);
+        if (res.error.code === '23503' || String(res.error.message || '').includes('category') || String(res.error.message || '').includes('foreign key')) {
+          try {
+            const localCats = JSON.parse(localStorage.getItem(STORAGE_KEYS.categories) || '[]');
+            const catMap = new Map(localCats.map((c) => [c.id, c]));
+            const usedCatIds = new Set(dbList.map((t) => t.category_id).filter(Boolean));
+            const catsToSync = [];
+            usedCatIds.forEach((cid) => {
+              const cat = catMap.get(cid);
+              if (cat) catsToSync.push(categoryToDb(cat));
+            });
+            if (catsToSync.length > 0) {
+              console.log(`Auto-sincronizando ${catsToSync.length} categorias para lote de transações...`);
+              await supabase.from('categories').upsert(catsToSync);
+              const retryRes = await supabase.from('transactions').upsert(dbList);
+              if (!retryRes?.error) {
+                return { success: true };
+              }
+              res = retryRes;
+            }
+          } catch (e) {
+            console.warn('Erro ao auto-curar categorias para lote:', e);
+          }
+        }
+        return { success: false, error: res.error };
+      }
+      return { success: true };
     }
   } catch (err) {
     console.error('Erro ao sincronizar lote de transações:', err);
+    return { success: false, error: err };
   }
 };
 

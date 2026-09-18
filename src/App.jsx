@@ -51,6 +51,8 @@ import {
   resetEntireSystem,
   loadDemoPresentationData,
   healMigratedInvoiceTransactions,
+  markCategoryPending,
+  clearCategoryPending,
   STORAGE_KEYS,
 } from './services/financeService';
 import {
@@ -224,6 +226,9 @@ export default function App() {
   // Controle de Nuvem e Sessão de Usuário
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSubmittingTx, setIsSubmittingTx] = useState(false);
+  const isSavingRef = useRef(false);
+  const cloudSyncCooldownUntilRef = useRef(0);
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('financas_session');
@@ -283,6 +288,11 @@ export default function App() {
 
   // Função unificada para carregar e sincronizar dados da nuvem
   const reloadDataFromCloud = useCallback(async () => {
+    // Evita sobrescrever edições locais em andamento ou durante período de carência (cooldown)
+    if (isSavingRef.current || Date.now() < cloudSyncCooldownUntilRef.current) {
+      return;
+    }
+
     try {
       const res = await loadInitialAppData({
         categories: DEFAULT_CATEGORIES,
@@ -295,8 +305,22 @@ export default function App() {
         if (res.transactions) {
           const activeCards = res.cards || [];
           const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(res.transactions, activeCards);
-          setTransactions(healedTransactions);
-          saveToLocalStorage('financas_transactions_v1', healedTransactions);
+          
+          // Preserva edições locais recentes para evitar race conditions com o Supabase
+          setTransactions((prevLocalTxs) => {
+            const localMap = new Map((prevLocalTxs || []).map((t) => [t.id, t]));
+            const now = Date.now();
+            const merged = healedTransactions.map((cloudTx) => {
+              const localTx = localMap.get(cloudTx.id);
+              if (localTx && localTx._localUpdatedAt && now - localTx._localUpdatedAt < 6000) {
+                return { ...cloudTx, ...localTx };
+              }
+              return cloudTx;
+            });
+            saveToLocalStorage('financas_transactions_v1', merged);
+            return merged;
+          });
+
           if (hasChanges && changedTxs.length > 0) {
             syncBatchTransactions(changedTxs);
           }
@@ -322,6 +346,10 @@ export default function App() {
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
         const now = Date.now();
+        // Não recarrega se houver salvamento local recente ou ativo
+        if (now < cloudSyncCooldownUntilRef.current || isSavingRef.current) {
+          return;
+        }
         // Debounce de 3 segundos para evitar re-fetch repetitivo
         if (now - lastSyncTime > 3000) {
           lastSyncTime = now;
@@ -338,8 +366,10 @@ export default function App() {
     const channel = subscribeToCloudChanges(() => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        reloadDataFromCloud();
-      }, 500);
+        if (!isSavingRef.current && Date.now() >= cloudSyncCooldownUntilRef.current) {
+          reloadDataFromCloud();
+        }
+      }, 1000);
     });
 
     return () => {
@@ -1847,6 +1877,7 @@ export default function App() {
     } else {
       updatedCategories = [...categories, newCat];
     }
+    markCategoryPending(newCat.id);
     setCategories(updatedCategories);
     saveToLocalStorage(STORAGE_KEYS.categories, updatedCategories);
     syncItem('categories', newCat);
@@ -1879,10 +1910,12 @@ export default function App() {
     let updatedCategories = categories.filter((c) => c.id !== finalCat.id);
     if (parentToUpdate) {
       updatedCategories = updatedCategories.map((c) => (c.id === parentToUpdate.id ? parentToUpdate : c));
+      markCategoryPending(parentToUpdate.id);
       syncItem('categories', parentToUpdate);
     }
     updatedCategories.push(finalCat);
 
+    markCategoryPending(finalCat.id);
     setCategories(updatedCategories);
     saveToLocalStorage(STORAGE_KEYS.categories, updatedCategories);
     syncItem('categories', finalCat);
@@ -2220,125 +2253,109 @@ export default function App() {
   };
 
   // Salvar Lançamentos
-  const handleSaveTransaction = (e) => {
+  const handleSaveTransaction = async (e) => {
     e.preventDefault();
-    const fd = new FormData(e.target);
-    const isEditing = modalState.mode === 'edit';
-    const original = modalState.data || {};
+    setIsSubmittingTx(true);
+    isSavingRef.current = true;
+    cloudSyncCooldownUntilRef.current = Date.now() + 3000;
 
-    const amount = Math.round(parseFloat(fd.get('amount') || '0') * 100);
-    const installments = parseInt(fd.get('installments') || '1', 10);
-    const isRecurring = formIsRecurring || fd.get('isRecurring') === 'on';
-    const scope = fd.get('scope') || 'FAMILY';
-    const ownerId = fd.get('ownerId') || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId);
+    try {
+      const fd = new FormData(e.target);
+      const isEditing = modalState.mode === 'edit';
+      const original = modalState.data || {};
 
-    const isActualRecurrence = Boolean(
-      original.recurrenceRuleId &&
-      !String(original.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
-      !String(original.recurrenceRuleId).startsWith('INVOICE_PAY:')
-    );
+      const amount = Math.round(parseFloat(fd.get('amount') || '0') * 100);
+      const installments = parseInt(fd.get('installments') || '1', 10);
+      const isRecurring = formIsRecurring || fd.get('isRecurring') === 'on';
+      const scope = fd.get('scope') || 'FAMILY';
+      const ownerId = fd.get('ownerId') || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId);
 
-    if (isEditing) {
-      if (editScope === 'all' && (original.installmentGroupId || isActualRecurrence)) {
-        const matched = [];
-        setTransactions((prev) => {
-          const updated = prev.map((t) => {
-            const isMatch =
-              (original.installmentGroupId && t.installmentGroupId === original.installmentGroupId) ||
-              (isActualRecurrence && t.recurrenceRuleId === original.recurrenceRuleId);
-            if (!isMatch) return t;
-            const u = {
-              ...t,
-              description: t.installmentNumber
-                ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
-                : fd.get('description'),
-              amountCents: amount,
-              type: fd.get('type'),
-              categoryId: fd.get('categoryId'),
-              scope,
-              ownerId,
-              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-            };
-            matched.push(u);
-            return u;
+      const isActualRecurrence = Boolean(
+        original.recurrenceRuleId &&
+        !String(original.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
+        !String(original.recurrenceRuleId).startsWith('INVOICE_PAY:')
+      );
+
+      if (isEditing) {
+        if (editScope === 'all' && (original.installmentGroupId || isActualRecurrence)) {
+          const matched = [];
+          setTransactions((prev) => {
+            const updated = prev.map((t) => {
+              const isMatch =
+                (original.installmentGroupId && t.installmentGroupId === original.installmentGroupId) ||
+                (isActualRecurrence && t.recurrenceRuleId === original.recurrenceRuleId);
+              if (!isMatch) return t;
+              const u = {
+                ...t,
+                description: t.installmentNumber
+                  ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
+                  : fd.get('description'),
+                amountCents: amount,
+                type: fd.get('type'),
+                categoryId: fd.get('categoryId'),
+                scope,
+                ownerId,
+                accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+                cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+                _localUpdatedAt: Date.now(),
+              };
+              matched.push(u);
+              return u;
+            });
+            saveToLocalStorage('financas_transactions_v1', updated);
+            return updated;
           });
-          saveToLocalStorage('financas_transactions_v1', updated);
-          return updated;
-        });
-        syncBatchTransactions(matched);
-      } else if (editScope === 'future' && (original.installmentGroupId || isActualRecurrence)) {
-        const matched = [];
-        setTransactions((prev) => {
-          const updated = prev.map((t) => {
-            const isMatch =
-              (original.installmentGroupId &&
-                t.installmentGroupId === original.installmentGroupId &&
-                (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
-              (isActualRecurrence &&
-                t.recurrenceRuleId === original.recurrenceRuleId &&
-                t.date >= original.date);
-            if (!isMatch) return t;
-            const u = {
-              ...t,
-              description: t.installmentNumber
-                ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
-                : fd.get('description'),
-              amountCents: amount,
-              type: fd.get('type'),
-              categoryId: fd.get('categoryId'),
-              scope,
-              ownerId,
-              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-            };
-            matched.push(u);
-            return u;
+          await syncBatchTransactions(matched);
+        } else if (editScope === 'future' && (original.installmentGroupId || isActualRecurrence)) {
+          const matched = [];
+          setTransactions((prev) => {
+            const updated = prev.map((t) => {
+              const isMatch =
+                (original.installmentGroupId &&
+                  t.installmentGroupId === original.installmentGroupId &&
+                  (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
+                (isActualRecurrence &&
+                  t.recurrenceRuleId === original.recurrenceRuleId &&
+                  t.date >= original.date);
+              if (!isMatch) return t;
+              const u = {
+                ...t,
+                description: t.installmentNumber
+                  ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
+                  : fd.get('description'),
+                amountCents: amount,
+                type: fd.get('type'),
+                categoryId: fd.get('categoryId'),
+                scope,
+                ownerId,
+                accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+                cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+                _localUpdatedAt: Date.now(),
+              };
+              matched.push(u);
+              return u;
+            });
+            saveToLocalStorage('financas_transactions_v1', updated);
+            return updated;
           });
-          saveToLocalStorage('financas_transactions_v1', updated);
-          return updated;
-        });
-        syncBatchTransactions(matched);
-      } else {
-        if (isRecurring && !isActualRecurrence && !original.installmentGroupId) {
-          // Converter um lançamento avulso existente em recorrente
-          const recurringHorizon = parseInt(fd.get('recurringHorizon') || String(formRecurringMonths) || '12', 10);
-          const ruleId = `rec-${Date.now()}`;
-          const baseDueDate = fd.get('date');
-          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
+          await syncBatchTransactions(matched);
+        } else {
+          if (isRecurring && !isActualRecurrence && !original.installmentGroupId) {
+            // Converter um lançamento avulso existente em recorrente
+            const recurringHorizon = parseInt(fd.get('recurringHorizon') || String(formRecurringMonths) || '12', 10);
+            const ruleId = `rec-${Date.now()}`;
+            const baseDueDate = fd.get('date');
+            const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
 
-          const updatedTx = {
-            ...original,
-            description: fd.get('description'),
-            amountCents: amount,
-            type: fd.get('type'),
-            status: fd.get('status'),
-            date: baseDueDate,
-            dueDate: baseDueDate,
-            purchaseDate: basePurchaseDate,
-            categoryId: fd.get('categoryId'),
-            scope,
-            ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
-            isRecurring: true,
-            recurrenceRuleId: ruleId,
-          };
-
-          const newFutureTxs = [];
-          for (let i = 1; i < recurringHorizon; i++) {
-            const recDueDate = addMonthsToIso(baseDueDate, i);
-            const recPurchaseDate = modalSourceType === 'CARD' ? addMonthsToIso(basePurchaseDate, i) : recDueDate;
-
-            newFutureTxs.push({
-              id: `tx-${Date.now()}-${i + 1}`,
+            const updatedTx = {
+              ...original,
               description: fd.get('description'),
               amountCents: amount,
               type: fd.get('type'),
-              status: 'COMPROMETIDO',
-              date: recDueDate,
-              dueDate: recDueDate,
-              purchaseDate: recPurchaseDate,
+              status: fd.get('status'),
+              date: baseDueDate,
+              dueDate: baseDueDate,
+              purchaseDate: basePurchaseDate,
               categoryId: fd.get('categoryId'),
               scope,
               ownerId,
@@ -2346,21 +2363,166 @@ export default function App() {
               cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
               isRecurring: true,
               recurrenceRuleId: ruleId,
+              _localUpdatedAt: Date.now(),
+            };
+
+            const newFutureTxs = [];
+            for (let i = 1; i < recurringHorizon; i++) {
+              const recDueDate = addMonthsToIso(baseDueDate, i);
+              const recPurchaseDate = modalSourceType === 'CARD' ? addMonthsToIso(basePurchaseDate, i) : recDueDate;
+
+              newFutureTxs.push({
+                id: `tx-${Date.now()}-${i + 1}`,
+                description: fd.get('description'),
+                amountCents: amount,
+                type: fd.get('type'),
+                status: 'COMPROMETIDO',
+                date: recDueDate,
+                dueDate: recDueDate,
+                purchaseDate: recPurchaseDate,
+                categoryId: fd.get('categoryId'),
+                scope,
+                ownerId,
+                accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+                cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
+                isRecurring: true,
+                recurrenceRuleId: ruleId,
+                _localUpdatedAt: Date.now(),
+              });
+            }
+
+            setTransactions((prev) => {
+              const updated = [...prev.map((t) => (t.id === original.id ? updatedTx : t)), ...newFutureTxs];
+              saveToLocalStorage('financas_transactions_v1', updated);
+              return updated;
+            });
+            await syncBatchTransactions([updatedTx, ...newFutureTxs]);
+          } else {
+            const baseDueDate = fd.get('date');
+            const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
+
+            const updatedTx = {
+              ...original,
+              description: fd.get('description'),
+              amountCents: amount,
+              type: fd.get('type'),
+              status: fd.get('status'),
+              date: baseDueDate,
+              dueDate: baseDueDate,
+              purchaseDate: basePurchaseDate,
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+              _localUpdatedAt: Date.now(),
+            };
+
+            setTransactions((prev) => {
+              const updated = prev.map((t) => (t.id === original.id ? updatedTx : t));
+              saveToLocalStorage('financas_transactions_v1', updated);
+              return updated;
+            });
+            await syncItem('transactions', updatedTx);
+          }
+        }
+      } else {
+        const installmentValueMode = fd.get('installmentValueMode') || 'TOTAL';
+        if (installments > 1) {
+          const startNum = Math.min(installments, Math.max(1, parseInt(fd.get('startInstallment') || String(formStartInstallment) || '1', 10)));
+          let installmentAmounts = [];
+          if (installmentValueMode === 'INSTALLMENT') {
+            // Repete o valor informado em todas as parcelas
+            installmentAmounts = Array(installments).fill(amount);
+          } else {
+            // Divide o valor total pelo número de parcelas
+            const baseCents = Math.floor(amount / installments);
+            const remainder = amount % installments;
+            installmentAmounts = Array.from({ length: installments }, (_, idx) =>
+              baseCents + (idx === 0 ? remainder : 0)
+            );
+          }
+
+          const groupId = `inst-${Date.now()}`;
+          const newTxs = [];
+          const baseDueDate = fd.get('date');
+          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
+
+          for (let i = startNum; i <= installments; i++) {
+            const offset = i - startNum;
+            const installmentDueDate = addMonthsToIso(baseDueDate, offset);
+            const installmentPurchaseDate = addMonthsToIso(basePurchaseDate, offset);
+
+            newTxs.push({
+              id: `tx-${Date.now()}-${i}`,
+              description: `${fd.get('description')} (${String(i).padStart(2, '0')}/${String(installments).padStart(2, '0')})`,
+              amountCents: installmentAmounts[i - 1],
+              type: fd.get('type'),
+              status: fd.get('status') || 'COMPROMETIDO',
+              date: installmentDueDate,
+              dueDate: installmentDueDate,
+              purchaseDate: modalSourceType === 'CARD' ? installmentPurchaseDate : installmentDueDate,
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+              installmentGroupId: groupId,
+              installmentNumber: i,
+              installmentCount: installments,
+              _localUpdatedAt: Date.now(),
+            });
+          }
+          setTransactions((prev) => {
+            const updated = [...prev, ...newTxs];
+            saveToLocalStorage('financas_transactions_v1', updated);
+            return updated;
+          });
+          await syncBatchTransactions(newTxs);
+        } else if (isRecurring) {
+          // Lançamento com repetição mensal (Recorrência) gerado para o horizonte escolhido (ex: 12, 24 ou 36 meses)
+          const recurringHorizon = parseInt(fd.get('recurringHorizon') || String(formRecurringMonths) || '12', 10);
+          const ruleId = `rec-${Date.now()}`;
+          const baseDueDate = fd.get('date');
+          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
+          const newTxs = [];
+
+          for (let i = 0; i < recurringHorizon; i++) {
+            const recDueDate = addMonthsToIso(baseDueDate, i);
+            const recPurchaseDate = modalSourceType === 'CARD' ? addMonthsToIso(basePurchaseDate, i) : recDueDate;
+
+            newTxs.push({
+              id: `tx-${Date.now()}-${i + 1}`,
+              description: fd.get('description'),
+              amountCents: amount,
+              type: fd.get('type'),
+              // O 1º mês recebe o status selecionado pelo usuário; os meses futuros nascem como COMPROMETIDO
+              status: i === 0 ? (fd.get('status') || 'COMPROMETIDO') : 'COMPROMETIDO',
+              date: recDueDate,
+              dueDate: recDueDate,
+              purchaseDate: recPurchaseDate,
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+              isRecurring: true,
+              recurrenceRuleId: ruleId,
+              _localUpdatedAt: Date.now(),
             });
           }
 
           setTransactions((prev) => {
-            const updated = [...prev.map((t) => (t.id === original.id ? updatedTx : t)), ...newFutureTxs];
+            const updated = [...prev, ...newTxs];
             saveToLocalStorage('financas_transactions_v1', updated);
             return updated;
           });
-          syncBatchTransactions([updatedTx, ...newFutureTxs]);
+          await syncBatchTransactions(newTxs);
         } else {
           const baseDueDate = fd.get('date');
-          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
-
-          const updatedTx = {
-            ...original,
+          const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
+          const newTx = {
+            id: `tx-${Date.now()}`,
             description: fd.get('description'),
             amountCents: amount,
             type: fd.get('type'),
@@ -2373,150 +2535,42 @@ export default function App() {
             ownerId,
             accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
             cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+            isRecurring: false,
+            recurrenceRuleId: null,
+            _localUpdatedAt: Date.now(),
           };
-
           setTransactions((prev) => {
-            const updated = prev.map((t) => (t.id === original.id ? updatedTx : t));
+            const updated = [...prev, newTx];
             saveToLocalStorage('financas_transactions_v1', updated);
             return updated;
           });
-          syncItem('transactions', updatedTx);
+          await syncItem('transactions', newTx);
         }
       }
-    } else {
-      const installmentValueMode = fd.get('installmentValueMode') || 'TOTAL';
-      if (installments > 1) {
-        const startNum = Math.min(installments, Math.max(1, parseInt(fd.get('startInstallment') || String(formStartInstallment) || '1', 10)));
-        let installmentAmounts = [];
-        if (installmentValueMode === 'INSTALLMENT') {
-          // Repete o valor informado em todas as parcelas
-          installmentAmounts = Array(installments).fill(amount);
-        } else {
-          // Divide o valor total pelo número de parcelas
-          const baseCents = Math.floor(amount / installments);
-          const remainder = amount % installments;
-          installmentAmounts = Array.from({ length: installments }, (_, idx) =>
-            baseCents + (idx === 0 ? remainder : 0)
-          );
+
+      if (modalState.scenarioIdToConvert) {
+        const updatedScens = scenarios.map((s) =>
+          s.id === modalState.scenarioIdToConvert ? { ...s, active: false } : s
+        );
+        setScenarios(updatedScens);
+        saveToLocalStorage('financas_scenarios_v1', updatedScens);
+        const convertedScen = scenarios.find((s) => s.id === modalState.scenarioIdToConvert);
+        if (convertedScen) {
+          await syncItem('scenarios', { ...convertedScen, active: false });
         }
-
-        const groupId = `inst-${Date.now()}`;
-        const newTxs = [];
-        const baseDueDate = fd.get('date');
-        const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
-
-        for (let i = startNum; i <= installments; i++) {
-          const offset = i - startNum;
-          const installmentDueDate = addMonthsToIso(baseDueDate, offset);
-          const installmentPurchaseDate = addMonthsToIso(basePurchaseDate, offset);
-
-          newTxs.push({
-            id: `tx-${Date.now()}-${i}`,
-            description: `${fd.get('description')} (${String(i).padStart(2, '0')}/${String(installments).padStart(2, '0')})`,
-            amountCents: installmentAmounts[i - 1],
-            type: fd.get('type'),
-            status: fd.get('status') || 'COMPROMETIDO',
-            date: installmentDueDate,
-            dueDate: installmentDueDate,
-            purchaseDate: modalSourceType === 'CARD' ? installmentPurchaseDate : installmentDueDate,
-            categoryId: fd.get('categoryId'),
-            scope,
-            ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-            installmentGroupId: groupId,
-            installmentNumber: i,
-            installmentCount: installments,
-          });
-        }
-        setTransactions((prev) => {
-          const updated = [...prev, ...newTxs];
-          saveToLocalStorage('financas_transactions_v1', updated);
-          return updated;
-        });
-        syncBatchTransactions(newTxs);
-      } else if (isRecurring) {
-        // Lançamento com repetição mensal (Recorrência) gerado para o horizonte escolhido (ex: 12, 24 ou 36 meses)
-        const recurringHorizon = parseInt(fd.get('recurringHorizon') || String(formRecurringMonths) || '12', 10);
-        const ruleId = `rec-${Date.now()}`;
-        const baseDueDate = fd.get('date');
-        const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
-        const newTxs = [];
-
-        for (let i = 0; i < recurringHorizon; i++) {
-          const recDueDate = addMonthsToIso(baseDueDate, i);
-          const recPurchaseDate = modalSourceType === 'CARD' ? addMonthsToIso(basePurchaseDate, i) : recDueDate;
-
-          newTxs.push({
-            id: `tx-${Date.now()}-${i + 1}`,
-            description: fd.get('description'),
-            amountCents: amount,
-            type: fd.get('type'),
-            // O 1º mês recebe o status selecionado pelo usuário; os meses futuros nascem como COMPROMETIDO
-            status: i === 0 ? (fd.get('status') || 'COMPROMETIDO') : 'COMPROMETIDO',
-            date: recDueDate,
-            dueDate: recDueDate,
-            purchaseDate: recPurchaseDate,
-            categoryId: fd.get('categoryId'),
-            scope,
-            ownerId,
-            accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-            cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-            isRecurring: true,
-            recurrenceRuleId: ruleId,
-          });
-        }
-
-        setTransactions((prev) => {
-          const updated = [...prev, ...newTxs];
-          saveToLocalStorage('financas_transactions_v1', updated);
-          return updated;
-        });
-        syncBatchTransactions(newTxs);
-      } else {
-        const baseDueDate = fd.get('date');
-        const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || fd.get('date')) : fd.get('date');
-        const newTx = {
-          id: `tx-${Date.now()}`,
-          description: fd.get('description'),
-          amountCents: amount,
-          type: fd.get('type'),
-          status: fd.get('status'),
-          date: baseDueDate,
-          dueDate: baseDueDate,
-          purchaseDate: basePurchaseDate,
-          categoryId: fd.get('categoryId'),
-          scope,
-          ownerId,
-          accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-          cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-          isRecurring: false,
-          recurrenceRuleId: null,
-        };
-        setTransactions((prev) => {
-          const updated = [...prev, newTx];
-          saveToLocalStorage('financas_transactions_v1', updated);
-          return updated;
-        });
-        syncItem('transactions', newTx);
+        alert('Cenário convertido em lançamento real com sucesso!');
       }
+
+      setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null });
+      setEditScope('single');
+    } catch (err) {
+      console.error('Erro ao salvar lançamento:', err);
+    } finally {
+      setIsSubmittingTx(false);
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 2500);
     }
-
-    if (modalState.scenarioIdToConvert) {
-      const updatedScens = scenarios.map((s) =>
-        s.id === modalState.scenarioIdToConvert ? { ...s, active: false } : s
-      );
-      setScenarios(updatedScens);
-      saveToLocalStorage('financas_scenarios_v1', updatedScens);
-      const convertedScen = scenarios.find((s) => s.id === modalState.scenarioIdToConvert);
-      if (convertedScen) {
-        syncItem('scenarios', { ...convertedScen, active: false });
-      }
-      alert('Cenário convertido em lançamento real com sucesso!');
-    }
-
-    setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null });
-    setEditScope('single');
   };
 
   const handleDeleteTransaction = (tx) => {
@@ -2680,6 +2734,7 @@ export default function App() {
           return c;
         });
       }
+      clearCategoryPending(cat.id);
       setCategories(updatedCats);
       saveToLocalStorage(STORAGE_KEYS.categories, updatedCats);
       syncItem('categories', cat, true);
@@ -9220,13 +9275,25 @@ export default function App() {
                   <div className="flex space-x-2 ml-auto">
                     <button
                       type="button"
+                      disabled={isSubmittingTx}
                       onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null })}
-                      className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50"
+                      className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Cancelar
                     </button>
-                    <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">
-                      {modalState.mode === 'create' ? 'Salvar Lançamento' : 'Atualizar Lançamento'}
+                    <button
+                      type="submit"
+                      disabled={isSubmittingTx}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 min-w-[140px]"
+                    >
+                      {isSubmittingTx ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                          <span>{modalState.mode === 'create' ? 'Salvando...' : 'Atualizando...'}</span>
+                        </>
+                      ) : (
+                        <span>{modalState.mode === 'create' ? 'Salvar Lançamento' : 'Atualizar Lançamento'}</span>
+                      )}
                     </button>
                   </div>
                 </div>

@@ -97,8 +97,12 @@ CREATE TABLE IF NOT EXISTS public.scenarios (
   scope TEXT NOT NULL DEFAULT 'FAMILY' CHECK (scope IN ('FAMILY', 'PERSONAL')),
   owner_id TEXT NOT NULL DEFAULT 'user-1',
   active BOOLEAN NOT NULL DEFAULT TRUE,
+  adjustments JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Garante a coluna adjustments em instalações prévias
+ALTER TABLE public.scenarios ADD COLUMN IF NOT EXISTS adjustments JSONB DEFAULT '{}'::jsonb;
 
 -- 7. Tabela de Envelopes Mensais e Tetos Planejados
 CREATE TABLE IF NOT EXISTS public.monthly_envelopes (

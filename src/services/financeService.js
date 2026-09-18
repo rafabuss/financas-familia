@@ -247,6 +247,11 @@ export const scenarioToClient = (row) => ({
   scope: row.scope || 'FAMILY',
   ownerId: row.owner_id || row.ownerId || 'user-1',
   active: Boolean(row.active ?? true),
+  adjustments: row.adjustments || {
+    ignoredIncomes: [],
+    ignoredExpenses: [],
+    categoryReductions: [],
+  },
 });
 
 export const scenarioToDb = (scen) => ({
@@ -263,6 +268,7 @@ export const scenarioToDb = (scen) => ({
   scope: scen.scope,
   owner_id: scen.ownerId,
   active: scen.active,
+  adjustments: scen.adjustments || null,
 });
 
 export const monthlyEnvelopeToClient = (row) => ({
@@ -719,6 +725,15 @@ export const syncItem = async (entity, item, isDelete = false) => {
               }
             } catch (healErr) {
               console.warn('Falha na auto-cura de categoria para transação:', healErr);
+            }
+          }
+
+          // 3. Fallback para cenários caso coluna adjustments não exista no Supabase (código 42703)
+          if (entity === 'scenarios' && (res.error.code === '42703' || String(res.error.message || '').includes('adjustments'))) {
+            const { adjustments, ...fallbackScen } = dbData;
+            const retryRes = await supabase.from('scenarios').upsert(fallbackScen);
+            if (!retryRes?.error) {
+              return { success: true };
             }
           }
 

@@ -258,3 +258,24 @@ export const onAuthChange = (callback) => {
   const { data: { subscription } } = supabase.auth.onAuthStateChange(callback);
   return () => subscription.unsubscribe();
 };
+
+export const subscribeToCloudChanges = (callback) => {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  try {
+    const channel = supabase
+      .channel('public-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        (payload) => {
+          if (typeof callback === 'function') callback(payload);
+        }
+      )
+      .subscribe();
+    return channel;
+  } catch (e) {
+    console.warn('Realtime subscription error:', e);
+    return null;
+  }
+};
+

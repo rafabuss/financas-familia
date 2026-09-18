@@ -65,6 +65,7 @@ import {
   isSupabaseConfigured,
   supabase,
   getUserProfile,
+  subscribeToCloudChanges,
 } from './services/supabase';
 
 // Formatação Monetária Segura (em Centavos)
@@ -280,11 +281,12 @@ export default function App() {
     }
   }, []);
 
-  // Carregamento inicial de dados unificado com auto-cura de faturas e preservação de datas
-  useEffect(() => {
-    loadInitialAppData({
-      categories: DEFAULT_CATEGORIES,
-    }).then((res) => {
+  // Função unificada para carregar e sincronizar dados da nuvem
+  const reloadDataFromCloud = useCallback(async () => {
+    try {
+      const res = await loadInitialAppData({
+        categories: DEFAULT_CATEGORIES,
+      });
       if (res) {
         setIsCloudConnected(res.isCloud);
         if (res.accounts) setAccounts(res.accounts);
@@ -302,8 +304,51 @@ export default function App() {
         if (res.scenarios) setScenarios(res.scenarios);
         if (res.monthlyEnvelopes) setMonthlyEnvelopes(res.monthlyEnvelopes);
       }
+    } catch (err) {
+      console.warn('Erro ao recarregar dados da nuvem:', err);
+    }
+  }, []);
+
+  // 1. Carregamento inicial de dados
+  useEffect(() => {
+    reloadDataFromCloud();
+  }, [currentUser, reloadDataFromCloud]);
+
+  // 2. Sincronização multi-dispositivo automática: ao trocar de aba ou desbloquear o celular (Visibility / Focus)
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    let lastSyncTime = Date.now();
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        // Debounce de 3 segundos para evitar re-fetch repetitivo
+        if (now - lastSyncTime > 3000) {
+          lastSyncTime = now;
+          reloadDataFromCloud();
+        }
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    // 3. Inscrição em Realtime para atualizações instantâneas entre aparelhos
+    let debounceTimer = null;
+    const channel = subscribeToCloudChanges(() => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        reloadDataFromCloud();
+      }, 500);
     });
-  }, [currentUser]);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [reloadDataFromCloud]);
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
@@ -2606,13 +2651,21 @@ export default function App() {
   const handleDeleteCategory = (cat) => {
     const tiedCount = transactions.filter((t) => t.categoryId === cat.id).length;
     const children = categories.filter((c) => c.parentId === cat.id);
-    const warning =
-      tiedCount > 0
-        ? `\n\nAtenção: Esta categoria possui ${tiedCount} lançamento(s) associado(s). Eles ficarão sem categoria vinculada.`
-        : '';
+    const duplicateSibling = categories.find(
+      (c) => c.id !== cat.id && c.name.trim().toLowerCase() === cat.name.trim().toLowerCase() && c.type === cat.type
+    );
+
+    let warning = '';
+    if (tiedCount > 0) {
+      if (duplicateSibling) {
+        warning = `\n\nIdentificamos outra categoria ativa "${duplicateSibling.name}". Os ${tiedCount} lançamento(s) vinculados a esta categoria serão migrados automaticamente para ela.`;
+      } else {
+        warning = `\n\nAtenção: Esta categoria possui ${tiedCount} lançamento(s) associado(s). Eles ficarão sem categoria vinculada.`;
+      }
+    }
     const childWarning =
       children.length > 0
-        ? `\n\nAtenção: Esta categoria possui ${children.length} subcategoria(s) associada(s). Elas se tornarão categorias principais independentes.`
+        ? `\n\nAtenção: Esta categoria possui ${children.length} subcategoria(s) associada(s). ${duplicateSibling ? `Elas serão vinculadas à categoria "${duplicateSibling.name}".` : 'Elas se tornarão categorias principais independentes.'}`
         : '';
 
     if (confirm(`Deseja realmente EXCLUIR DEFINITIVAMENTE a categoria "${cat.name}"?${warning}${childWarning}`)) {
@@ -2620,7 +2673,7 @@ export default function App() {
       if (children.length > 0) {
         updatedCats = updatedCats.map((c) => {
           if (c.parentId === cat.id) {
-            const detached = { ...c, parentId: null };
+            const detached = { ...c, parentId: duplicateSibling?.id || null };
             syncItem('categories', detached);
             return detached;
           }
@@ -2632,9 +2685,21 @@ export default function App() {
       syncItem('categories', cat, true);
 
       if (tiedCount > 0) {
-        const updatedTxs = transactions.map((t) => (t.categoryId === cat.id ? { ...t, categoryId: null } : t));
+        const targetCatId = duplicateSibling ? duplicateSibling.id : null;
+        const changedTxs = [];
+        const updatedTxs = transactions.map((t) => {
+          if (t.categoryId === cat.id) {
+            const upd = { ...t, categoryId: targetCatId };
+            changedTxs.push(upd);
+            return upd;
+          }
+          return t;
+        });
         setTransactions(updatedTxs);
         saveToLocalStorage(STORAGE_KEYS.transactions, updatedTxs);
+        if (changedTxs.length > 0) {
+          syncBatchTransactions(changedTxs);
+        }
       }
     }
   };

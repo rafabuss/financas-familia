@@ -258,18 +258,27 @@ export const loadInitialAppData = async (defaults = {}) => {
       const localCats = getLocal(STORAGE_KEYS.categories, defaults.categories || []);
       const localCatsMap = new Map((localCats || []).map((c) => [c.id, c]));
 
-      // Se as categorias estiverem vazias, faz o seed apenas de categorias essenciais
-      let cloudCats = (catRes.data || []).map(categoryToClient);
-      if (cloudCats.length === 0 && defaults.categories?.length) {
-        try {
-          await supabase.from('categories').upsert(defaults.categories.map(categoryToDb));
-        } catch (e) {
-          console.warn('Erro ao inserir categorias padrão:', e);
+      // 1. Categorias: se a nuvem responder com sucesso, ela é a Fonte da Verdade (SSOT)
+      let cloudCats = [];
+      const isCatSuccess = !catRes?.error && Array.isArray(catRes?.data);
+      if (isCatSuccess) {
+        if (catRes.data.length === 0 && defaults.categories?.length) {
+          // Se o banco for completamente virgem, insere categorias padrão
+          try {
+            await supabase.from('categories').upsert(defaults.categories.map(categoryToDb));
+          } catch (e) {
+            console.warn('Erro ao inserir categorias padrão:', e);
+          }
+          cloudCats = defaults.categories;
+        } else {
+          cloudCats = catRes.data.map(categoryToClient);
         }
-        cloudCats = defaults.categories;
+      } else {
+        // Falha de rede nas categorias: usa cache local com segurança
+        cloudCats = localCats;
       }
 
-      // Mescla com localStorage para preservar budgetLimitCents e parentId caso a coluna ainda não exista no Supabase
+      // Mescla com localStorage apenas para preservar budgetLimitCents e parentId de categorias existentes
       const mergedCats = cloudCats.map((c) => {
         const local = localCatsMap.get(c.id);
         if (local) {
@@ -282,43 +291,47 @@ export const loadInitialAppData = async (defaults = {}) => {
         return c;
       });
 
-      // Se existirem categorias no localStorage que ainda não estão no banco (ex: criadas recentemente), mantém-nas e agenda sync
-      const cloudCatIds = new Set(cloudCats.map((c) => c.id));
-      const missingFromCloud = (localCats || []).filter((c) => !cloudCatIds.has(c.id));
-      if (missingFromCloud.length > 0) {
-        mergedCats.push(...missingFromCloud);
-        missingFromCloud.forEach((cat) => syncItem('categories', cat));
-      }
-
-      if (mergedCats.length > 0) {
+      // Se a nuvem respondeu com sucesso, atualiza o cache local com as categorias autoritativas.
+      // NUNCA ressuscite categorias que foram excluídas em outro dispositivo!
+      if (isCatSuccess) {
         localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(mergedCats));
       }
 
-      // Envelopes mensais (mescla dados da nuvem com dados do localStorage para máxima resiliência)
-      const cloudEnvelopes = (envRes?.data || []).map(monthlyEnvelopeToClient);
-      const localEnvelopes = getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient);
-      const cloudEnvIds = new Set(cloudEnvelopes.map((e) => e.id));
-
-      const mergedEnvelopes = [...cloudEnvelopes];
-      localEnvelopes.forEach((le) => {
-        if (!cloudEnvIds.has(le.id)) {
-          mergedEnvelopes.push(le);
-          syncItem('monthlyEnvelopes', le);
-        }
-      });
-
-      if (mergedEnvelopes.length > 0) {
+      // 2. Envelopes mensais: segue estritamente a nuvem sem ressuscitar envelopes excluídos
+      const isEnvSuccess = !envRes?.error && Array.isArray(envRes?.data);
+      let mergedEnvelopes = [];
+      if (isEnvSuccess) {
+        mergedEnvelopes = envRes.data.map(monthlyEnvelopeToClient);
         localStorage.setItem(STORAGE_KEYS.monthlyEnvelopes, JSON.stringify(mergedEnvelopes));
+      } else {
+        mergedEnvelopes = getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient);
       }
+
+      // 3. Contas, Cartões, Transações e Cenários
+      const isAccSuccess = !accRes?.error && Array.isArray(accRes?.data);
+      const accounts = isAccSuccess ? accRes.data.map(accountToClient) : getLocal(STORAGE_KEYS.accounts, []);
+      if (isAccSuccess) localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(accounts));
+
+      const isCardSuccess = !cardRes?.error && Array.isArray(cardRes?.data);
+      const cards = isCardSuccess ? cardRes.data.map(cardToClient) : getLocal(STORAGE_KEYS.cards, []);
+      if (isCardSuccess) localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(cards));
+
+      const isTxSuccess = !txRes?.error && Array.isArray(txRes?.data);
+      const transactions = isTxSuccess ? txRes.data.map(transactionToClient) : getLocal(STORAGE_KEYS.transactions, []).map(transactionToClient);
+      if (isTxSuccess) localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(transactions));
+
+      const isScenSuccess = !scenRes?.error && Array.isArray(scenRes?.data);
+      const scenarios = isScenSuccess ? scenRes.data.map(scenarioToClient) : getLocal(STORAGE_KEYS.scenarios, []);
+      if (isScenSuccess) localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify(scenarios));
 
       // Retorna exatamente os dados reais do banco (SEM injetar transações ou simulações fictícias)
       return {
         isCloud: true,
-        accounts: (accRes.data || []).map(accountToClient),
-        cards: (cardRes.data || []).map(cardToClient),
+        accounts,
+        cards,
         categories: mergedCats,
-        transactions: (txRes.data || []).map(transactionToClient),
-        scenarios: (scenRes.data || []).map(scenarioToClient),
+        transactions,
+        scenarios,
         monthlyEnvelopes: mergedEnvelopes,
       };
     } catch (err) {

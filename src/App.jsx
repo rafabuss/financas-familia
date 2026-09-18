@@ -668,7 +668,7 @@ export default function App() {
         !String(data.recurrenceRuleId).startsWith('INVOICE_PAY:'))
     );
     setModalSourceType(sType);
-    setEditScope('single');
+    setEditScope(data?.installmentGroupId || isActualRec ? 'all' : 'single');
     setFormAmount(data?.amountCents ? (data.amountCents / 100).toFixed(2) : '');
     setFormInstallments(data?.installmentCount || data?.installments || 1);
     setFormStartInstallment(data?.installmentNumber || 1);
@@ -2323,66 +2323,68 @@ export default function App() {
 
       if (isEditing) {
         if (editScope === 'all' && (original.installmentGroupId || isActualRecurrence)) {
+          const isMatch = (t) =>
+            (original.installmentGroupId && t.installmentGroupId === original.installmentGroupId) ||
+            (isActualRecurrence && t.recurrenceRuleId === original.recurrenceRuleId);
+
           const matched = [];
-          setTransactions((prev) => {
-            const updated = prev.map((t) => {
-              const isMatch =
-                (original.installmentGroupId && t.installmentGroupId === original.installmentGroupId) ||
-                (isActualRecurrence && t.recurrenceRuleId === original.recurrenceRuleId);
-              if (!isMatch) return t;
-              const u = {
-                ...t,
-                description: t.installmentNumber
-                  ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
-                  : fd.get('description'),
-                amountCents: amount,
-                type: fd.get('type'),
-                categoryId: fd.get('categoryId'),
-                scope,
-                ownerId,
-                accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-                cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-                _localUpdatedAt: Date.now(),
-              };
-              matched.push(u);
-              return u;
-            });
-            saveToLocalStorage('financas_transactions_v1', updated);
-            return updated;
+          const updated = transactions.map((t) => {
+            if (!isMatch(t)) return t;
+            const u = {
+              ...t,
+              description: t.installmentNumber
+                ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
+                : fd.get('description'),
+              amountCents: amount,
+              type: fd.get('type'),
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || t.accountId || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || t.cardId || null) : null,
+              _localUpdatedAt: Date.now(),
+            };
+            matched.push(u);
+            return u;
           });
+
+          matched.forEach((t) => markTransactionPending(t.id));
+          setTransactions(updated);
+          saveToLocalStorage(STORAGE_KEYS.transactions, updated);
           await syncBatchTransactions(matched);
         } else if (editScope === 'future' && (original.installmentGroupId || isActualRecurrence)) {
+          const isMatch = (t) =>
+            (original.installmentGroupId &&
+              t.installmentGroupId === original.installmentGroupId &&
+              (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
+            (isActualRecurrence &&
+              t.recurrenceRuleId === original.recurrenceRuleId &&
+              t.date >= original.date);
+
           const matched = [];
-          setTransactions((prev) => {
-            const updated = prev.map((t) => {
-              const isMatch =
-                (original.installmentGroupId &&
-                  t.installmentGroupId === original.installmentGroupId &&
-                  (t.installmentNumber || 0) >= (original.installmentNumber || 0)) ||
-                (isActualRecurrence &&
-                  t.recurrenceRuleId === original.recurrenceRuleId &&
-                  t.date >= original.date);
-              if (!isMatch) return t;
-              const u = {
-                ...t,
-                description: t.installmentNumber
-                  ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
-                  : fd.get('description'),
-                amountCents: amount,
-                type: fd.get('type'),
-                categoryId: fd.get('categoryId'),
-                scope,
-                ownerId,
-                accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-                cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
-                _localUpdatedAt: Date.now(),
-              };
-              matched.push(u);
-              return u;
-            });
-            saveToLocalStorage('financas_transactions_v1', updated);
-            return updated;
+          const updated = transactions.map((t) => {
+            if (!isMatch(t)) return t;
+            const u = {
+              ...t,
+              description: t.installmentNumber
+                ? `${fd.get('description').replace(/\s*\(\d+\/\d+\)/, '')} (${String(t.installmentNumber).padStart(2, '0')}/${String(t.installmentCount).padStart(2, '0')})`
+                : fd.get('description'),
+              amountCents: amount,
+              type: fd.get('type'),
+              categoryId: fd.get('categoryId'),
+              scope,
+              ownerId,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || t.accountId || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || t.cardId || null) : null,
+              _localUpdatedAt: Date.now(),
+            };
+            matched.push(u);
+            return u;
           });
+
+          matched.forEach((t) => markTransactionPending(t.id));
+          setTransactions(updated);
+          saveToLocalStorage(STORAGE_KEYS.transactions, updated);
           await syncBatchTransactions(matched);
         } else {
           if (isRecurring && !isActualRecurrence && !original.installmentGroupId) {
@@ -2404,7 +2406,7 @@ export default function App() {
               categoryId: fd.get('categoryId'),
               scope,
               ownerId,
-              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || original.accountId || null) : null,
               cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
               isRecurring: true,
               recurrenceRuleId: ruleId,
@@ -2436,12 +2438,12 @@ export default function App() {
               });
             }
 
-            setTransactions((prev) => {
-              const updated = [...prev.map((t) => (t.id === original.id ? updatedTx : t)), ...newFutureTxs];
-              saveToLocalStorage('financas_transactions_v1', updated);
-              return updated;
-            });
-            await syncBatchTransactions([updatedTx, ...newFutureTxs]);
+            const allToSync = [updatedTx, ...newFutureTxs];
+            allToSync.forEach((t) => markTransactionPending(t.id));
+            const updated = [...transactions.map((t) => (t.id === original.id ? updatedTx : t)), ...newFutureTxs];
+            setTransactions(updated);
+            saveToLocalStorage(STORAGE_KEYS.transactions, updated);
+            await syncBatchTransactions(allToSync);
           } else {
             const baseDueDate = fd.get('date');
             const basePurchaseDate = modalSourceType === 'CARD' ? (fd.get('purchaseDate') || original.purchaseDate || baseDueDate) : baseDueDate;
@@ -2458,17 +2460,15 @@ export default function App() {
               categoryId: fd.get('categoryId'),
               scope,
               ownerId,
-              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || null) : null,
-              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || null) : null,
+              accountId: modalSourceType === 'ACCOUNT' ? (fd.get('accountId') || original.accountId || null) : null,
+              cardId: modalSourceType === 'CARD' ? (fd.get('cardId') || original.cardId || null) : null,
               _localUpdatedAt: Date.now(),
             };
 
             markTransactionPending(updatedTx.id);
-            setTransactions((prev) => {
-              const updated = prev.map((t) => (t.id === original.id ? updatedTx : t));
-              saveToLocalStorage(STORAGE_KEYS.transactions, updated);
-              return updated;
-            });
+            const updated = transactions.map((t) => (t.id === original.id ? updatedTx : t));
+            setTransactions(updated);
+            saveToLocalStorage(STORAGE_KEYS.transactions, updated);
             await syncItem('transactions', updatedTx);
           }
         }

@@ -685,7 +685,13 @@ export default function App() {
 
   // Verifica se um lançamento está de fato em atraso (comprometido com vencimento anterior a hoje)
   const isTxOverdue = useCallback((tx, todayStr = new Date().toISOString().slice(0, 10)) => {
-    if (!tx || tx.isHypothetical || tx.status !== 'COMPROMETIDO') return false;
+    if (!tx || tx.isHypothetical) return false;
+    if (tx.isInvoiceMaster) {
+      return tx.status === 'EM ATRASO' || (!tx.isPaid && Boolean(tx.dueDate && tx.dueDate < todayStr));
+    }
+    // Compras em cartão de crédito pertencem à fatura do cartão (cardInvoiceMaster), não são contas avulsas de débito em conta
+    if (tx.cardId) return false;
+    if (tx.status !== 'COMPROMETIDO') return false;
     const dueDate = getTxDueDate(tx);
     return Boolean(dueDate && dueDate < todayStr);
   }, [getTxDueDate]);
@@ -1535,8 +1541,8 @@ export default function App() {
   // Lançamentos em atraso (comprometidos com vencimento anterior a hoje)
   const overdueTransactions = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return visibleTransactions.filter((tx) => isTxOverdue(tx, todayStr));
-  }, [visibleTransactions, isTxOverdue]);
+    return allDisplayTransactions.filter((tx) => isTxOverdue(tx, todayStr));
+  }, [allDisplayTransactions, isTxOverdue]);
 
   const overdueExpensesTotalCents = useMemo(() => {
     return overdueTransactions
@@ -1549,11 +1555,11 @@ export default function App() {
     const todayStr = new Date().toISOString().slice(0, 10);
 
     // Filtra transações não canceladas: vencimentos futuros ou pendentes/atrasados
-    const pendingOrUpcoming = visibleTransactions.filter((tx) => {
+    const pendingOrUpcoming = allDisplayTransactions.filter((tx) => {
       if (tx.status === 'CANCELADO') return false;
       const due = getTxDueDate(tx);
       if (due >= todayStr) return true;
-      return tx.status === 'COMPROMETIDO';
+      return isTxOverdue(tx, todayStr);
     });
 
     // Ordenação: contas em atraso no topo (da mais antiga para a mais recente),
@@ -1571,7 +1577,7 @@ export default function App() {
     });
 
     return pendingOrUpcoming.slice(0, 6);
-  }, [visibleTransactions, getTxDueDate, isTxOverdue]);
+  }, [allDisplayTransactions, getTxDueDate, isTxOverdue]);
 
   // Resumo de dados da importação de fatura em conferência
   const importSummary = useMemo(() => {
@@ -3226,6 +3232,19 @@ export default function App() {
     setFilterEndDate('');
   };
 
+  const handleNavigateToOverdueTransactions = useCallback(() => {
+    setSearchTerm('');
+    setFilterType('ALL');
+    setFilterStatus('OVERDUE');
+    setFilterSource('ALL');
+    setFilterCategory('ALL');
+    setFilterScope('ALL');
+    setFilterDatePreset('ALL');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setActiveTab('transactions');
+  }, []);
+
   // Navegação interativa com Drill-Down direto para a aba de Lançamentos
   const handleDrillDownToTransactions = useCallback((categoryId, dateRangeOrMonth = null) => {
     setFilterCategory(categoryId);
@@ -3331,9 +3350,11 @@ export default function App() {
           return false;
         }
 
-        // 7. Intervalo de Datas
-        if (filterStartDate && effectiveDate < filterStartDate) return false;
-        if (filterEndDate && effectiveDate > filterEndDate) return false;
+        // 7. Intervalo de Datas (contas em atraso não devem ser ocultadas por filtros de data)
+        if (filterStatus !== 'OVERDUE') {
+          if (filterStartDate && effectiveDate < filterStartDate) return false;
+          if (filterEndDate && effectiveDate > filterEndDate) return false;
+        }
 
         return true;
       }
@@ -3395,12 +3416,14 @@ export default function App() {
         return false;
       }
 
-      // 7. Filtro por Data Inicial / Final
-      if (filterStartDate && effectiveDate < filterStartDate) {
-        return false;
-      }
-      if (filterEndDate && effectiveDate > filterEndDate) {
-        return false;
+      // 7. Filtro por Data Inicial / Final (contas em atraso não devem ser ocultadas por filtros de data)
+      if (filterStatus !== 'OVERDUE') {
+        if (filterStartDate && effectiveDate < filterStartDate) {
+          return false;
+        }
+        if (filterEndDate && effectiveDate > filterEndDate) {
+          return false;
+        }
       }
 
       return true;
@@ -3973,10 +3996,7 @@ export default function App() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setFilterStatus('OVERDUE');
-                    setActiveTab('transactions');
-                  }}
+                  onClick={handleNavigateToOverdueTransactions}
                   className="bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition whitespace-nowrap shadow-xs flex items-center space-x-1.5 self-end sm:self-auto"
                 >
                   <span>Ver contas em atraso</span>
@@ -4733,7 +4753,16 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => setFilterStatus(filterStatus === 'OVERDUE' ? 'ALL' : 'OVERDUE')}
+                  onClick={() => {
+                    if (filterStatus === 'OVERDUE') {
+                      setFilterStatus('ALL');
+                    } else {
+                      setFilterStatus('OVERDUE');
+                      setFilterDatePreset('ALL');
+                      setFilterStartDate('');
+                      setFilterEndDate('');
+                    }
+                  }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center space-x-1 transition ${
                     filterStatus === 'OVERDUE'
                       ? 'bg-rose-600 text-white font-semibold'
@@ -5156,7 +5185,7 @@ export default function App() {
                       filteredTransactions.map((tx) => {
                         if (tx.isInvoiceMaster) {
                           const isOverdue = tx.status === 'EM ATRASO';
-                          const isExpanded = Boolean(expandedInvoices[tx.id]) || (filterCategory !== 'ALL') || Boolean(searchTerm.trim());
+                          const isExpanded = Boolean(expandedInvoices[tx.id]) || (filterCategory !== 'ALL') || Boolean(searchTerm.trim()) || (filterStatus === 'OVERDUE');
                           const isCategoryOrSearchActive = filterCategory !== 'ALL' || Boolean(searchTerm && searchTerm.trim());
 
                           // Filtra os itens exibidos dentro da fatura respeitando os filtros ativos e subcategorias

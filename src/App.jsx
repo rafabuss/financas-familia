@@ -53,6 +53,9 @@ import {
   healMigratedInvoiceTransactions,
   markCategoryPending,
   clearCategoryPending,
+  markTransactionPending,
+  clearTransactionPending,
+  getPendingTransactions,
   STORAGE_KEYS,
 } from './services/financeService';
 import {
@@ -166,11 +169,25 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentMemberId, setCurrentMemberId] = useState('user-all');
 
-  const [accounts, setAccounts] = useState([]);
-  const [cards, setCards] = useState([]);
+  const [accounts, setAccounts] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.accounts);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [cards, setCards] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.cards);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [categories, setCategories] = useState(() => {
     try {
-      const stored = localStorage.getItem('financas_categories_v1');
+      const stored = localStorage.getItem(STORAGE_KEYS.categories);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -180,11 +197,25 @@ export default function App() {
     }
     return DEFAULT_CATEGORIES;
   });
-  const [transactions, setTransactions] = useState([]);
-  const [scenarios, setScenarios] = useState([]);
+  const [transactions, setTransactions] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.transactions);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [scenarios, setScenarios] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.scenarios);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [monthlyEnvelopes, setMonthlyEnvelopes] = useState(() => {
     try {
-      const local = localStorage.getItem('financas_monthly_envelopes_v1');
+      const local = localStorage.getItem(STORAGE_KEYS.monthlyEnvelopes);
       return local ? JSON.parse(local) : [];
     } catch {
       return [];
@@ -306,18 +337,32 @@ export default function App() {
           const activeCards = res.cards || [];
           const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(res.transactions, activeCards);
           
-          // Preserva edições locais recentes para evitar race conditions com o Supabase
+          // Preserva edições locais recentes e pendentes para evitar race conditions com o Supabase
           setTransactions((prevLocalTxs) => {
+            const pendingTxIds = new Set(getPendingTransactions());
             const localMap = new Map((prevLocalTxs || []).map((t) => [t.id, t]));
             const now = Date.now();
             const merged = healedTransactions.map((cloudTx) => {
               const localTx = localMap.get(cloudTx.id);
-              if (localTx && localTx._localUpdatedAt && now - localTx._localUpdatedAt < 6000) {
-                return { ...cloudTx, ...localTx };
+              if (localTx) {
+                const isPending = pendingTxIds.has(localTx.id);
+                const isRecent = localTx._localUpdatedAt && (now - localTx._localUpdatedAt < 15000);
+                if (isPending || isRecent) {
+                  return { ...cloudTx, ...localTx };
+                }
               }
               return cloudTx;
             });
-            saveToLocalStorage('financas_transactions_v1', merged);
+
+            // Preserva transações locais que ainda não foram sincronizadas com a nuvem
+            const cloudIds = new Set(healedTransactions.map((t) => t.id));
+            (prevLocalTxs || []).forEach((lt) => {
+              if (!cloudIds.has(lt.id) && (pendingTxIds.has(lt.id) || (lt._localUpdatedAt && now - lt._localUpdatedAt < 60000))) {
+                merged.push(lt);
+              }
+            });
+
+            saveToLocalStorage(STORAGE_KEYS.transactions, merged);
             return merged;
           });
 
@@ -2418,9 +2463,10 @@ export default function App() {
               _localUpdatedAt: Date.now(),
             };
 
+            markTransactionPending(updatedTx.id);
             setTransactions((prev) => {
               const updated = prev.map((t) => (t.id === original.id ? updatedTx : t));
-              saveToLocalStorage('financas_transactions_v1', updated);
+              saveToLocalStorage(STORAGE_KEYS.transactions, updated);
               return updated;
             });
             await syncItem('transactions', updatedTx);
@@ -2539,9 +2585,10 @@ export default function App() {
             recurrenceRuleId: null,
             _localUpdatedAt: Date.now(),
           };
+          markTransactionPending(newTx.id);
           setTransactions((prev) => {
             const updated = [...prev, newTx];
-            saveToLocalStorage('financas_transactions_v1', updated);
+            saveToLocalStorage(STORAGE_KEYS.transactions, updated);
             return updated;
           });
           await syncItem('transactions', newTx);
@@ -2904,10 +2951,11 @@ export default function App() {
 
     // Lançamentos normais de conta corrente / dinheiro
     const nextStatus = tx.status === 'REALIZADO' ? 'COMPROMETIDO' : 'REALIZADO';
-    const updatedTx = { ...tx, status: nextStatus };
+    const updatedTx = { ...tx, status: nextStatus, _localUpdatedAt: Date.now() };
+    markTransactionPending(updatedTx.id);
     const updated = transactions.map((t) => (t.id === tx.id ? updatedTx : t));
     setTransactions(updated);
-    saveToLocalStorage('financas_transactions_v1', updated);
+    saveToLocalStorage(STORAGE_KEYS.transactions, updated);
     syncItem('transactions', updatedTx);
   };
 
@@ -2922,10 +2970,11 @@ export default function App() {
       return;
     }
 
-    const updatedTx = { ...tx, status: targetStatus };
+    const updatedTx = { ...tx, status: targetStatus, _localUpdatedAt: Date.now() };
+    markTransactionPending(updatedTx.id);
     const updated = transactions.map((t) => (t.id === tx.id ? updatedTx : t));
     setTransactions(updated);
-    saveToLocalStorage('financas_transactions_v1', updated);
+    saveToLocalStorage(STORAGE_KEYS.transactions, updated);
     syncItem('transactions', updatedTx);
   };
 

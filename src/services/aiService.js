@@ -9,20 +9,26 @@
 
 const STORAGE_API_KEY = 'financas_gemini_api_key';
 const STORAGE_SELECTED_MODEL = 'financas_gemini_model';
-const DEFAULT_MODEL = 'gemini-3.6-flash';
+const DEFAULT_MODEL = 'gemini-3.8-flash';
+
+export const isLegacyOrDiscontinuedModel = (modelId) => {
+  if (!modelId) return true;
+  const id = modelId.toLowerCase();
+  return id.includes('1.5') || id.includes('2.0') || id.includes('2.5');
+};
 
 export const AVAILABLE_MODELS = [
-  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Recomendado & Mais Rápido)' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Equilibrado)' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Raciocínio Complexo)' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recomendado & Mais Inteligente)' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Rápido e Preciso)' },
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Equilibrado)' },
+  { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite (Ultra Rápido)' },
 ];
 
 export const FALLBACK_CANDIDATE_MODELS = [
+  'gemini-3.8-flash',
   'gemini-3.6-flash',
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
 ];
 
 /**
@@ -78,14 +84,21 @@ export const fetchAvailableModels = async (apiKeyParam) => {
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        _cachedDiscoveredModels = parsed;
-        return parsed;
+        const cleanParsed = parsed.filter((m) => !isLegacyOrDiscontinuedModel(m.id));
+        if (cleanParsed.length > 0) {
+          _cachedDiscoveredModels = cleanParsed;
+          return cleanParsed;
+        }
       }
     }
   } catch {}
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, {
+      headers: {
+        'x-goog-api-key': key,
+      },
+    });
     if (!res.ok) return AVAILABLE_MODELS;
 
     const data = await res.json();
@@ -99,10 +112,11 @@ export const fetchAvailableModels = async (apiKeyParam) => {
           name: m.displayName ? `${m.displayName} (${id})` : id,
           description: m.description || '',
         };
-      });
+      })
+      .filter((m) => !isLegacyOrDiscontinuedModel(m.id));
 
     if (valid.length > 0) {
-      // Prioriza modelos flash e ordenação decrescente de versão
+      // Prioriza modelos flash e ordenação decrescente de versão (3.8 > 3.6 > 3.5 > 3.1)
       valid.sort((a, b) => {
         const aFlash = a.id.includes('flash') ? 1 : 0;
         const bFlash = b.id.includes('flash') ? 1 : 0;
@@ -126,17 +140,20 @@ export const fetchAvailableModels = async (apiKeyParam) => {
 export const getSelectedModel = () => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem(STORAGE_SELECTED_MODEL);
-    // Auto-migração: se o modelo salvo for descontinuado (1.5 ou 2.0), migra para o 3.6
-    if (saved && !saved.includes('1.5') && !saved.includes('2.0')) {
+    // Auto-migração: se o modelo salvo for legado/descontinuado (1.5, 2.0, 2.5), auto-migra para o padrão 3.8
+    if (saved && !isLegacyOrDiscontinuedModel(saved)) {
       return saved;
     }
+    localStorage.setItem(STORAGE_SELECTED_MODEL, DEFAULT_MODEL);
   }
   return DEFAULT_MODEL;
 };
 
 export const setSelectedModel = (model) => {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_SELECTED_MODEL, model);
+  const cleanId = (model || '').replace(/^models\//, '').trim();
+  const finalModel = isLegacyOrDiscontinuedModel(cleanId) ? DEFAULT_MODEL : cleanId;
+  localStorage.setItem(STORAGE_SELECTED_MODEL, finalModel);
 };
 
 // Formatação monetária segura para o prompt da IA
@@ -357,7 +374,9 @@ export const sendMessageToGemini = async ({
     );
   }
 
-  const activeModel = model || getSelectedModel();
+  const cleanModel = (m) => (m || '').replace(/^models\//, '').trim();
+  const rawModel = cleanModel(model) || getSelectedModel();
+  const activeModel = isLegacyOrDiscontinuedModel(rawModel) ? DEFAULT_MODEL : rawModel;
   const systemPrompt = buildSystemPrompt(financialContext);
 
   // Formata o histórico de mensagens para a estrutura do Gemini
@@ -381,22 +400,31 @@ export const sendMessageToGemini = async ({
   };
 
   const endpointUrl = (targetModel) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel(targetModel)}:generateContent?key=${apiKey}`;
 
   let currentModel = activeModel;
   let response;
+  let lastErrorDetail = '';
+  let hadHighDemand = false;
+
   const modelsToTry = [
     currentModel,
     ...FALLBACK_CANDIDATE_MODELS.filter((m) => m !== currentModel),
-  ];
+  ].filter((m) => !isLegacyOrDiscontinuedModel(m));
+
   let hasQueriedLiveModels = false;
 
   for (let i = 0; i < modelsToTry.length; i++) {
-    const candidateModel = modelsToTry[i];
+    const candidateModel = cleanModel(modelsToTry[i]);
+    if (isLegacyOrDiscontinuedModel(candidateModel)) continue;
+
     try {
       response = await fetch(endpointUrl(candidateModel), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify(requestBody),
       });
 
@@ -406,29 +434,37 @@ export const sendMessageToGemini = async ({
         break;
       }
 
-      // 1. Tratamento de 404 (modelo inexistente ou descontinuado)
-      if (response.status === 404) {
-        let errorDetail = '';
-        try {
-          const errorJson = await response.clone().json();
-          errorDetail = errorJson?.error?.message || '';
-        } catch {}
+      // Analisa detalhes do erro
+      let errorDetail = '';
+      try {
+        const errorJson = await response.clone().json();
+        errorDetail = errorJson?.error?.message || '';
+      } catch {}
 
+      lastErrorDetail = errorDetail;
+
+      // 1. Tratamento de 404 (modelo não encontrado ou sem permissão na conta)
+      if (response.status === 404) {
         console.warn(`Modelo ${candidateModel} retornou 404: ${errorDetail}`);
 
-        // Se a mensagem do Google contiver "Please update your code to use models/...", extrai o modelo sugerido
+        // Se a mensagem do Google sugerir outro modelo moderno, adiciona à fila
         const match = errorDetail.match(/models\/(gemini-[\w.-]+)/);
-        if (match && match[1] && !modelsToTry.includes(match[1])) {
+        if (
+          match &&
+          match[1] &&
+          !modelsToTry.includes(match[1]) &&
+          !isLegacyOrDiscontinuedModel(match[1])
+        ) {
           console.log(`Auto-detectado modelo recomendado pela API: ${match[1]}`);
           modelsToTry.splice(i + 1, 0, match[1]);
         }
 
-        // Consulta a lista oficial de modelos compatíveis da conta via ListModels
+        // Consulta a lista de modelos ativos da conta
         if (!hasQueriedLiveModels) {
           hasQueriedLiveModels = true;
           try {
             const liveModels = await fetchAvailableModels(apiKey);
-            const liveIds = liveModels.map((m) => m.id);
+            const liveIds = liveModels.map((m) => m.id).filter((id) => !isLegacyOrDiscontinuedModel(id));
             liveIds.forEach((id) => {
               if (!modelsToTry.includes(id)) {
                 modelsToTry.push(id);
@@ -443,15 +479,14 @@ export const sendMessageToGemini = async ({
       }
 
       // 2. Tratamento de 503 (High Demand / Sobrecarga temporária) ou 429/500/502
-      // Diferentes modelos do Gemini rodam em clusters distintos de TPU no Google Cloud.
-      // Se um modelo estiver sobrecarregado, tentar outro modelo geralmente resolve imediatamente!
       if (response.status === 503 || response.status === 429 || response.status === 500 || response.status === 502) {
+        hadHighDemand = true;
         console.warn(`Modelo ${candidateModel} retornou status ${response.status} (alta demanda). Tentando próximo modelo alternativo...`);
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 400));
         continue;
       }
 
-      // Se for erro permanente de parâmetros ou chave (400), interrompe o loop
+      // Se for erro definitivo de parâmetros ou chave (ex: 400), interrompe o loop
       break;
     } catch (netErr) {
       if (i === modelsToTry.length - 1) {
@@ -461,12 +496,20 @@ export const sendMessageToGemini = async ({
   }
 
   if (!response || !response.ok) {
-    let errorDetail = '';
-    try {
-      const errorJson = await response.json();
-      errorDetail = errorJson?.error?.message || JSON.stringify(errorJson);
-    } catch {
-      errorDetail = response?.statusText || 'Erro desconhecido';
+    if (hadHighDemand && (!response || response.status === 503)) {
+      throw new Error(
+        'ALTA_DEMANDA (503): Os servidores do Google Gemini estão com alta demanda temporária neste momento. Por favor, aguarde alguns instantes e tente enviar sua mensagem novamente.'
+      );
+    }
+
+    let errorDetail = lastErrorDetail;
+    if (!errorDetail && response) {
+      try {
+        const errorJson = await response.json();
+        errorDetail = errorJson?.error?.message || JSON.stringify(errorJson);
+      } catch {
+        errorDetail = response?.statusText || 'Erro desconhecido';
+      }
     }
 
     if (response?.status === 400 && errorDetail.includes('API_KEY_INVALID')) {
@@ -532,7 +575,10 @@ export const sendMessageToGemini = async ({
         try {
           const followUpRes = await fetch(endpointUrl(currentModel), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': apiKey,
+            },
             body: JSON.stringify({
               systemInstruction: {
                 parts: [{ text: systemPrompt }],

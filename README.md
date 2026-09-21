@@ -119,7 +119,7 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Modo Privacidade ("Olho Mágico") na navbar para mascarar saldos e valores em compartilhamento de tela.
 
 - [x] **Fase 2: Assistente de IA Financeiro Conversacional (Google Gemini - MVP & Testes)**
-  - [x] Integração com a API do Google Gemini (`gemini-1.5-flash` / `gemini-2.0-flash`).
+  - [x] Integração com a API do Google Gemini (`gemini-3.8-flash` / `gemini-3.6-flash`).
   - [x] Arquitetura desacoplada em serviço (`src/services/aiService.js`) com suporte a chave de ambiente (`VITE_GEMINI_API_KEY`) e fallback em `localStorage`.
   - [x] Chat financeiro nativo na interface com visão do contexto atual da família (saldos, faturas, envelopes, despesas).
   - [x] *Tool Calling / Function Calling:* A IA é capaz de criar transações e simular cenários diretamente por comandos de texto com cards visuais de execução.
@@ -185,7 +185,7 @@ A aplicação estará disponível em `http://localhost:5173`.
 
 ### 🔑 Como obter e configurar a Chave da API Google Gemini
 
-O assistente financeiro utiliza o **Google Gemini** (`gemini-1.5-flash` ou `gemini-2.0-flash`). Você pode obter uma chave gratuita em menos de 1 minuto:
+O assistente financeiro utiliza o **Google Gemini** (`gemini-3.8-flash` ou `gemini-3.6-flash`). Você pode obter uma chave gratuita em menos de 1 minuto:
 
 1. Acesse o [Google AI Studio](https://aistudio.google.com/app/apikey).
 2. Faça login com sua conta Google e clique em **"Create API Key"** (ou "Criar Chave de API").

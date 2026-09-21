@@ -182,10 +182,18 @@ export default function AIChatDrawer({
       setTimeout(() => inputRef.current?.focus(), 150);
       const keyExists = hasGeminiApiKey();
       setHasKey(keyExists);
-      setActiveModelState(getSelectedModel());
+      const current = getSelectedModel();
+      setActiveModelState(current);
       if (keyExists) {
         fetchAvailableModels().then((live) => {
-          if (live && live.length > 0) setModelList(live);
+          if (live && live.length > 0) {
+            setModelList(live);
+            const freshCurrent = getSelectedModel();
+            if (!live.some((m) => m.id === freshCurrent)) {
+              setSelectedModel(live[0].id);
+              setActiveModelState(live[0].id);
+            }
+          }
         }).catch(() => {});
       }
     }
@@ -356,11 +364,19 @@ export default function AIChatDrawer({
   const handleOpenKeyModal = () => {
     const key = getGeminiApiKey();
     setKeyInputValue(key);
-    setActiveModelState(getSelectedModel());
+    const current = getSelectedModel();
+    setActiveModelState(current);
     setShowKeyModal(true);
     if (key) {
       fetchAvailableModels(key).then((live) => {
-        if (live && live.length > 0) setModelList(live);
+        if (live && live.length > 0) {
+          setModelList(live);
+          const freshCurrent = getSelectedModel();
+          if (!live.some((m) => m.id === freshCurrent)) {
+            setSelectedModel(live[0].id);
+            setActiveModelState(live[0].id);
+          }
+        }
       }).catch(() => {});
     }
   };

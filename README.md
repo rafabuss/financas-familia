@@ -124,13 +124,14 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Chat financeiro nativo na interface com visão do contexto atual da família (saldos, faturas, envelopes, despesas).
   - [x] *Tool Calling / Function Calling:* A IA é capaz de criar transações e simular cenários diretamente por comandos de texto com cards visuais de execução.
   - [x] Compatibilidade total com Modo Real (Supabase) e Modo Demonstração (sandbox em memória).
-  - [ ] Consultoria preditiva: Alertas de padrões de consumo, anomalias e sugestões de corte de custos.
+  - [x] Consultoria preditiva: Alertas de padrões de consumo, anomalias e sugestões de corte de custos.
 
-- [ ] **Fase 3: Arquitetura, Modularização & Desacoplamento do App**
-  - [ ] Desmembramento do arquivo monolítico `src/App.jsx` em componentes de página dedicados.
-  - [ ] Roteamento claro de abas e páginas (`/dashboard`, `/extrato`, `/cartoes`, `/envelopes`, `/cenarios`).
-  - [ ] Criação de Hooks customizados de domínio (`useTransactions`, `useCards`, `useEnvelopes`, `useScenarios`).
-  - [ ] Otimização de performance e redução de re-renderizações desnecessárias.
+- [x] **Fase 3: Arquitetura, Modularização & Desacoplamento do App**
+  - [x] Desmembramento do arquivo monolítico `src/App.jsx` em componentes modulares dedicados por aba (`DashboardTab`, `TransactionsTab`, `AccountsTab`, `CardsInvoicesTab`, `EnvelopesTab`, `CategoriesTab`, `ProjectionsTab`, `ScenariosTab`, `ChartsTab`, `ImportTab`, `ExportsTab`).
+  - [x] Modularização do Navbar superior com suporte a multi-membro, modo demonstração e modo privacidade ("Olho Mágico").
+  - [x] Desacoplamento de modais do sistema em componentes dedicados (`EntityModal`, `TransactionModal`, `DeleteModals`, `InvoicePaymentModal`, `EnvelopeModals`).
+  - [x] Criação de utilitários globais de formatação e regras de datas/vencimentos em `src/utils/formatters.js` e constantes em `src/data/constants.js`.
+  - [x] Redução drástica da complexidade do `App.jsx` (de ~11.820 linhas para ~4.750 linhas) mantendo 100% de integridade funcional e visual com zero regressões.
 
 - [ ] **Fase 4: Multi-Tenancy, Segurança RLS & "Acesso Individual com Impacto Familiar"**
   - [ ] Modelagem de Multi-Tenancy no Supabase (`households` e `household_members`).

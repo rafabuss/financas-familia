@@ -109,6 +109,8 @@ function SimpleMarkdown({ text }) {
 }
 
 export default function AIChatDrawer({
+  isOpen: externalIsOpen,
+  onToggle: externalOnToggle,
   dashboardMonth,
   accounts = [],
   cards = [],
@@ -125,7 +127,19 @@ export default function AIChatDrawer({
   onCreateScenario,
   onNavigateTab,
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
+  const setIsOpen = (val) => {
+    if (externalOnToggle) {
+      if (typeof val === 'function') {
+        externalOnToggle(val(isOpen));
+      } else {
+        externalOnToggle(val);
+      }
+    } else {
+      setInternalIsOpen(val);
+    }
+  };
   const [messages, setMessages] = useState(() => {
     try {
       const saved = sessionStorage.getItem(CHAT_STORAGE_KEY);
@@ -356,10 +370,10 @@ export default function AIChatDrawer({
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label="Abrir Assistente Financeiro de IA"
         title="Conversar com o Assistente IA (Google Gemini)"
-        className={`fixed bottom-6 right-6 z-40 group flex items-center justify-center rounded-full shadow-xl transition-all duration-300 transform active:scale-95 ${
+        className={`fixed bottom-6 right-6 z-50 group flex items-center justify-center rounded-full shadow-xl transition-all duration-300 transform active:scale-95 cursor-pointer ${
           isOpen
             ? 'w-12 h-12 bg-slate-800 text-white hover:bg-slate-900 rotate-90 shadow-slate-900/20'
-            : 'px-4 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white hover:shadow-indigo-500/30 hover:scale-105'
+            : 'px-4 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white hover:shadow-indigo-500/30 hover:scale-105 ring-2 ring-indigo-400/30'
         }`}
       >
         {isOpen ? (
@@ -380,7 +394,7 @@ export default function AIChatDrawer({
 
       {/* Drawer / Modal Flutuante de Conversação */}
       {isOpen && (
-        <div className="fixed inset-x-3 bottom-20 sm:bottom-20 sm:right-6 sm:left-auto z-40 w-auto sm:w-[440px] max-w-full h-[78vh] sm:h-[620px] max-h-[82vh] bg-white rounded-3xl shadow-2xl border border-slate-200/90 flex flex-col overflow-hidden animate-in slide-in-from-bottom-6 duration-200">
+        <div className="fixed inset-x-3 bottom-20 sm:bottom-20 sm:right-6 sm:left-auto z-50 w-auto sm:w-[440px] max-w-full h-[78vh] sm:h-[620px] max-h-[82vh] bg-white rounded-3xl shadow-2xl border border-slate-200/90 flex flex-col overflow-hidden animate-in slide-in-from-bottom-6 duration-200">
           {/* Header do Chat */}
           <div className="px-4 py-3.5 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white flex items-center justify-between shrink-0 shadow-sm">
             <div className="flex items-center space-x-2.5">

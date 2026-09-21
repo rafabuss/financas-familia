@@ -356,6 +356,7 @@ export default function App() {
   // Controle de Nuvem e Sessão de Usuário
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAIChatOpen, setIsAIChatOpen] = useState(false);
   const [isSubmittingTx, setIsSubmittingTx] = useState(false);
   const isSavingRef = useRef(false);
   const cloudSyncCooldownUntilRef = useRef(0);
@@ -4434,6 +4435,24 @@ export default function App() {
                   <span>Modo Local</span>
                 </div>
               )}
+
+              {/* Botão Assistente IA (Google Gemini) */}
+              <button
+                type="button"
+                onClick={() => setIsAIChatOpen((prev) => !prev)}
+                title="Abrir Assistente Financeiro IA (Google Gemini)"
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 cursor-pointer shadow-xs ${
+                  isAIChatOpen
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-indigo-400 shadow-inner ring-1 ring-indigo-400'
+                    : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 hover:text-white hover:border-slate-600'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span className="font-bold text-white">Assistente IA</span>
+                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 hidden sm:inline">
+                  Gemini
+                </span>
+              </button>
 
               {/* Botão Modo Privacidade (Olho Mágico para Compartilhamento de Tela) */}
               <button
@@ -11779,6 +11798,8 @@ export default function App() {
 
       {/* Assistente de IA Financeiro Conversacional (Google Gemini) */}
       <AIChatDrawer
+        isOpen={isAIChatOpen}
+        onToggle={setIsAIChatOpen}
         dashboardMonth={dashboardMonth}
         accounts={accounts}
         cards={cards}

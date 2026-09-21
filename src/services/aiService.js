@@ -341,7 +341,7 @@ export const sendMessageToGemini = async ({
         break;
       }
 
-      // Se for 404, analisa se a mensagem sugere um modelo específico
+      // 1. Tratamento de 404 (modelo inexistente ou descontinuado)
       if (response.status === 404) {
         let errorDetail = '';
         try {
@@ -360,7 +360,16 @@ export const sendMessageToGemini = async ({
         continue;
       }
 
-      // Se for erro de chave ou rate-limit, interrompe o loop de modelos
+      // 2. Tratamento de 503 (High Demand / Sobrecarga temporária) ou 429/500/502
+      // Diferentes modelos do Gemini rodam em clusters distintos de TPU no Google Cloud.
+      // Se um modelo estiver sobrecarregado, tentar outro modelo geralmente resolve imediatamente!
+      if (response.status === 503 || response.status === 429 || response.status === 500 || response.status === 502) {
+        console.warn(`Modelo ${candidateModel} retornou status ${response.status} (alta demanda). Tentando próximo modelo alternativo...`);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+
+      // Se for erro permanente de parâmetros ou chave (400), interrompe o loop
       break;
     } catch (netErr) {
       if (i === modelsToTry.length - 1) {
@@ -383,6 +392,9 @@ export const sendMessageToGemini = async ({
     }
     if (response?.status === 429) {
       throw new Error('LIMITE_ATINGIDO: O limite temporário de requisições da sua chave Gemini foi atingido. Aguarde alguns segundos.');
+    }
+    if (response?.status === 503) {
+      throw new Error('ALTA_DEMANDA (503): Os servidores do Google Gemini estão enfrentando um pico temporário de demanda mundial. Aguarde alguns segundos e tente novamente.');
     }
 
     throw new Error(`Erro na API Gemini (${response?.status || 500}): ${errorDetail}`);

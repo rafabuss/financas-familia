@@ -9,11 +9,20 @@
 
 const STORAGE_API_KEY = 'financas_gemini_api_key';
 const STORAGE_SELECTED_MODEL = 'financas_gemini_model';
-const DEFAULT_MODEL = 'gemini-1.5-flash';
+const DEFAULT_MODEL = 'gemini-3.6-flash';
 
 export const AVAILABLE_MODELS = [
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Rápido & Econômico)' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Mais Recente)' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Recomendado & Mais Rápido)' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Equilibrado)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Raciocínio Complexo)' },
+];
+
+export const FALLBACK_CANDIDATE_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
 ];
 
 /**
@@ -53,7 +62,10 @@ export const hasGeminiApiKey = () => {
 export const getSelectedModel = () => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem(STORAGE_SELECTED_MODEL);
-    if (saved) return saved;
+    // Auto-migração: se o modelo salvo for descontinuado (1.5 ou 2.0), migra para o 3.6
+    if (saved && saved !== 'gemini-1.5-flash' && saved !== 'gemini-2.0-flash') {
+      return saved;
+    }
   }
   return DEFAULT_MODEL;
 };
@@ -309,46 +321,71 @@ export const sendMessageToGemini = async ({
 
   let currentModel = activeModel;
   let response;
+  const modelsToTry = [
+    currentModel,
+    ...FALLBACK_CANDIDATE_MODELS.filter((m) => m !== currentModel),
+  ];
 
-  try {
-    response = await fetch(endpointUrl(currentModel), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
-
-    // Se falhar com 404 (modelo específico não encontrado), tenta fallback para o outro modelo
-    if (response.status === 404) {
-      const fallbackModel = currentModel === 'gemini-1.5-flash' ? 'gemini-2.0-flash' : 'gemini-1.5-flash';
-      console.warn(`Modelo ${currentModel} retornou 404. Tentando fallback para ${fallbackModel}...`);
-      currentModel = fallbackModel;
-      response = await fetch(endpointUrl(currentModel), {
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const candidateModel = modelsToTry[i];
+    try {
+      response = await fetch(endpointUrl(candidateModel), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
+
+      if (response.ok) {
+        currentModel = candidateModel;
+        setSelectedModel(candidateModel);
+        break;
+      }
+
+      // Se for 404, analisa se a mensagem sugere um modelo específico
+      if (response.status === 404) {
+        let errorDetail = '';
+        try {
+          const errorJson = await response.clone().json();
+          errorDetail = errorJson?.error?.message || '';
+        } catch {}
+
+        console.warn(`Modelo ${candidateModel} retornou 404: ${errorDetail}`);
+
+        // Se a mensagem do Google contiver "Please update your code to use models/...", extrai o modelo sugerido
+        const match = errorDetail.match(/models\/(gemini-[\w.-]+)/);
+        if (match && match[1] && !modelsToTry.includes(match[1])) {
+          console.log(`Auto-detectado modelo recomendado pela API: ${match[1]}`);
+          modelsToTry.splice(i + 1, 0, match[1]);
+        }
+        continue;
+      }
+
+      // Se for erro de chave ou rate-limit, interrompe o loop de modelos
+      break;
+    } catch (netErr) {
+      if (i === modelsToTry.length - 1) {
+        throw new Error(`Falha de conexão com os servidores do Google Gemini: ${netErr.message}`);
+      }
     }
-  } catch (netErr) {
-    throw new Error(`Falha de conexão com os servidores do Google Gemini: ${netErr.message}`);
   }
 
-  if (!response.ok) {
+  if (!response || !response.ok) {
     let errorDetail = '';
     try {
       const errorJson = await response.json();
       errorDetail = errorJson?.error?.message || JSON.stringify(errorJson);
     } catch {
-      errorDetail = response.statusText;
+      errorDetail = response?.statusText || 'Erro desconhecido';
     }
 
-    if (response.status === 400 && errorDetail.includes('API_KEY_INVALID')) {
+    if (response?.status === 400 && errorDetail.includes('API_KEY_INVALID')) {
       throw new Error('CHAVE_INVALIDA: A chave de API do Google Gemini informada é inválida. Verifique sua chave no Google AI Studio.');
     }
-    if (response.status === 429) {
+    if (response?.status === 429) {
       throw new Error('LIMITE_ATINGIDO: O limite temporário de requisições da sua chave Gemini foi atingido. Aguarde alguns segundos.');
     }
 
-    throw new Error(`Erro na API Gemini (${response.status}): ${errorDetail}`);
+    throw new Error(`Erro na API Gemini (${response?.status || 500}): ${errorDetail}`);
   }
 
   const data = await response.json();

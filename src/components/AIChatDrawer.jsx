@@ -179,6 +179,7 @@ export default function AIChatDrawer({
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 150);
       setHasKey(hasGeminiApiKey());
+      setActiveModelState(getSelectedModel());
     }
   }, [isOpen]);
 
@@ -346,6 +347,7 @@ export default function AIChatDrawer({
 
   const handleOpenKeyModal = () => {
     setKeyInputValue(getGeminiApiKey());
+    setActiveModelState(getSelectedModel());
     setShowKeyModal(true);
   };
 

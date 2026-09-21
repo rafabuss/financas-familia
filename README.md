@@ -108,6 +108,106 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 
 ---
 
+## 🏗️ Arquitetura Modular & Estrutura de Componentes
+
+Com a conclusão da **Fase 3**, o aplicativo foi totalmente desacoplado do arquivo monolítico original, adotando uma arquitetura modular orientada a responsabilidades, contratos explícitos de propriedades (*props*) e isolamento de efeitos colaterais:
+
+```
+src/
+├── components/
+│   ├── layout/
+│   │   └── Navbar.jsx                 # Top bar, modo demo, Olho Mágico, seletor de membro, navegação
+│   ├── dashboard/
+│   │   └── DashboardTab.jsx           # Resumo financeiro, atalhos rápidos, próximos vencimentos
+│   ├── transactions/
+│   │   └── TransactionsTab.jsx        # Extrato completo, filtros avançados, faturas agrupadas
+│   ├── accounts/
+│   │   └── AccountsTab.jsx            # Contas correntes, investimentos, carteiras e cartões
+│   ├── cards/
+│   │   └── CardsInvoicesTab.jsx       # Gestão de cartões, faturas mensais e parcelas futuras
+│   ├── envelopes/
+│   │   └── EnvelopesTab.jsx           # Metodologia dos envelopes e tetos orçamentários por mês
+│   ├── categories/
+│   │   └── CategoriesTab.jsx          # Centros de custo e árvore hierárquica (pai/filhas)
+│   ├── projections/
+│   │   └── ProjectionsTab.jsx         # Fluxo de caixa futuro projetado e drawer "What-If"
+│   ├── scenarios/
+│   │   └── ScenariosTab.jsx           # Simulador de cenários hipotéticos e conversão em dados reais
+│   ├── charts/
+│   │   └── ChartsTab.jsx              # Análise gráfica percentual e drill-down por categoria
+│   ├── import/
+│   │   └── ImportTab.jsx              # Importador client-side de faturas PDF e conciliação
+│   ├── exports/
+│   │   └── ExportsTab.jsx             # Backup em JSON, exportação para planilhas e restauração
+│   └── modals/
+│       ├── EntityModal.jsx            # Modal unificado para Contas, Cartões, Categorias e Cenários
+│       ├── TransactionModal.jsx       # Modal completo de lançamento (parcelas, recorrências)
+│       ├── DeleteModals.jsx           # Modais de exclusão (transação única, parcelas em lote, fatura)
+│       ├── InvoicePaymentModal.jsx    # Liquidação de fatura com débito em conta bancária
+│       └── EnvelopeModals.jsx         # Programação mensal, conflito de tetos e exclusão de envelopes
+├── data/
+│   ├── constants.js                   # Membros da família (FAMILY_MEMBERS) e categorias essenciais
+│   └── demoData.js                    # Conjunto rico de dados de exemplo para a Sandbox em memória
+├── utils/
+│   └── formatters.js                  # formatMoney com Olho Mágico, formatDateBR e regras bancárias
+└── services/
+    ├── financeService.js              # Camada de persistência híbrida e fila de sincronização
+    ├── aiService.js                   # Integração com API Google Gemini e Function Calling
+    ├── supabase.js                    # Cliente de autenticação e banco PostgreSQL na nuvem
+    └── pdfParser.js                   # Parser client-side de faturas bancárias em PDF
+```
+
+### 🧩 Detalhamento dos Módulos:
+
+1. **`Navbar.jsx` (Navegação & Layout Global):**
+   Gerencia a barra superior fixa do sistema. Integra o banner de alerta do Modo Demonstração, botão de alternância do Modo Privacidade ("Olho Mágico"), seletor de titularidade (`user-all`, gastos conjuntos da família ou visão privada de cada membro), botão de criação rápida de lançamentos e menu de abas responsivo.
+
+2. **`DashboardTab.jsx` (Visão Geral da Família):**
+   Tela inicial executiva com totalizadores inteligentes do mês (Entradas, Despesas, Saldo Operacional e Saldo Acumulado), timeline de próximos vencimentos de contas e faturas, alertas de envelopes próximos do limite e cartões bancários ativos.
+
+3. **`TransactionsTab.jsx` (Extrato & Lançamentos):**
+   Módulo de controle transacional diário. Inclui campo de busca em tempo real, drawer com múltiplos filtros combináveis (período pré-definido ou personalizado, status, membro, categoria e conta), visualização em lote, atalhos de liquidação rápida e agrupamento visual de faturas de cartão de crédito.
+
+4. **`AccountsTab.jsx` (Contas Bancárias & Carteiras):**
+   Gerenciamento de contas correntes, contas de investimento e carteiras de dinheiro físico. Calcula saldos consolidados em tempo real, permite arquivar contas inativas preservando o histórico e exibe os cartões associados a cada titular.
+
+5. **`CardsInvoicesTab.jsx` (Cartões & Faturas):**
+   Módulo de crédito da família. Exibe limites totais, utilizados e disponíveis, histórico de faturas mensais e visualização das parcelas de compras que impactarão os meses seguintes, com modal direto para liquidação da fatura.
+
+6. **`EnvelopesTab.jsx` (Orçamento por Envelopes):**
+   Implementa a metodologia clássica de envelopes financeiros. Permite destinar um teto orçamentário mensal para cada categoria de despesa, monitorar barras de progresso com alertas de estouro de orçamento e programar valores recorrentes para meses específicos.
+
+7. **`CategoriesTab.jsx` (Categorias & Centros de Custo):**
+   Organização das naturezas financeiras da família em estrutura em árvore (Categorias Pai e Subcategorias filhas). Define identificação cromática e tetos sugeridos.
+
+8. **`ProjectionsTab.jsx` (Planejamento & Fluxo de Caixa Futuro):**
+   Gráficos e tabelas projetando a liquidez familiar mês a mês para os próximos 6 a 12 meses. Inclui o simulador dinâmico *"What-If"*, que permite testar reduções de gastos e exclusão de receitas hipotéticas em tempo de execução.
+
+9. **`ScenariosTab.jsx` (Cenários & Simulações):**
+   Laboratório de simulação financeira. Permite criar propostas (ex: troca de veículo, reforma, nova fonte de renda) e ativá-las/desativá-las para medir o impacto no fluxo futuro sem alterar o banco de dados real, permitindo a conversão do cenário em lançamentos reais com um clique.
+
+10. **`ChartsTab.jsx` (Análise Gráfica & Relatórios):**
+    Visualização gráfica percentual da origem das receitas e destino das despesas. Suporta alternância entre visão agregada e hierárquica, além de *drill-down* direto para o extrato ao clicar em qualquer fatia.
+
+11. **`ImportTab.jsx` (Importador Inteligente de Faturas):**
+    Leitura de faturas em PDF (Itaú, Mercado Pago, etc.) diretamente no navegador via Web Worker (`pdfjs-dist`). Oferece conferência item a item, detecção automática de compras duplicadas e seleção em lote antes da gravação.
+
+12. **`ExportsTab.jsx` (Backup & Portabilidade):**
+    Exportação completa dos dados da família em formato JSON estruturado ou planilhas Excel/CSV, além de controles administrativos para restauração dos dados do sandbox de demonstração e reset de fábrica.
+
+13. **`src/components/modals/` (Modais Desacoplados):**
+    Componentes especializados isolados que não recarregam a árvore principal do app:
+    * `EntityModal.jsx`: Cadastro/edição unificada de Contas, Cartões, Categorias e Cenários.
+    * `TransactionModal.jsx`: Criação e edição de transações com gerador automático de compras parceladas (1/N) e regras de repetição mensal.
+    * `DeleteModals.jsx`: Exclusão segura com seleção de escopo (apenas esta parcela, parcelas futuras ou todo o grupo).
+    * `InvoicePaymentModal.jsx`: Liquidação de fatura com débito na conta bancária selecionada.
+    * `EnvelopeModals.jsx`: Configuração mensal e validação assistida de hierarquia de tetos (Categoria Pai vs. Subcategorias).
+
+14. **`src/utils/formatters.js` & `src/data/constants.js`:**
+    Funções puras e imutáveis com suporte ao **Modo Privacidade ("Olho Mágico")** (`formatMoney`), tratamento defensivo de datas ISO (`formatDateBR`) e regras de fechamento/vencimento de faturas de cartão (`calculateCardDueDate`).
+
+---
+
 ## 🚀 Roadmap de Evolução (Do Projeto Pessoal ao Produto SaaS)
 
 Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada fase for desenvolvida, ela será documentada e marcada nesta lista.

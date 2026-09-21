@@ -1,4 +1,27 @@
 import { supabase, isSupabaseConfigured } from './supabase.js';
+import {
+  DEMO_ACCOUNTS,
+  DEMO_CARDS,
+  DEMO_CATEGORIES,
+  DEMO_TRANSACTIONS,
+  DEMO_SCENARIOS,
+  DEMO_MONTHLY_ENVELOPES,
+} from '../data/demoData.js';
+
+export const isDemoMode = () => {
+  if (typeof window === 'undefined') return false;
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.get('demo') === 'true' || searchParams.get('demo') === '1') return true;
+  if (window.location.pathname === '/demo' || window.location.pathname.startsWith('/demo/')) return true;
+  if (window.location.hash === '#demo' || window.location.hash === '#/demo') return true;
+  return sessionStorage.getItem('financas_is_demo') === 'true';
+};
+
+export const clearDemoSandbox = () => {
+  if (typeof window === 'undefined') return;
+  Object.values(STORAGE_KEYS).forEach((k) => sessionStorage.removeItem('demo_' + k));
+  sessionStorage.removeItem('financas_is_demo');
+};
 
 export const STORAGE_KEYS = {
   accounts: 'financas_accounts_v1',
@@ -10,7 +33,7 @@ export const STORAGE_KEYS = {
 };
 
 export const markCategoryPending = (catId) => {
-  if (!catId) return;
+  if (!catId || isDemoMode()) return;
   try {
     const list = JSON.parse(localStorage.getItem('financas_pending_categories') || '[]');
     if (!list.includes(catId)) {
@@ -21,7 +44,7 @@ export const markCategoryPending = (catId) => {
 };
 
 export const clearCategoryPending = (catId) => {
-  if (!catId) return;
+  if (!catId || isDemoMode()) return;
   try {
     const list = JSON.parse(localStorage.getItem('financas_pending_categories') || '[]');
     const filtered = list.filter((id) => id !== catId);
@@ -30,6 +53,7 @@ export const clearCategoryPending = (catId) => {
 };
 
 export const getPendingCategories = () => {
+  if (isDemoMode()) return [];
   try {
     return JSON.parse(localStorage.getItem('financas_pending_categories') || '[]');
   } catch {
@@ -38,7 +62,7 @@ export const getPendingCategories = () => {
 };
 
 export const markTransactionPending = (txId) => {
-  if (!txId) return;
+  if (!txId || isDemoMode()) return;
   try {
     const list = JSON.parse(localStorage.getItem('financas_pending_transactions') || '[]');
     if (!list.includes(txId)) {
@@ -49,7 +73,7 @@ export const markTransactionPending = (txId) => {
 };
 
 export const clearTransactionPending = (txId) => {
-  if (!txId) return;
+  if (!txId || isDemoMode()) return;
   try {
     const list = JSON.parse(localStorage.getItem('financas_pending_transactions') || '[]');
     const filtered = list.filter((id) => id !== txId);
@@ -58,6 +82,7 @@ export const clearTransactionPending = (txId) => {
 };
 
 export const getPendingTransactions = () => {
+  if (isDemoMode()) return [];
   try {
     return JSON.parse(localStorage.getItem('financas_pending_transactions') || '[]');
   } catch {
@@ -293,6 +318,32 @@ export const monthlyEnvelopeToDb = (env) => ({
 // ==========================================
 
 export const loadInitialAppData = async (defaults = {}) => {
+  if (isDemoMode()) {
+    const getDemoSession = (key, fallback) => {
+      try {
+        const stored = sessionStorage.getItem('demo_' + key);
+        if (stored !== null) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return fallback;
+      } catch {
+        return fallback;
+      }
+    };
+
+    return {
+      isCloud: false,
+      isDemo: true,
+      accounts: getDemoSession(STORAGE_KEYS.accounts, defaults.accounts || DEMO_ACCOUNTS),
+      cards: getDemoSession(STORAGE_KEYS.cards, defaults.cards || DEMO_CARDS),
+      categories: getDemoSession(STORAGE_KEYS.categories, defaults.categories || DEMO_CATEGORIES),
+      transactions: getDemoSession(STORAGE_KEYS.transactions, defaults.transactions || DEMO_TRANSACTIONS).map(transactionToClient),
+      scenarios: getDemoSession(STORAGE_KEYS.scenarios, defaults.scenarios || DEMO_SCENARIOS),
+      monthlyEnvelopes: getDemoSession(STORAGE_KEYS.monthlyEnvelopes, defaults.monthlyEnvelopes || DEMO_MONTHLY_ENVELOPES).map(monthlyEnvelopeToClient),
+    };
+  }
+
   const isCloud = isSupabaseConfigured() && supabase;
 
   // Fallback para LocalStorage (NUNCA gera transações de exemplo por padrão)
@@ -465,6 +516,25 @@ export const loadInitialAppData = async (defaults = {}) => {
 };
 
 export const loadDemoPresentationData = async (demo) => {
+  if (isDemoMode()) {
+    saveToLocalStorage(STORAGE_KEYS.accounts, demo.accounts || []);
+    saveToLocalStorage(STORAGE_KEYS.cards, demo.cards || []);
+    saveToLocalStorage(STORAGE_KEYS.categories, demo.categories || []);
+    saveToLocalStorage(STORAGE_KEYS.transactions, demo.transactions || []);
+    saveToLocalStorage(STORAGE_KEYS.scenarios, demo.scenarios || []);
+    saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, demo.monthlyEnvelopes || []);
+    sessionStorage.setItem('financas_demo_loaded', 'true');
+
+    return {
+      accounts: demo.accounts || [],
+      cards: demo.cards || [],
+      categories: demo.categories || [],
+      transactions: demo.transactions || [],
+      scenarios: demo.scenarios || [],
+      monthlyEnvelopes: demo.monthlyEnvelopes || [],
+    };
+  }
+
   const isCloud = isSupabaseConfigured() && supabase;
 
   if (isCloud) {
@@ -584,6 +654,7 @@ export const clearAllDemoData = clearDemoDataOnly;
 // ==========================================
 
 export const syncItem = async (entity, item, isDelete = false) => {
+  if (isDemoMode()) return { success: true };
   const isCloud = isSupabaseConfigured() && supabase;
   if (!isCloud) return { success: true };
 
@@ -757,6 +828,7 @@ export const syncItem = async (entity, item, isDelete = false) => {
 };
 
 export const syncBatchTransactions = async (txList, isDelete = false) => {
+  if (isDemoMode()) return { success: true };
   const isCloud = isSupabaseConfigured() && supabase;
   if (!isCloud || !txList?.length) return { success: true };
 
@@ -810,6 +882,7 @@ export const syncBatchTransactions = async (txList, isDelete = false) => {
 };
 
 export const syncBatchMonthlyEnvelopes = async (envList, isDelete = false) => {
+  if (isDemoMode()) return;
   const isCloud = isSupabaseConfigured() && supabase;
   if (!isCloud || !envList?.length) return;
 
@@ -832,9 +905,13 @@ export const syncBatchMonthlyEnvelopes = async (envList, isDelete = false) => {
 
 export const saveToLocalStorage = (key, data) => {
   try {
+    if (isDemoMode()) {
+      sessionStorage.setItem('demo_' + key, JSON.stringify(data));
+      return;
+    }
     localStorage.setItem(key, JSON.stringify(data));
   } catch (e) {
-    console.warn('Erro ao salvar no localStorage:', e);
+    console.warn('Erro ao salvar no storage:', e);
   }
 };
 

@@ -37,7 +37,10 @@ import {
   Search,
   Target,
   Mail,
-  MoreHorizontal
+  MoreHorizontal,
+  Eye,
+  EyeOff,
+  Info
 } from 'lucide-react';
 import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
@@ -56,6 +59,8 @@ import {
   markTransactionPending,
   clearTransactionPending,
   getPendingTransactions,
+  isDemoMode,
+  clearDemoSandbox,
   STORAGE_KEYS,
 } from './services/financeService';
 import {
@@ -64,6 +69,7 @@ import {
   DEMO_CATEGORIES,
   DEMO_TRANSACTIONS,
   DEMO_SCENARIOS,
+  DEMO_MONTHLY_ENVELOPES,
 } from './data/demoData';
 import {
   signOutUser,
@@ -73,8 +79,16 @@ import {
   subscribeToCloudChanges,
 } from './services/supabase';
 
-// Formatação Monetária Segura (em Centavos)
-const formatMoney = (cents = 0) => {
+// Formatação Monetária Segura (em Centavos) com suporte a Modo Privacidade ("Olho Mágico")
+let _globalPrivacyActive = false;
+export const setGlobalPrivacyActive = (val) => {
+  _globalPrivacyActive = Boolean(val);
+};
+
+const formatMoney = (cents = 0, bypassPrivacy = false) => {
+  if (_globalPrivacyActive && !bypassPrivacy) {
+    return 'R$ •••••';
+  }
   return (cents / 100).toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL',
@@ -165,28 +179,88 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function App() {
-  // Estado Principal (Inicia 100% limpo, sem dados mockados)
+  // Detecção e Estado do Modo Demonstração (Sandbox 100% em Memória/Sessão)
+  const [isDemoModeState, setIsDemoModeState] = useState(() => {
+    const demo = isDemoMode();
+    if (demo && typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('financas_is_demo', 'true');
+      } catch {}
+    }
+    return demo;
+  });
+
+  // Estado do Modo Privacidade ("Olho Mágico") com persistência no LocalStorage
+  const [isPrivacyMode, setIsPrivacyMode] = useState(() => {
+    try {
+      return localStorage.getItem('financas_privacy_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Mantém a flag global de formatação monetária sincronizada com o estado
+  _globalPrivacyActive = isPrivacyMode;
+
+  const togglePrivacyMode = () => {
+    setIsPrivacyMode((prev) => {
+      const next = !prev;
+      _globalPrivacyActive = next;
+      try {
+        localStorage.setItem('financas_privacy_mode', String(next));
+      } catch (e) {
+        console.warn('Erro ao salvar preferência de privacidade:', e);
+      }
+      return next;
+    });
+  };
+
+  // Estado Principal (No modo real inicia limpo; no modo demo inicia com dados ricos em memória)
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentMemberId, setCurrentMemberId] = useState('user-all');
 
   const [accounts, setAccounts] = useState(() => {
     try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.accounts);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_ACCOUNTS;
+      }
       const stored = localStorage.getItem(STORAGE_KEYS.accounts);
       return stored ? JSON.parse(stored) : [];
     } catch {
-      return [];
+      return isDemoMode() ? DEMO_ACCOUNTS : [];
     }
   });
   const [cards, setCards] = useState(() => {
     try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.cards);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_CARDS;
+      }
       const stored = localStorage.getItem(STORAGE_KEYS.cards);
       return stored ? JSON.parse(stored) : [];
     } catch {
-      return [];
+      return isDemoMode() ? DEMO_CARDS : [];
     }
   });
   const [categories, setCategories] = useState(() => {
     try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.categories);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_CATEGORIES;
+      }
       const stored = localStorage.getItem(STORAGE_KEYS.categories);
       if (stored) {
         const parsed = JSON.parse(stored);
@@ -195,30 +269,54 @@ export default function App() {
     } catch {
       // ignore
     }
-    return DEFAULT_CATEGORIES;
+    return isDemoMode() ? DEMO_CATEGORIES : DEFAULT_CATEGORIES;
   });
   const [transactions, setTransactions] = useState(() => {
     try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.transactions);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_TRANSACTIONS;
+      }
       const stored = localStorage.getItem(STORAGE_KEYS.transactions);
       return stored ? JSON.parse(stored) : [];
     } catch {
-      return [];
+      return isDemoMode() ? DEMO_TRANSACTIONS : [];
     }
   });
   const [scenarios, setScenarios] = useState(() => {
     try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.scenarios);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_SCENARIOS;
+      }
       const stored = localStorage.getItem(STORAGE_KEYS.scenarios);
       return stored ? JSON.parse(stored) : [];
     } catch {
-      return [];
+      return isDemoMode() ? DEMO_SCENARIOS : [];
     }
   });
   const [monthlyEnvelopes, setMonthlyEnvelopes] = useState(() => {
     try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.monthlyEnvelopes);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_MONTHLY_ENVELOPES;
+      }
       const local = localStorage.getItem(STORAGE_KEYS.monthlyEnvelopes);
       return local ? JSON.parse(local) : [];
     } catch {
-      return [];
+      return isDemoMode() ? DEMO_MONTHLY_ENVELOPES : [];
     }
   });
 
@@ -261,6 +359,15 @@ export default function App() {
   const isSavingRef = useRef(false);
   const cloudSyncCooldownUntilRef = useRef(0);
   const [currentUser, setCurrentUser] = useState(() => {
+    if (isDemoMode()) {
+      return {
+        id: 'demo-user-1',
+        name: 'Família Silva (Demo)',
+        email: 'demo@financasdafamilia.app',
+        role: 'admin',
+        memberKey: 'user-all',
+      };
+    }
     try {
       const saved = localStorage.getItem('financas_session');
       return saved ? JSON.parse(saved) : null;
@@ -269,8 +376,9 @@ export default function App() {
     }
   });
 
-  // Restaurar sessão do Supabase Auth caso exista
+  // Restaurar sessão do Supabase Auth caso exista (ignorado em modo demonstração)
   useEffect(() => {
+    if (isDemoModeState || isDemoMode()) return;
     if (isSupabaseConfigured() && supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
@@ -315,10 +423,13 @@ export default function App() {
 
       return () => subscription.unsubscribe();
     }
-  }, []);
+  }, [isDemoModeState]);
 
   // Função unificada para carregar e sincronizar dados da nuvem
   const reloadDataFromCloud = useCallback(async () => {
+    if (isDemoModeState || isDemoMode()) {
+      return;
+    }
     // Evita sobrescrever edições locais em andamento ou durante período de carência (cooldown)
     if (isSavingRef.current || Date.now() < cloudSyncCooldownUntilRef.current) {
       return;
@@ -376,16 +487,17 @@ export default function App() {
     } catch (err) {
       console.warn('Erro ao recarregar dados da nuvem:', err);
     }
-  }, []);
+  }, [isDemoModeState]);
 
-  // 1. Carregamento inicial de dados
+  // 1. Carregamento inicial de dados (ignorado no modo demo pois os dados já estão em memória)
   useEffect(() => {
+    if (isDemoModeState || isDemoMode()) return;
     reloadDataFromCloud();
-  }, [currentUser, reloadDataFromCloud]);
+  }, [currentUser, reloadDataFromCloud, isDemoModeState]);
 
-  // 2. Sincronização multi-dispositivo automática: ao trocar de aba ou desbloquear o celular (Visibility / Focus)
+  // 2. Sincronização multi-dispositivo automática: ao trocar de aba ou desbloquear o celular (ignorado em modo demo)
   useEffect(() => {
-    if (!isSupabaseConfigured() || !supabase) return;
+    if (isDemoModeState || isDemoMode() || !isSupabaseConfigured() || !supabase) return;
 
     let lastSyncTime = Date.now();
     const handleVisibilityOrFocus = () => {
@@ -423,7 +535,7 @@ export default function App() {
       if (debounceTimer) clearTimeout(debounceTimer);
       if (channel) supabase.removeChannel(channel);
     };
-  }, [reloadDataFromCloud]);
+  }, [reloadDataFromCloud, isDemoModeState]);
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
@@ -447,28 +559,88 @@ export default function App() {
     }
   };
 
-  // Carregar dados de demonstração sob demanda para apresentar a aplicação
-  const handleLoadDemoData = async () => {
-    if (confirm('Deseja carregar os dados de demonstração/apresentação? Isso criará contas, cartões, lançamentos e simulações de exemplo para você demonstrar a plataforma.')) {
-      const res = await loadDemoPresentationData({
-        accounts: DEMO_ACCOUNTS,
-        cards: DEMO_CARDS,
-        categories: DEMO_CATEGORIES,
-        transactions: DEMO_TRANSACTIONS,
-        scenarios: DEMO_SCENARIOS,
-      });
-      setAccounts(res.accounts);
-      setCards(res.cards);
-      setCategories(res.categories);
-      setTransactions(res.transactions);
-      setScenarios(res.scenarios);
-      alert('Dados de demonstração carregados com sucesso! Você pode zerar tudo a qualquer momento.');
+  // Sair do Modo Demonstração e restaurar a aplicação normal
+  const handleExitDemo = () => {
+    clearDemoSandbox();
+    try {
+      sessionStorage.removeItem('financas_is_demo');
+    } catch {}
+    window.location.href = window.location.pathname === '/demo' ? '/' : (window.location.pathname || '/');
+  };
+
+  // Restaurar dados padrão da demonstração (reset do sandbox em memória)
+  const handleResetDemoSandbox = () => {
+    if (confirm('Deseja restaurar os dados originais da demonstração? Suas alterações de teste nesta sessão serão resetadas.')) {
+      clearDemoSandbox();
+      try {
+        sessionStorage.setItem('financas_is_demo', 'true');
+      } catch {}
+      saveToLocalStorage(STORAGE_KEYS.accounts, DEMO_ACCOUNTS);
+      saveToLocalStorage(STORAGE_KEYS.cards, DEMO_CARDS);
+      saveToLocalStorage(STORAGE_KEYS.categories, DEMO_CATEGORIES);
+      saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
+      saveToLocalStorage(STORAGE_KEYS.scenarios, DEMO_SCENARIOS);
+      saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, DEMO_MONTHLY_ENVELOPES);
+      setAccounts(DEMO_ACCOUNTS);
+      setCards(DEMO_CARDS);
+      setCategories(DEMO_CATEGORIES);
+      setTransactions(DEMO_TRANSACTIONS);
+      setScenarios(DEMO_SCENARIOS);
+      setMonthlyEnvelopes(DEMO_MONTHLY_ENVELOPES);
+      alert('Dados de demonstração restaurados para o padrão com sucesso!');
     }
+  };
+
+  // Ativar Modo Demonstração Seguro
+  const handleEnterDemoMode = () => {
+    try {
+      sessionStorage.setItem('financas_is_demo', 'true');
+    } catch {}
+    saveToLocalStorage(STORAGE_KEYS.accounts, DEMO_ACCOUNTS);
+    saveToLocalStorage(STORAGE_KEYS.cards, DEMO_CARDS);
+    saveToLocalStorage(STORAGE_KEYS.categories, DEMO_CATEGORIES);
+    saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
+    saveToLocalStorage(STORAGE_KEYS.scenarios, DEMO_SCENARIOS);
+    saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, DEMO_MONTHLY_ENVELOPES);
+
+    setIsDemoModeState(true);
+    setAccounts(DEMO_ACCOUNTS);
+    setCards(DEMO_CARDS);
+    setCategories(DEMO_CATEGORIES);
+    setTransactions(DEMO_TRANSACTIONS);
+    setScenarios(DEMO_SCENARIOS);
+    setMonthlyEnvelopes(DEMO_MONTHLY_ENVELOPES);
+    setCurrentUser({
+      id: 'demo-user-1',
+      name: 'Família Silva (Demo)',
+      email: 'demo@financasdafamilia.app',
+      role: 'admin',
+      memberKey: 'user-all',
+    });
+    setCurrentMemberId('user-all');
+    setActiveTab('dashboard');
+
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('demo') !== 'true') {
+        url.searchParams.set('demo', 'true');
+        window.history.pushState(null, '', url.toString());
+      }
+    }
+  };
+
+  // Carregar modo de demonstração sob demanda para apresentar a aplicação
+  const handleLoadDemoData = () => {
+    handleEnterDemoMode();
   };
 
   // Limpeza estritamente segura apenas de registros de exemplo (prefixo demo-)
   // NUNCA exclui lançamentos reais (tx-...) nem altera saldos de contas reais do usuário
   const handleClearOnlyDemo = async () => {
+    if (isDemoModeState) {
+      handleResetDemoSandbox();
+      return;
+    }
     const demoTxs = transactions.filter((t) => String(t.id || '').startsWith('demo-'));
     const demoAccs = accounts.filter((a) => String(a.id || '').startsWith('demo-'));
     const demoCards = cards.filter((c) => String(c.id || '').startsWith('demo-'));
@@ -3980,93 +4152,179 @@ export default function App() {
       />
     );
   }
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased font-sans">
-      {/* Barra de Navegação Superior com Seletor de Perfil / Login Familiar */}
-      <header className="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-xl shadow-inner">
-              F
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-lg font-bold tracking-tight">Finanças da Família</h1>
-                <span className="text-[10px] bg-blue-900/60 text-blue-300 border border-blue-700 px-2 py-0.5 rounded-full font-semibold">
-                  Planejamento Familiar
+    <div className={`min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased font-sans ${isPrivacyMode ? 'privacy-mode-active' : ''}`}>
+      {/* Barra de Topo Fixa: Banner de Demonstração (se ativo) + Navegação Superior */}
+      <div className="sticky top-0 z-30 shadow-md">
+        {/* Banner Visual Fixo do Modo Demonstração (Sandbox 100% em Memória) */}
+        {isDemoModeState && (
+          <div className="bg-gradient-to-r from-amber-600 via-amber-700 to-amber-800 text-white border-b border-amber-500/40 shadow-inner">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2.5 text-xs sm:text-sm">
+              <div className="flex items-center space-x-2.5">
+                <span className="flex h-2 w-2 relative shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-200"></span>
                 </span>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2">
+                  <span className="font-bold text-white tracking-tight">
+                    Modo Demonstração Interativo — Nenhuma alteração é salva
+                  </span>
+                  <span className="text-amber-100/80 text-xs hidden lg:inline">
+                    (Sandbox 100% em memória • Risco zero aos dados reais)
+                  </span>
+                </div>
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">Gestão, Projeções e Orçamento Compartilhado</p>
+              <div className="flex items-center space-x-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={togglePrivacyMode}
+                  className="bg-amber-800/80 hover:bg-amber-800 text-amber-100 hover:text-white border border-amber-500/50 px-2.5 py-1 rounded-lg text-xs font-semibold transition active:scale-95 flex items-center space-x-1 cursor-pointer"
+                  title={isPrivacyMode ? 'Mostrar valores monetários' : 'Ocultar valores monetários (Olho Mágico)'}
+                >
+                  {isPrivacyMode ? <EyeOff className="w-3.5 h-3.5 text-amber-300" /> : <Eye className="w-3.5 h-3.5 text-amber-300" />}
+                  <span className="hidden sm:inline">{isPrivacyMode ? 'Valores Ocultos' : 'Olho Mágico'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetDemoSandbox}
+                  className="bg-amber-800/80 hover:bg-amber-800 text-amber-100 hover:text-white border border-amber-500/50 px-2.5 py-1 rounded-lg text-xs font-semibold transition active:scale-95 flex items-center space-x-1 cursor-pointer"
+                  title="Restaurar dados originais da demonstração"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Restaurar Dados</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExitDemo}
+                  className="bg-white hover:bg-slate-100 text-slate-900 px-3 py-1 rounded-lg text-xs font-bold shadow transition active:scale-95 flex items-center space-x-1 cursor-pointer"
+                  title="Sair da demonstração e voltar aos dados reais"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sair da Demonstração</span>
+                </button>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Seletor de Visão / Usuário & Botão Novo Lançamento */}
-          <div className="flex items-center space-x-2.5">
-            {/* Indicador de Nuvem / Local */}
-            {isCloudConnected ? (
-              <div className="hidden lg:flex items-center space-x-1.5 text-[11px] font-semibold text-emerald-300 bg-emerald-950/60 border border-emerald-700/50 px-2.5 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>Nuvem Conectada</span>
+        {/* Barra de Navegação Superior com Seletor de Perfil / Login Familiar */}
+        <header className="bg-slate-900 text-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-xl shadow-inner">
+                F
               </div>
-            ) : (
-              <div className="hidden lg:flex items-center space-x-1.5 text-[11px] font-semibold text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-                <span>Modo Local / Demo</span>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h1 className="text-lg font-bold tracking-tight">Finanças da Família</h1>
+                  <span className="text-[10px] bg-blue-900/60 text-blue-300 border border-blue-700 px-2 py-0.5 rounded-full font-semibold">
+                    Planejamento Familiar
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 hidden sm:block">Gestão, Projeções e Orçamento Compartilhado</p>
               </div>
-            )}
+            </div>
 
-            {/* Perfil do Usuário Logado */}
-            <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 shadow-sm">
-              <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
-                {currentUser?.name?.[0] || 'U'}
-              </div>
-              <div className="hidden sm:block text-left leading-tight">
-                <div className="text-xs font-bold text-white leading-none">{currentUser?.name}</div>
-                <span className="text-[9px] uppercase font-bold text-blue-400">
-                  {currentUser?.role === 'admin' ? 'Administrador' : 'Membro'}
-                </span>
-              </div>
+            {/* Seletor de Visão / Usuário, Olho Mágico & Botão Novo Lançamento */}
+            <div className="flex items-center space-x-2 sm:space-x-2.5">
+              {/* Indicador de Nuvem / Local / Demonstração Segura */}
+              {isDemoModeState ? (
+                <div className="hidden lg:flex items-center space-x-1.5 text-[11px] font-semibold text-amber-300 bg-amber-950/60 border border-amber-700/50 px-2.5 py-1 rounded-full">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Demonstração Segura</span>
+                </div>
+              ) : isCloudConnected ? (
+                <div className="hidden lg:flex items-center space-x-1.5 text-[11px] font-semibold text-emerald-300 bg-emerald-950/60 border border-emerald-700/50 px-2.5 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Nuvem Conectada</span>
+                </div>
+              ) : (
+                <div className="hidden lg:flex items-center space-x-1.5 text-[11px] font-semibold text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                  <span>Modo Local</span>
+                </div>
+              )}
+
+              {/* Botão Modo Privacidade (Olho Mágico para Compartilhamento de Tela) */}
               <button
                 type="button"
-                onClick={handleLogout}
-                className="text-slate-400 hover:text-rose-400 hover:bg-slate-700 p-1 rounded transition flex items-center space-x-1 ml-1"
-                title="Sair da conta"
+                onClick={togglePrivacyMode}
+                title={
+                  isPrivacyMode
+                    ? 'Olho Mágico ATIVADO: Todos os valores estão ocultos (R$ •••••). Clique para exibir.'
+                    : 'Ativar Olho Mágico: Oculte todos os valores para compartilhar tela com segurança.'
+                }
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 cursor-pointer shadow-xs ${
+                  isPrivacyMode
+                    ? 'bg-amber-500/25 text-amber-300 border-amber-500/60 hover:bg-amber-500/35 ring-1 ring-amber-500/40 shadow-inner'
+                    : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700 hover:text-white hover:border-slate-600'
+                }`}
               >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-medium hidden md:inline">Sair</span>
+                {isPrivacyMode ? (
+                  <>
+                    <EyeOff className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                    <span className="font-bold text-amber-300">Olho Mágico</span>
+                    <span className="text-[10px] bg-amber-500/30 text-amber-200 px-1.5 py-0.5 rounded-full font-bold ml-0.5">Oculto</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Olho Mágico</span>
+                  </>
+                )}
+              </button>
+
+              {/* Perfil do Usuário Logado */}
+              <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 shadow-sm">
+                <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+                  {currentUser?.name?.[0] || 'U'}
+                </div>
+                <div className="hidden sm:block text-left leading-tight">
+                  <div className="text-xs font-bold text-white leading-none">{currentUser?.name}</div>
+                  <span className="text-[9px] uppercase font-bold text-blue-400">
+                    {isDemoModeState ? 'Visitante Demo' : currentUser?.role === 'admin' ? 'Administrador' : 'Membro'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={isDemoModeState ? handleExitDemo : handleLogout}
+                  className="text-slate-400 hover:text-rose-400 hover:bg-slate-700 p-1 rounded transition flex items-center space-x-1 ml-1 cursor-pointer"
+                  title={isDemoModeState ? "Sair do modo demo" : "Sair da conta"}
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-medium hidden md:inline">Sair</span>
+                </button>
+              </div>
+
+              {/* Seletor de Visão (Filtrado pelo Perfil do Usuário) */}
+              <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 shadow-sm">
+                <Users className="w-4 h-4 text-slate-400 mr-2" />
+                <select
+                  value={currentMemberId}
+                  onChange={(e) => setCurrentMemberId(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer"
+                >
+                  {FAMILY_MEMBERS.filter((m) => {
+                    if (isDemoModeState || currentUser?.role === 'admin') return true;
+                    return m.id === 'family-shared' || m.id === currentUser?.memberKey;
+                  }).map((m) => (
+                    <option key={m.id} value={m.id} className="bg-slate-900 text-white">
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => openTransactionModal('create')}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg flex items-center space-x-1.5 shadow-sm transition active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Novo Lançamento</span>
               </button>
             </div>
-
-            {/* Seletor de Visão (Filtrado pelo Perfil do Usuário) */}
-            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 shadow-sm">
-              <Users className="w-4 h-4 text-slate-400 mr-2" />
-              <select
-                value={currentMemberId}
-                onChange={(e) => setCurrentMemberId(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer"
-              >
-                {FAMILY_MEMBERS.filter((m) => {
-                  if (currentUser?.role === 'admin') return true;
-                  return m.id === 'family-shared' || m.id === currentUser?.memberKey;
-                }).map((m) => (
-                  <option key={m.id} value={m.id} className="bg-slate-900 text-white">
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => openTransactionModal('create')}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg flex items-center space-x-1.5 shadow-sm transition active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Novo Lançamento</span>
-            </button>
           </div>
-        </div>
 
         {/* Abas Principais: 5 Módulos Principais + Menu Mais */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-800 flex items-center justify-between py-2 relative">
@@ -4213,6 +4471,7 @@ export default function App() {
           </div>
         </div>
       </header>
+    </div>
 
       {/* Conteúdo Principal */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
@@ -4270,8 +4529,8 @@ export default function App() {
               </div>
             )}
 
-            {/* Banner para Modo Demonstração / Apresentação Ativo */}
-            {transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
+            {/* Banner para Dados de Exemplo Residuais no Modo Real */}
+            {!isDemoModeState && transactions.some((t) => String(t.id || '').startsWith('demo-')) && (
               <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center space-x-3">
                   <span className="text-2xl">✨</span>
@@ -4378,7 +4637,17 @@ export default function App() {
               <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-5 rounded-2xl shadow-sm flex flex-col justify-between border border-slate-700">
                 <div className="flex items-center justify-between text-slate-300 mb-2">
                   <span className="text-xs font-bold uppercase tracking-wider text-blue-300">Saldo Consolidado</span>
-                  <Sparkles className="w-5 h-5 text-amber-400" />
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={togglePrivacyMode}
+                      className="p-1 text-slate-400 hover:text-amber-300 hover:bg-slate-700/60 rounded-lg transition cursor-pointer"
+                      title={isPrivacyMode ? 'Mostrar valores (Desativar Olho Mágico)' : 'Ocultar valores (Ativar Olho Mágico)'}
+                    >
+                      {isPrivacyMode ? <EyeOff className="w-4 h-4 text-amber-400" /> : <Eye className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    <Sparkles className="w-5 h-5 text-amber-400" />
+                  </div>
                 </div>
                 <div>
                   <div className={`text-2xl font-black ${monthSummary.projectedEndBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -4421,7 +4690,17 @@ export default function App() {
                 <div>
                   <div className="flex items-center justify-between text-slate-400 mb-2">
                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo em Contas</span>
-                    <Wallet className="w-5 h-5 text-blue-500" />
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={togglePrivacyMode}
+                        className="p-1 text-slate-400 hover:text-amber-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                        title={isPrivacyMode ? 'Mostrar valores (Desativar Olho Mágico)' : 'Ocultar valores (Ativar Olho Mágico)'}
+                      >
+                        {isPrivacyMode ? <EyeOff className="w-4 h-4 text-amber-500" /> : <Eye className="w-4 h-4 text-slate-400" />}
+                      </button>
+                      <Wallet className="w-5 h-5 text-blue-500" />
+                    </div>
                   </div>
                   <div className="text-2xl font-bold text-slate-900">{formatMoney(monthSummary.totalBankBalance)}</div>
                   <div className="text-xs text-slate-400 mt-1">Soma atual de todas as contas</div>
@@ -8958,6 +9237,39 @@ export default function App() {
                 </button>
               </div>
 
+              <div className="p-4 border border-purple-100 bg-purple-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-sm text-purple-900 flex items-center space-x-1.5">
+                    {isPrivacyMode ? <EyeOff className="w-4 h-4 text-purple-600" /> : <Eye className="w-4 h-4 text-purple-600" />}
+                    <span>Modo Privacidade ("Olho Mágico")</span>
+                  </h4>
+                  <p className="text-xs text-purple-700">
+                    Oculta todos os saldos e valores monetários na tela (exibindo R$ •••••) para permitir apresentar ou compartilhar tela com segurança.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={togglePrivacyMode}
+                  className={`text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1.5 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto cursor-pointer ${
+                    isPrivacyMode
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white'
+                  }`}
+                >
+                  {isPrivacyMode ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5" />
+                      <span>Desativar (Valores Ocultos)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Ativar Olho Mágico</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
               {/* Seção Modo Demonstração e Gerenciamento de Dados */}
               <div className="pt-4 border-t border-slate-200 space-y-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-1.5">
@@ -8967,35 +9279,39 @@ export default function App() {
 
                 <div className="p-4 border border-blue-100 bg-blue-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h4 className="font-bold text-sm text-blue-900">Carregar Dados de Demonstração</h4>
+                    <h4 className="font-bold text-sm text-blue-900">Modo Demonstração Seguro (Sandbox)</h4>
                     <p className="text-xs text-blue-700">
-                      Insere contas, cartões, lançamentos e simulações de exemplo para você testar ou apresentar a plataforma.
+                      Abre a plataforma com dados ricos de simulação isolados 100% em memória, com risco zero aos seus dados reais.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={handleLoadDemoData}
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Carregar Exemplos</span>
+                    <span>Iniciar Demonstração</span>
                   </button>
                 </div>
 
                 <div className="p-4 border border-amber-100 bg-amber-50/60 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h4 className="font-bold text-sm text-amber-900">Remover Apenas Dados de Exemplo</h4>
+                    <h4 className="font-bold text-sm text-amber-900">
+                      {isDemoModeState ? 'Restaurar Dados Padrão da Demo' : 'Remover Apenas Dados de Exemplo'}
+                    </h4>
                     <p className="text-xs text-amber-700">
-                      Remove somente lançamentos e registros fictícios de demonstração, mantendo 100% intactos seus lançamentos reais, contas e saldos.
+                      {isDemoModeState
+                        ? 'Reseta todas as alterações temporárias feitas nesta sessão de demonstração para o estado original.'
+                        : 'Remove somente lançamentos e registros fictícios de demonstração, mantendo 100% intactos seus lançamentos reais, contas e saldos.'}
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={handleClearOnlyDemo}
-                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto"
+                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center space-x-1 shadow-sm transition active:scale-95 whitespace-nowrap self-start sm:self-auto cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Limpar Exemplos</span>
+                    <span>{isDemoModeState ? 'Restaurar Sandbox' : 'Limpar Exemplos'}</span>
                   </button>
                 </div>
 

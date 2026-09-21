@@ -1,16 +1,175 @@
-# React + Vite
+# 💰 Finanças da Família
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+> **Plataforma Completa de Gestão Financeira Familiar, Previsibilidade e Orçamento por Envelopes.**
+> Desenvolvida com **React 19**, **Vite**, **TailwindCSS** e **Supabase (PostgreSQL)**.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 📌 Visão Geral do Projeto
 
-## React Compiler
+O **Finanças da Família** é uma aplicação projetada para fornecer controle financeiro rigoroso, transparência compartilhada e planejamento futuro para famílias. Diferente de planilhas complexas ou aplicativos engessados, o sistema une:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. **Gestão do Presente:** Controle diário de contas, faturas de cartão de crédito e extrato detalhado.
+2. **Método dos Envelopes Orçamentários:** Definição de tetos mensais por categoria para evitar surpresas no fim do mês.
+3. **Simulador de Futuro (*What-If*):** Projeção de fluxo de caixa futuro e impacto de grandes decisões financeiras antes de tomar a decisão real.
+4. **Visão Compartilhada vs. Individual:** Conciliação da renda familiar com a autonomia de cada membro.
 
-## Expanding the Oxlint configuration
+---
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## 🛠️ Stack Tecnológica
+
+| Camada | Tecnologia | Descrição |
+| :--- | :--- | :--- |
+| **Frontend** | React 19 + Vite 6 | Aplicação SPA ultra-rápida e responsiva |
+| **Estilização** | TailwindCSS v4 | Interface moderna, limpa e responsiva |
+| **Ícones** | Lucide React | Conjunto visual consistente |
+| **Leitura de Documentos** | PDF.js (`pdfjs-dist`) | Extração automatizada de extratos e faturas em PDF |
+| **Backend & Banco de Dados** | Supabase (PostgreSQL) | Banco relacional com Row Level Security (RLS) |
+| **Autenticação** | Supabase Auth | Gerenciamento de sessões com fallback local |
+| **Offline-First / Cache** | LocalStorage + Sync Queue | Persistência resiliente mesmo com oscilações de rede |
+
+---
+
+## 🌟 Funcionalidades Atuais do Sistema
+
+O sistema já conta com uma base robusta de recursos em produção, divididos nos seguintes módulos:
+
+### 1. 📊 Dashboard Inteligente
+* **Visão Geral Mensal:** Totalizadores dinâmicos de Entradas, Saídas, Saldo do Mês e Saldo Acumulado.
+* **Status dos Lançamentos:** Separação clara entre valores *Realizados* (já pagos/recebidos), *Comprometidos* (faturas/boletos fechados) e *Previstos* (recorrentes e estimativas).
+* **Filtro por Membro:** Alternância instantânea de visão entre a Família consolidada ou membros individuais.
+* **Próximos Vencimentos:** Linha do tempo com contas e faturas a vencer nos próximos dias.
+* **Alertas Financeiros:** Notificações contextuais sobre faturas em aberto e envelopes próximos do limite.
+
+### 2. 📝 Lançamentos & Extrato Completo
+* **Gestão de Transações:** Cadastro, edição e exclusão de Receitas, Despesas e Transferências entre contas.
+* **Parcelamentos Inteligentes:** Lançamento de compras parceladas (ex: `1/10`), com geração automática de todas as parcelas futuras e agrupamento lógico.
+* **Recorrências Mensais:** Despesas fixas (aluguel, condomínio, assinaturas) geradas automaticamente.
+* **Filtros Avançados:** Busca textual, filtro por período/mês, status, conta bancária, cartão, categoria, membro e escopo (familiar ou pessoal).
+* **Classificação por Status:**
+  * `REALIZADO`: Transação já liquidada.
+  * `COMPROMETIDO`: Compra no cartão ou boleto com valor fechado.
+  * `PREVISTO`: Despesa esperada que ainda vai acontecer.
+  * `HIPOTETICO`: Lançamento de simulação temporária.
+
+### 3. 🏦 Contas Bancárias & Carteiras
+* **Múltiplas Instituições:** Suporte a contas correntes, investimentos, poupança e reservas de emergência.
+* **Cálculo Automático de Saldo:** O saldo atual é calculado em tempo real a partir do saldo inicial somado às movimentações liquidadas.
+* **Vínculo com Membros:** Atribuição de titularidade (contas conjuntas da família ou contas particulares de um membro).
+* **Arquivamento Seguro:** Possibilidade de desativar contas antigas preservando o histórico histórico de lançamentos.
+
+### 4. 💳 Cartões de Crédito & Gestão de Faturas
+* **Datas de Corte e Vencimento:** Cálculo automatizado do melhor dia de compra, fechamento de fatura e vencimento.
+* **Acompanhamento de Limite:** Medidor visual de limite total, limite utilizado e limite disponível.
+* **Faturas Futuras:** Visualização antecipada de faturas dos meses subsequentes baseada nas parcelas pendentes.
+* **Identidade Visual:** Cores e bandeiras personalizadas por cartão (Nubank, XP, Itaú, Inter, etc.).
+
+### 5. ✉️ Orçamento por Envelopes & Tetos Mensais
+* **Teto por Categoria:** Aplicação da metodologia clássica de envelopes financeiros.
+* **Termômetro de Gastos:** Barras de progresso com alertas de cores (Verde: dentro do teto; Amarelo: alerta; Vermelho: orçamento estourado).
+* **Regras Específicas por Mês:** Ajuste de tetos para meses atípicos (ex: férias, festas de fim de ano, IPTU/IPVA) sem desconfigurar o padrão anual.
+
+### 6. 🗂️ Categorias & Subcategorias Hierárquicas
+* **Classificação Clara:** Divisão entre categorias de Receita e Despesa.
+* **Organização em Árvore:** Suporte a categorias pai e subcategorias filhas (ex: `Moradia > Condomínio`, `Alimentação > Supermercado`).
+* **Cores e Identificadores:** Identificação cromática rápida para gráficos e relatórios.
+
+### 7. 📈 Projeções & Fluxo de Caixa Futuro
+* **Previsibilidade Anual:** Gráficos e tabelas projetando o saldo bancário e o fluxo financeiro mês a mês para os próximos 6 a 12 meses.
+* **Integração Completa:** Considera receitas recorrentes, parcelamentos ativos em cartões de crédito e despesas fixas da família.
+
+### 8. 🔮 Cenários Hipotéticos (*"What-If"*)
+* **Simulador de Decisões:** Criação de cenários de teste (ex: *"Trocar de carro"*, *"Fazer curso de pós-graduação"*, *"Aumento de salário"*).
+* **Toggle Ativar/Desativar:** Ative um ou mais cenários e veja o impacto instantâneo no fluxo de caixa futuro **sem alterar nenhum dado real do banco**.
+* **Impacto Mensal e Duração:** Configuração de início, duração em meses e categoria de impacto.
+
+### 9. 📊 Gráficos & Relatórios Analíticos
+* **Distribuição de Gastos:** Gráficos interativos de rosca/pizza por categoria.
+* **Balanço Mensal:** Comparativo entre Entradas vs. Saídas mês a mês.
+* **Participação por Membro:** Visibilidade do peso de cada pessoa nas despesas e receitas do núcleo familiar.
+
+### 10. 📄 Importador Inteligente de Faturas (PDF)
+* **Extração Direta via Navegador:** Utilização de `pdfjs-dist` para ler faturas sem precisar enviar arquivos para servidores externos.
+* **Suporte Inicial:** Faturas de instituições como Itaú e Mercado Pago.
+* **Revisão Pré-Lançamento:** Tela de conferência dos lançamentos extraídos, permitindo selecionar quais importar e associar categorias antes de salvar.
+
+### 11. 💾 Sincronização Híbrida & Persistência Resiliente
+* **Nuvem (Supabase):** Tabelas PostgreSQL modeladas (`accounts`, `cards`, `categories`, `transactions`, `scenarios`, `monthly_envelopes`, `profiles`).
+* **Fallback e Modo Offline:** Suporte a LocalStorage para uso sem conexão ou sem configuração imediata de chaves Supabase, com fila de sincronização pendente.
+
+---
+
+## 🚀 Roadmap de Evolução (Do Projeto Pessoal ao Produto SaaS)
+
+Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada fase for desenvolvida, ela será documentada e marcada nesta lista.
+
+- [ ] **Fase 1: Vitrine, Demonstração Segura & Modo Privacidade**
+  - [ ] Modo Demonstração (*Showcase Sandbox*) 100% em memória via `/?demo=true` e botão na interface.
+  - [ ] Zero gravação no banco Supabase durante apresentações para terceiros.
+  - [ ] Conjunto de dados fictícios rico e realista para demonstração de todos os recursos.
+  - [ ] Modo Privacidade ("Olho Mágico") na navbar para mascarar saldos e valores em compartilhamento de tela.
+
+- [ ] **Fase 2: Assistente de IA Financeiro Conversacional (Google Gemini)**
+  - [ ] Integração com a API do Google Gemini (alta velocidade e compreensão contextual).
+  - [ ] Chat financeiro integrado na interface com visão do contexto atual da família.
+  - [ ] *Tool Calling / Function Calling:* A IA é capaz de criar transações e simular cenários por comandos de texto/voz.
+  - [ ] Consultoria preditiva: Alertas de padrões de consumo, anomalias e sugestões de corte de custos.
+
+- [ ] **Fase 3: Arquitetura, Modularização & Desacoplamento do App**
+  - [ ] Desmembramento do arquivo monolítico `src/App.jsx` em componentes de página dedicados.
+  - [ ] Roteamento claro de abas e páginas (`/dashboard`, `/extrato`, `/cartoes`, `/envelopes`, `/cenarios`).
+  - [ ] Criação de Hooks customizados de domínio (`useTransactions`, `useCards`, `useEnvelopes`, `useScenarios`).
+  - [ ] Otimização de performance e redução de re-renderizações desnecessárias.
+
+- [ ] **Fase 4: Multi-Tenancy, Segurança RLS & "Acesso Individual com Impacto Familiar"**
+  - [ ] Modelagem de Multi-Tenancy no Supabase (`households` e `household_members`).
+  - [ ] Políticas rigorosas de Row-Level Security (RLS) no PostgreSQL, impedindo vazamento de dados entre famílias.
+  - [ ] **Diferencial Matador:** Lançamentos Pessoais Privados (visíveis com detalhes apenas para quem gastou, mas computados no saldo e apresentados de forma agregada para o cônjuge).
+  - [ ] Sistema de convites por e-mail com papéis de Administrador e Membro da família.
+
+- [ ] **Fase 5: Importações Flexíveis & Conciliação Inteligente**
+  - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).
+  - [ ] **Conciliação Híbrida Inteligente:** Motor que detecta despesas manuais já cadastradas e sugere a unificação com os lançamentos bancários importados, sem duplicações.
+  - [ ] Edição, recategorização e divisão (*split*) livre de qualquer lançamento importado.
+  - [ ] Preparação da arquitetura para futura conexão direta via Open Finance (Pluggy / Belvo).
+
+- [ ] **Fase 6: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
+  - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
+  - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.
+  - [ ] Atalhos rápidos no celular para inclusão de gastos imediatos no dia a dia.
+  - [ ] Preparação para modelo comercial (planos de assinatura ou distribuição para beta testers).
+
+---
+
+## 💻 Como Rodar o Projeto Localmente
+
+### Pré-requisitos
+* **Node.js** (versão 18 ou superior)
+* **npm** ou **yarn**
+
+### Instalação
+
+```bash
+# 1. Clone o repositório
+git clone https://github.com/rafabuss/financas-familia.git
+
+# 2. Acesse a pasta do projeto
+cd financas-da-familia
+
+# 3. Instale as dependências
+npm install
+
+# 4. Configure as variáveis de ambiente
+cp .env.example .env.local
+# Preencha suas chaves do Supabase em .env.local (opcional se for rodar em modo local puro)
+
+# 5. Inicie o servidor de desenvolvimento
+npm run dev
+```
+
+A aplicação estará disponível em `http://localhost:5173`.
+
+---
+
+## 📄 Licença
+Propriedade privada de Rafael & Família. Todos os direitos reservados.

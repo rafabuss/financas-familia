@@ -93,7 +93,16 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 * **Suporte Inicial:** Faturas de instituições como Itaú e Mercado Pago.
 * **Revisão Pré-Lançamento:** Tela de conferência dos lançamentos extraídos, permitindo selecionar quais importar e associar categorias antes de salvar.
 
-### 11. 💾 Sincronização Híbrida & Persistência Resiliente
+### 11. 🤖 Assistente de IA Financeiro Conversacional (Google Gemini)
+* **Visão Contextual Dinâmica:** A IA recebe a cada mensagem o panorama financeiro em tempo real (saldo bancário, faturas de cartões, limites disponíveis, status dos envelopes e categorias ativas).
+* **Tool Calling / Function Calling:** Capaz de executar ações autônomas diretamente no app:
+  * `criar_transacao`: Registra receitas e despesas identificando automaticamente a categoria e forma de pagamento.
+  * `simular_cenario`: Cria simulações *What-If* sem alterar os dados reais.
+* **Cards Visuais de Ação:** Exibe no chat confirmações com atalhos diretos (*"Ver no Extrato"*, *"Ver em Cenários"*).
+* **Acesso Simples:** Botão flutuante moderno (FAB) no canto inferior direito.
+* **Modo Demonstração vs. Real:** Totalmente seguro em demonstrações (grava apenas na sessão em memória) e integrado ao Supabase no Modo Real.
+
+### 12. 💾 Sincronização Híbrida & Persistência Resiliente
 * **Nuvem (Supabase):** Tabelas PostgreSQL modeladas (`accounts`, `cards`, `categories`, `transactions`, `scenarios`, `monthly_envelopes`, `profiles`).
 * **Fallback e Modo Offline:** Suporte a LocalStorage para uso sem conexão ou sem configuração imediata de chaves Supabase, com fila de sincronização pendente.
 
@@ -103,16 +112,18 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 
 Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada fase for desenvolvida, ela será documentada e marcada nesta lista.
 
-- [ ] **Fase 1: Vitrine, Demonstração Segura & Modo Privacidade**
-  - [ ] Modo Demonstração (*Showcase Sandbox*) 100% em memória via `/?demo=true` e botão na interface.
-  - [ ] Zero gravação no banco Supabase durante apresentações para terceiros.
-  - [ ] Conjunto de dados fictícios rico e realista para demonstração de todos os recursos.
-  - [ ] Modo Privacidade ("Olho Mágico") na navbar para mascarar saldos e valores em compartilhamento de tela.
+- [x] **Fase 1: Vitrine, Demonstração Segura & Modo Privacidade**
+  - [x] Modo Demonstração (*Showcase Sandbox*) 100% em memória via `/?demo=true` e botão na interface.
+  - [x] Zero gravação no banco Supabase durante apresentações para terceiros.
+  - [x] Conjunto de dados fictícios rico e realista para demonstração de todos os recursos.
+  - [x] Modo Privacidade ("Olho Mágico") na navbar para mascarar saldos e valores em compartilhamento de tela.
 
-- [ ] **Fase 2: Assistente de IA Financeiro Conversacional (Google Gemini)**
-  - [ ] Integração com a API do Google Gemini (alta velocidade e compreensão contextual).
-  - [ ] Chat financeiro integrado na interface com visão do contexto atual da família.
-  - [ ] *Tool Calling / Function Calling:* A IA é capaz de criar transações e simular cenários por comandos de texto/voz.
+- [x] **Fase 2: Assistente de IA Financeiro Conversacional (Google Gemini - MVP & Testes)**
+  - [x] Integração com a API do Google Gemini (`gemini-1.5-flash` / `gemini-2.0-flash`).
+  - [x] Arquitetura desacoplada em serviço (`src/services/aiService.js`) com suporte a chave de ambiente (`VITE_GEMINI_API_KEY`) e fallback em `localStorage`.
+  - [x] Chat financeiro nativo na interface com visão do contexto atual da família (saldos, faturas, envelopes, despesas).
+  - [x] *Tool Calling / Function Calling:* A IA é capaz de criar transações e simular cenários diretamente por comandos de texto com cards visuais de execução.
+  - [x] Compatibilidade total com Modo Real (Supabase) e Modo Demonstração (sandbox em memória).
   - [ ] Consultoria preditiva: Alertas de padrões de consumo, anomalias e sugestões de corte de custos.
 
 - [ ] **Fase 3: Arquitetura, Modularização & Desacoplamento do App**
@@ -134,6 +145,7 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [ ] Preparação da arquitetura para futura conexão direta via Open Finance (Pluggy / Belvo).
 
 - [ ] **Fase 6: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
+  - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).
   - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
   - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.
   - [ ] Atalhos rápidos no celular para inclusão de gastos imediatos no dia a dia.
@@ -161,13 +173,31 @@ npm install
 
 # 4. Configure as variáveis de ambiente
 cp .env.example .env.local
-# Preencha suas chaves do Supabase em .env.local (opcional se for rodar em modo local puro)
+# Preencha suas chaves do Supabase e do Google Gemini em .env.local
+# - VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY (opcional se for rodar em modo local/demo puro)
+# - VITE_GEMINI_API_KEY (gratuita em https://aistudio.google.com/app/apikey)
 
 # 5. Inicie o servidor de desenvolvimento
 npm run dev
 ```
 
 A aplicação estará disponível em `http://localhost:5173`.
+
+### 🔑 Como obter e configurar a Chave da API Google Gemini
+
+O assistente financeiro utiliza o **Google Gemini** (`gemini-1.5-flash` ou `gemini-2.0-flash`). Você pode obter uma chave gratuita em menos de 1 minuto:
+
+1. Acesse o [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Faça login com sua conta Google e clique em **"Create API Key"** (ou "Criar Chave de API").
+3. Copie a chave gerada (iniciada por `AIzaSy...`).
+4. **Onde colocar a chave? (Você pode escolher uma das duas opções):**
+   * **Opção 1 (Via arquivo local - Recomendado para desenvolvimento):**
+     Abra o arquivo `.env.local` na raiz do projeto e defina:
+     ```bash
+     VITE_GEMINI_API_KEY=sua-chave-aqui
+     ```
+   * **Opção 2 (Direto na interface do aplicativo):**
+     Abra o aplicativo, clique no botão flutuante do **Assistente IA** (canto inferior direito), clique no ícone de chave (**🔑**) no topo do painel do chat, cole sua chave e clique em **"Salvar Chave"**. Ela ficará salva com segurança no seu navegador (`localStorage`).
 
 ---
 

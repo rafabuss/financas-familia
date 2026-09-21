@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { parseInvoicePdf } from './services/pdfParser';
 import AuthModal from './components/AuthModal';
+import AIChatDrawer from './components/AIChatDrawer';
 import {
   loadInitialAppData,
   syncItem,
@@ -3193,6 +3194,195 @@ export default function App() {
       saveToLocalStorage(STORAGE_KEYS.scenarios, updated);
       syncItem('scenarios', scen, true);
     }
+  };
+
+  // Criação autônoma de transação disparada pelo Assistente IA (Tool Calling)
+  const handleAICreateTransaction = async ({
+    descricao,
+    valor_reais,
+    tipo = 'DESPESA',
+    categoria_nome,
+    conta_ou_cartao_nome,
+    data,
+  }) => {
+    const amountCents = Math.round(Math.abs(Number(valor_reais || 0)) * 100);
+    if (amountCents <= 0) {
+      throw new Error('O valor da transação deve ser maior que zero.');
+    }
+
+    const tipoUpper = String(tipo || '').toUpperCase();
+    const isIncome = tipoUpper.includes('REC') || tipoUpper === 'INCOME';
+    const txType = isIncome ? 'INCOME' : 'EXPENSE';
+
+    // 1. Identificar a categoria mais próxima
+    const activeCats = categories.filter((c) => !c.archived);
+    const typeMatchingCats = activeCats.filter((c) => c.type === txType);
+    const catQuery = String(categoria_nome || '').trim().toLowerCase();
+
+    let matchedCat = null;
+    if (catQuery) {
+      matchedCat = typeMatchingCats.find((c) => c.name.toLowerCase() === catQuery);
+      if (!matchedCat) {
+        matchedCat = typeMatchingCats.find(
+          (c) => c.name.toLowerCase().includes(catQuery) || catQuery.includes(c.name.toLowerCase())
+        );
+      }
+      if (!matchedCat) {
+        matchedCat = activeCats.find((c) => c.name.toLowerCase() === catQuery);
+      }
+    }
+    if (!matchedCat) {
+      matchedCat = typeMatchingCats[0] || activeCats[0] || null;
+    }
+
+    // 2. Identificar Conta ou Cartão
+    const activeAccounts = accounts.filter((a) => !a.archived);
+    const activeCards = cards.filter((c) => !c.archived);
+    const sourceQuery = String(conta_ou_cartao_nome || '').trim().toLowerCase();
+
+    let matchedAccount = null;
+    let matchedCard = null;
+
+    if (sourceQuery) {
+      matchedCard = activeCards.find(
+        (c) =>
+          c.name.toLowerCase() === sourceQuery ||
+          c.name.toLowerCase().includes(sourceQuery) ||
+          sourceQuery.includes(c.name.toLowerCase()) ||
+          (c.bank && c.bank.toLowerCase().includes(sourceQuery))
+      );
+
+      if (!matchedCard) {
+        matchedAccount = activeAccounts.find(
+          (a) =>
+            a.name.toLowerCase() === sourceQuery ||
+            a.name.toLowerCase().includes(sourceQuery) ||
+            sourceQuery.includes(a.name.toLowerCase()) ||
+            (a.bank && a.bank.toLowerCase().includes(sourceQuery))
+        );
+      }
+    }
+
+    if (!matchedCard && !matchedAccount) {
+      const isCardHint =
+        sourceQuery.includes('cart') ||
+        sourceQuery.includes('fatura') ||
+        sourceQuery.includes('crédit');
+
+      if (isCardHint && activeCards.length > 0) {
+        matchedCard = activeCards[0];
+      } else if (activeAccounts.length > 0) {
+        matchedAccount = activeAccounts[0];
+      } else if (activeCards.length > 0) {
+        matchedCard = activeCards[0];
+      }
+    }
+
+    // 3. Data e Status
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const txDate = data && /^\d{4}-\d{2}-\d{2}$/.test(data) ? data : todayStr;
+    const isFuture = txDate > todayStr;
+    const txStatus = matchedCard ? 'COMPROMETIDO' : isFuture ? 'COMPROMETIDO' : 'REALIZADO';
+
+    const newTx = {
+      id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      description: descricao || (txType === 'INCOME' ? 'Receita' : 'Despesa'),
+      amountCents,
+      type: txType,
+      status: txStatus,
+      date: txDate,
+      dueDate: txDate,
+      purchaseDate: txDate,
+      categoryId: matchedCat ? matchedCat.id : null,
+      scope: 'FAMILY',
+      ownerId: (currentMemberId && currentMemberId !== 'user-all') ? currentMemberId : (currentUser?.id || 'user-1'),
+      accountId: matchedAccount ? matchedAccount.id : null,
+      cardId: matchedCard ? matchedCard.id : null,
+      isRecurring: false,
+      recurrenceRuleId: null,
+      _localUpdatedAt: Date.now(),
+    };
+
+    const isDemo = isDemoModeState || isDemoMode();
+
+    if (isDemo) {
+      setTransactions((prev) => {
+        const updated = [...prev, newTx];
+        saveToLocalStorage(STORAGE_KEYS.transactions, updated);
+        return updated;
+      });
+    } else {
+      markTransactionPending(newTx.id);
+      setTransactions((prev) => {
+        const updated = [...prev, newTx];
+        saveToLocalStorage(STORAGE_KEYS.transactions, updated);
+        return updated;
+      });
+      await syncItem('transactions', newTx);
+    }
+
+    return {
+      success: true,
+      transaction: newTx,
+      categoryName: matchedCat?.name || 'Geral',
+      sourceName: matchedCard?.name || matchedAccount?.name || 'Geral',
+    };
+  };
+
+  // Criação autônoma de simulação de cenário pelo Assistente IA (Tool Calling)
+  const handleAICreateScenario = async ({
+    titulo,
+    valor_mensal,
+    duracao_meses = 12,
+    tipo = 'DESPESA',
+  }) => {
+    const amountCents = Math.round(Math.abs(Number(valor_mensal || 0)) * 100);
+    if (amountCents <= 0) {
+      throw new Error('O valor mensal do cenário deve ser maior que zero.');
+    }
+
+    const tipoUpper = String(tipo || '').toUpperCase();
+    const isIncome = tipoUpper.includes('REC') || tipoUpper === 'INCOME';
+    const monthlyImpactCents = isIncome ? amountCents : -amountCents;
+
+    const newScen = {
+      id: `scen-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      title: titulo || 'Simulação do Assistente IA',
+      type: isIncome ? 'INCOME' : 'EXPENSE',
+      monthlyImpactCents,
+      months: Math.max(1, parseInt(duracao_meses || 12, 10)),
+      startDate: new Date().toISOString().slice(0, 10),
+      categoryId: categories.find((c) => c.type === (isIncome ? 'INCOME' : 'EXPENSE'))?.id || categories[0]?.id || null,
+      sourceType: 'ACCOUNT',
+      accountId: accounts[0]?.id || null,
+      cardId: null,
+      scope: 'FAMILY',
+      ownerId: (currentMemberId && currentMemberId !== 'user-all') ? currentMemberId : 'user-1',
+      active: true,
+      adjustments: { ignoredIncomes: [], ignoredExpenses: [], categoryReductions: [] },
+    };
+
+    const isDemo = isDemoModeState || isDemoMode();
+
+    if (isDemo) {
+      setScenarios((prev) => {
+        const updated = [...prev, newScen];
+        saveToLocalStorage(STORAGE_KEYS.scenarios, updated);
+        return updated;
+      });
+    } else {
+      setScenarios((prev) => {
+        const updated = [...prev, newScen];
+        saveToLocalStorage(STORAGE_KEYS.scenarios, updated);
+        return updated;
+      });
+      await syncItem('scenarios', newScen);
+    }
+
+    return {
+      success: true,
+      scenario: newScen,
+    };
   };
 
   // Abre o modal de pagamento da fatura consolidada de um cartão para um determinado mês
@@ -11585,6 +11775,25 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onLoginSuccess={handleLoginSuccess}
+      />
+
+      {/* Assistente de IA Financeiro Conversacional (Google Gemini) */}
+      <AIChatDrawer
+        dashboardMonth={dashboardMonth}
+        accounts={accounts}
+        cards={cards}
+        categories={categories}
+        transactions={visibleTransactions}
+        scenarios={scenarios}
+        monthlyEnvelopes={monthlyEnvelopes}
+        accountBalances={accountBalances}
+        cardStats={cardStats}
+        monthSummary={monthSummary}
+        dashboardEnvelopes={dashboardEnvelopes}
+        isDemo={Boolean(isDemoModeState || isDemoMode())}
+        onCreateTransaction={handleAICreateTransaction}
+        onCreateScenario={handleAICreateScenario}
+        onNavigateTab={(tab) => setActiveTab(tab)}
       />
     </div>
   );

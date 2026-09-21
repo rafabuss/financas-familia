@@ -59,11 +59,75 @@ export const hasGeminiApiKey = () => {
   return Boolean(getGeminiApiKey());
 };
 
+let _cachedDiscoveredModels = null;
+
+/**
+ * Consulta a API do Google Gemini (ModelService.ListModels) para obter
+ * a lista autoritativa e atualizada de modelos compatíveis com generateContent.
+ */
+export const fetchAvailableModels = async (apiKeyParam) => {
+  const key = apiKeyParam || getGeminiApiKey();
+  if (!key) return AVAILABLE_MODELS;
+
+  if (_cachedDiscoveredModels && _cachedDiscoveredModels.length > 0) {
+    return _cachedDiscoveredModels;
+  }
+
+  try {
+    const stored = sessionStorage.getItem('financas_gemini_discovered_models');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        _cachedDiscoveredModels = parsed;
+        return parsed;
+      }
+    }
+  } catch {}
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+    if (!res.ok) return AVAILABLE_MODELS;
+
+    const data = await res.json();
+    const rawList = data?.models || [];
+    const valid = rawList
+      .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+      .map((m) => {
+        const id = m.name.replace(/^models\//, '');
+        return {
+          id,
+          name: m.displayName ? `${m.displayName} (${id})` : id,
+          description: m.description || '',
+        };
+      });
+
+    if (valid.length > 0) {
+      // Prioriza modelos flash e ordenação decrescente de versão
+      valid.sort((a, b) => {
+        const aFlash = a.id.includes('flash') ? 1 : 0;
+        const bFlash = b.id.includes('flash') ? 1 : 0;
+        if (aFlash !== bFlash) return bFlash - aFlash;
+        return b.id.localeCompare(a.id);
+      });
+
+      _cachedDiscoveredModels = valid;
+      try {
+        sessionStorage.setItem('financas_gemini_discovered_models', JSON.stringify(valid));
+      } catch {}
+      return valid;
+    }
+  } catch (err) {
+    console.warn('Aviso ao consultar ListModels:', err);
+  }
+
+  return AVAILABLE_MODELS;
+};
+
 export const getSelectedModel = () => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem(STORAGE_SELECTED_MODEL);
     // Auto-migração: se o modelo salvo for descontinuado (1.5 ou 2.0), migra para o 3.6
-    if (saved && saved !== 'gemini-1.5-flash' && saved !== 'gemini-2.0-flash') {
+    if (saved && !saved.includes('1.5') && !saved.includes('2.0')) {
       return saved;
     }
   }
@@ -325,6 +389,7 @@ export const sendMessageToGemini = async ({
     currentModel,
     ...FALLBACK_CANDIDATE_MODELS.filter((m) => m !== currentModel),
   ];
+  let hasQueriedLiveModels = false;
 
   for (let i = 0; i < modelsToTry.length; i++) {
     const candidateModel = modelsToTry[i];
@@ -357,6 +422,23 @@ export const sendMessageToGemini = async ({
           console.log(`Auto-detectado modelo recomendado pela API: ${match[1]}`);
           modelsToTry.splice(i + 1, 0, match[1]);
         }
+
+        // Consulta a lista oficial de modelos compatíveis da conta via ListModels
+        if (!hasQueriedLiveModels) {
+          hasQueriedLiveModels = true;
+          try {
+            const liveModels = await fetchAvailableModels(apiKey);
+            const liveIds = liveModels.map((m) => m.id);
+            liveIds.forEach((id) => {
+              if (!modelsToTry.includes(id)) {
+                modelsToTry.push(id);
+              }
+            });
+          } catch (listErr) {
+            console.warn('Falha ao descobrir modelos via ListModels:', listErr);
+          }
+        }
+
         continue;
       }
 

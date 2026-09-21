@@ -26,6 +26,7 @@ import {
   getSelectedModel,
   setSelectedModel,
   AVAILABLE_MODELS,
+  fetchAvailableModels,
 } from '../services/aiService';
 
 const CHAT_STORAGE_KEY = 'financas_ai_chat_history_v1';
@@ -156,6 +157,7 @@ export default function AIChatDrawer({
   const [keySavedToast, setKeySavedToast] = useState(false);
   const [hasKey, setHasKey] = useState(hasGeminiApiKey());
   const [activeModel, setActiveModelState] = useState(getSelectedModel());
+  const [modelList, setModelList] = useState(AVAILABLE_MODELS);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -174,12 +176,18 @@ export default function AIChatDrawer({
     } catch {}
   }, [messages]);
 
-  // Foco no input ao abrir
+  // Foco no input e sincronização de modelos ao abrir
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 150);
-      setHasKey(hasGeminiApiKey());
+      const keyExists = hasGeminiApiKey();
+      setHasKey(keyExists);
       setActiveModelState(getSelectedModel());
+      if (keyExists) {
+        fetchAvailableModels().then((live) => {
+          if (live && live.length > 0) setModelList(live);
+        }).catch(() => {});
+      }
     }
   }, [isOpen]);
 
@@ -346,9 +354,15 @@ export default function AIChatDrawer({
   };
 
   const handleOpenKeyModal = () => {
-    setKeyInputValue(getGeminiApiKey());
+    const key = getGeminiApiKey();
+    setKeyInputValue(key);
     setActiveModelState(getSelectedModel());
     setShowKeyModal(true);
+    if (key) {
+      fetchAvailableModels(key).then((live) => {
+        if (live && live.length > 0) setModelList(live);
+      }).catch(() => {});
+    }
   };
 
   const handleModelChange = (e) => {
@@ -784,7 +798,7 @@ export default function AIChatDrawer({
                   onChange={handleModelChange}
                   className="w-full text-xs text-slate-800 bg-white px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  {AVAILABLE_MODELS.map((m) => (
+                  {modelList.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
                     </option>

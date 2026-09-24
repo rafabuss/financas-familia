@@ -4695,7 +4695,6 @@ export default function App() {
       <CardPaymentPromptModal
         cardPaymentPromptModal={cardPaymentPromptModal}
         setCardPaymentPromptModal={setCardPaymentPromptModal}
-        handlePayCardDirectly={handlePayCardDirectly}
         openInvoicePaymentModal={openInvoicePaymentModal}
       />
 

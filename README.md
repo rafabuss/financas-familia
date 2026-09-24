@@ -233,19 +233,35 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Criação de utilitários globais de formatação e regras de datas/vencimentos em `src/utils/formatters.js` e constantes em `src/data/constants.js`.
   - [x] Redução drástica da complexidade do `App.jsx` (de ~11.820 linhas para ~4.750 linhas) mantendo 100% de integridade funcional e visual com zero regressões.
 
-- [ ] **Fase 4: Multi-Tenancy, Segurança RLS & "Acesso Individual com Impacto Familiar"**
+- [ ] **Fase 3.1: Refinamento de Interface & Layout Clean da Barra Superior (Navbar Polish)**
+  - [ ] Redesenho da barra superior (`Navbar.jsx`) para dar destaque à marca e ao título "Finanças da Família".
+  - [ ] Transformação de botões utilitários (Olho Mágico e Assistente IA) em IconButtons minimalistas com tooltips.
+  - [ ] Unificação do perfil do usuário em um menu avatar suspenso moderno (avatar, nome, cargo e logout).
+  - [ ] Substituição do texto longo de conexão por um indicador discreto com pulso (verde/cinza/âmbar).
+  - [ ] Preservação de 100% dos callbacks, responsividade e integridade do banner do Modo Demonstração.
+
+- [ ] **Fase 4: Multi-Tenancy, Arquitetura de Estado (`FinanceContext`) & "Acesso Individual com Impacto Familiar"**
+  - [ ] Introdução do `FinanceContext` (React Context) para eliminar o *prop drilling* remanescente do `App.jsx` e centralizar o estado.
   - [ ] Modelagem de Multi-Tenancy no Supabase (`households` e `household_members`).
   - [ ] Políticas rigorosas de Row-Level Security (RLS) no PostgreSQL, impedindo vazamento de dados entre famílias.
   - [ ] **Diferencial Matador:** Lançamentos Pessoais Privados (visíveis com detalhes apenas para quem gastou, mas computados no saldo e apresentados de forma agregada para o cônjuge).
   - [ ] Sistema de convites por e-mail com papéis de Administrador e Membro da família.
 
-- [ ] **Fase 5: Importações Flexíveis & Conciliação Inteligente**
+- [ ] **Fase 5: Transferências entre Contas (Pix) & Módulo de Cofrinhos / Metas / Investimentos**
+  - [ ] **Tipo Nativo `TRANSFER` (Transferência entre Contas):** Lançamentos que movimentam saldo entre conta de origem e conta de destino (ex: Pix do Itaú para o Nubank para pagamento de fatura) sem inflar artificialmente as receitas ou despesas da família.
+  - [ ] **Módulo de Cofrinhos / Caixinhas / Metas de Poupança:**
+    - Cadastro de cofrinhos/caixinhas associados a contas (ex: Cofrinho Inter, Caixinhas Nubank, Tesouro Direto, CDBs).
+    - Aporte programado a partir da renda mensal (destinar valores da renda para a meta/cofrinho).
+    - Resgate e transferência de valores de volta para a conta corrente para uso imediato.
+    - Acompanhamento de evolução patrimonial, saldo acumulado e rendimento das metas.
+
+- [ ] **Fase 6: Importações Flexíveis & Conciliação Inteligente**
   - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).
   - [ ] **Conciliação Híbrida Inteligente:** Motor que detecta despesas manuais já cadastradas e sugere a unificação com os lançamentos bancários importados, sem duplicações.
   - [ ] Edição, recategorização e divisão (*split*) livre de qualquer lançamento importado.
   - [ ] Preparação da arquitetura para futura conexão direta via Open Finance (Pluggy / Belvo).
 
-- [ ] **Fase 6: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
+- [ ] **Fase 7: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
   - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).
   - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
   - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.

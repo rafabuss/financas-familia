@@ -195,8 +195,8 @@ export default function CardsInvoicesTab({
                       <span className="inline-flex items-center text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                         {info.paymentTx ? (
                           <>
-                            ✓ Pago via <strong>{accounts.find((a) => a.id === info.paymentTx.accountId)?.name || 'Conta bancária'}</strong>
-                            {info.paymentTx.date && ` em ${formatDateBR(info.paymentTx.date)}`}
+                            ✓ Pago via <strong className="ml-1">{accounts.find((a) => a.id === info.paymentTx.accountId)?.name || 'Conta bancária'}</strong>
+                            {info.paymentTx.date && <span className="ml-1">em {formatDateBR(info.paymentTx.date)}</span>}
                           </>
                         ) : (
                           '✓ Fatura Paga'

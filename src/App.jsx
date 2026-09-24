@@ -294,6 +294,7 @@ export default function App() {
   const [isSubmittingTx, setIsSubmittingTx] = useState(false);
   const isSavingRef = useRef(false);
   const cloudSyncCooldownUntilRef = useRef(0);
+  const recentlyDeletedTxIdsRef = useRef(new Set());
   const [currentUser, setCurrentUser] = useState(() => {
     if (isDemoMode()) {
       return {
@@ -382,29 +383,44 @@ export default function App() {
         if (res.categories) setCategories(res.categories);
         if (res.transactions) {
           const activeCards = res.cards || [];
-          const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(res.transactions, activeCards);
+          // Ignora da nuvem transações que foram excluídas recentemente no cliente local (evita que roundtrip ressuscite itens)
+          const nonDeletedResTxs = res.transactions.filter(
+            (t) => !recentlyDeletedTxIdsRef.current.has(t.id)
+          );
+          const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(nonDeletedResTxs, activeCards);
+          const changedMap = new Map(changedTxs.map((t) => [t.id, t]));
           
           // Preserva edições locais recentes e pendentes para evitar race conditions com o Supabase
           setTransactions((prevLocalTxs) => {
             const pendingTxIds = new Set(getPendingTransactions());
             const localMap = new Map((prevLocalTxs || []).map((t) => [t.id, t]));
             const now = Date.now();
-            const merged = healedTransactions.map((cloudTx) => {
-              const localTx = localMap.get(cloudTx.id);
-              if (localTx) {
-                const isPending = pendingTxIds.has(localTx.id);
-                const isRecent = localTx._localUpdatedAt && (now - localTx._localUpdatedAt < 15000);
-                if (isPending || isRecent) {
-                  return { ...cloudTx, ...localTx };
+            const merged = healedTransactions
+              .filter((cloudTx) => !recentlyDeletedTxIdsRef.current.has(cloudTx.id))
+              .map((cloudTx) => {
+                // Se a transação foi corrigida por cura, a versão curada tem precedência sobre o cache local antigo
+                if (changedMap.has(cloudTx.id)) {
+                  return cloudTx;
                 }
-              }
-              return cloudTx;
-            });
+                const localTx = localMap.get(cloudTx.id);
+                if (localTx) {
+                  const isPending = pendingTxIds.has(localTx.id);
+                  const isRecent = localTx._localUpdatedAt && (now - localTx._localUpdatedAt < 15000);
+                  if (isPending || isRecent) {
+                    return { ...cloudTx, ...localTx };
+                  }
+                }
+                return cloudTx;
+              });
 
-            // Preserva transações locais que ainda não foram sincronizadas com a nuvem
+            // Preserva transações locais que ainda não foram sincronizadas com a nuvem (exceto as deletadas recentemente)
             const cloudIds = new Set(healedTransactions.map((t) => t.id));
             (prevLocalTxs || []).forEach((lt) => {
-              if (!cloudIds.has(lt.id) && (pendingTxIds.has(lt.id) || (lt._localUpdatedAt && now - lt._localUpdatedAt < 60000))) {
+              if (
+                !cloudIds.has(lt.id) &&
+                !recentlyDeletedTxIdsRef.current.has(lt.id) &&
+                (pendingTxIds.has(lt.id) || (lt._localUpdatedAt && now - lt._localUpdatedAt < 60000))
+              ) {
                 merged.push(lt);
               }
             });
@@ -414,7 +430,7 @@ export default function App() {
           });
 
           if (hasChanges && changedTxs.length > 0) {
-            syncBatchTransactions(changedTxs);
+            syncBatchTransactions(changedTxs).catch(console.warn);
           }
         }
         if (res.scenarios) setScenarios(res.scenarios);
@@ -430,6 +446,21 @@ export default function App() {
     if (isDemoModeState || isDemoMode()) return;
     reloadDataFromCloud();
   }, [currentUser, reloadDataFromCloud, isDemoModeState]);
+
+  // Auto-cura preventiva de parcelas de cartão com competência distorcida ao carregar a aplicação
+  useEffect(() => {
+    if (cards.length > 0 && transactions.length > 0) {
+      const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(transactions, cards);
+      if (hasChanges && changedTxs.length > 0) {
+        console.log(`[Auto-Repair] Reparadas ${changedTxs.length} parcelas de cartão com competência incorreta.`);
+        setTransactions(healedTransactions);
+        saveToLocalStorage(STORAGE_KEYS.transactions, healedTransactions);
+        if (isSupabaseConfigured() && supabase && !isDemoMode() && !isDemoModeState) {
+          syncBatchTransactions(changedTxs).catch(console.warn);
+        }
+      }
+    }
+  }, [cards]);
 
   // 2. Sincronização multi-dispositivo automática: ao trocar de aba ou desbloquear o celular (ignorado em modo demo)
   useEffect(() => {
@@ -3385,6 +3416,9 @@ export default function App() {
       fd.get('description') ||
       `Pagamento Fatura ${card.name} (${formatMonthLabel(invoicePaymentModal.monthKey)})`;
 
+    // Cooldown para evitar que Realtime interfira durante a gravação
+    cloudSyncCooldownUntilRef.current = Date.now() + 5000;
+
     const isEditMode = invoicePaymentModal.mode === 'edit';
     const existingPaymentTx =
       invoicePaymentModal.paymentTx ||
@@ -3408,26 +3442,59 @@ export default function App() {
         _localUpdatedAt: Date.now(),
       };
 
+      // Remover duplicatas de pagamento órfãs caso existam
+      const extraPaymentTxs = transactions.filter(
+        (t) =>
+          t.isInvoicePayment &&
+          t.targetCardId === card.id &&
+          t.invoiceMonth === invoicePaymentModal.monthKey &&
+          t.id !== existingPaymentTx.id
+      );
+      if (extraPaymentTxs.length > 0) {
+        extraPaymentTxs.forEach((ep) => {
+          recentlyDeletedTxIdsRef.current.add(ep.id);
+          syncItem('transactions', ep, true).catch(console.warn);
+        });
+      }
+      const extraTxIds = new Set(extraPaymentTxs.map((ep) => ep.id));
+
       const monthItemIds = new Set(invoicePaymentModal.monthItems.map((i) => i.id));
       const updatedMonthItems = [];
 
-      const updatedTransactions = transactions.map((t) => {
-        if (t.id === existingPaymentTx.id) {
-          return updatedPaymentTx;
-        }
-        if (monthItemIds.has(t.id) && t.status !== 'REALIZADO') {
-          const u = { ...t, status: 'REALIZADO', _localUpdatedAt: Date.now() };
-          updatedMonthItems.push(u);
-          return u;
-        }
-        return t;
-      });
+      const updatedTransactions = transactions
+        .filter((t) => !extraTxIds.has(t.id))
+        .map((t) => {
+          if (t.id === existingPaymentTx.id) {
+            return updatedPaymentTx;
+          }
+          if (monthItemIds.has(t.id) && t.status !== 'REALIZADO') {
+            const u = { ...t, status: 'REALIZADO', _localUpdatedAt: Date.now() };
+            updatedMonthItems.push(u);
+            return u;
+          }
+          return t;
+        });
 
       setTransactions(updatedTransactions);
       saveToLocalStorage(STORAGE_KEYS.transactions, updatedTransactions);
-      syncBatchTransactions([updatedPaymentTx, ...updatedMonthItems]);
+      syncBatchTransactions([updatedPaymentTx, ...updatedMonthItems]).catch(console.warn);
     } else {
       // 2. Novo pagamento de fatura
+      // Limpar pagamentos pré-existentes caso haja para este cartão e mês
+      const oldPaymentTxs = transactions.filter(
+        (t) =>
+          t.isInvoicePayment &&
+          t.targetCardId === card.id &&
+          t.invoiceMonth === invoicePaymentModal.monthKey
+      );
+      if (oldPaymentTxs.length > 0) {
+        oldPaymentTxs.forEach((op) => {
+          recentlyDeletedTxIdsRef.current.add(op.id);
+          syncItem('transactions', op, true).catch(console.warn);
+        });
+      }
+      const oldPaymentTxIds = new Set(oldPaymentTxs.map((op) => op.id));
+
       const monthItemIds = new Set(invoicePaymentModal.monthItems.map((i) => i.id));
       const updatedMonthItems = [];
 
@@ -3455,20 +3522,22 @@ export default function App() {
         ownerId: card.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
       };
 
-      const updatedTransactions = transactions.map((t) => {
-        if (monthItemIds.has(t.id)) {
-          const u = { ...t, status: 'REALIZADO' };
-          updatedMonthItems.push(u);
-          return u;
-        }
-        return t;
-      });
+      const updatedTransactions = transactions
+        .filter((t) => !oldPaymentTxIds.has(t.id))
+        .map((t) => {
+          if (monthItemIds.has(t.id)) {
+            const u = { ...t, status: 'REALIZADO' };
+            updatedMonthItems.push(u);
+            return u;
+          }
+          return t;
+        });
 
       updatedTransactions.unshift(paymentTx);
 
       setTransactions(updatedTransactions);
       saveToLocalStorage(STORAGE_KEYS.transactions, updatedTransactions);
-      syncBatchTransactions([...updatedMonthItems, paymentTx]);
+      syncBatchTransactions([...updatedMonthItems, paymentTx]).catch(console.warn);
     }
 
     setInvoicePaymentModal({
@@ -3491,19 +3560,24 @@ export default function App() {
     );
     if (!confirmEstorno) return;
 
-    // 1. Localizar transação de pagamento de fatura
-    const paymentTx = transactions.find(
+    // 1. Localizar TODAS as transações de pagamento desta fatura
+    const paymentTxs = transactions.filter(
       (t) =>
         t.isInvoicePayment &&
         t.targetCardId === card.id &&
         t.invoiceMonth === monthKey &&
         t.status !== 'CANCELADO'
     );
+    const paymentTxIds = new Set(paymentTxs.map((p) => p.id));
+    paymentTxs.forEach((p) => recentlyDeletedTxIdsRef.current.add(p.id));
+
+    // Cooldown para impedir que Realtime ressuscite o pagamento antes da gravação no Supabase terminar
+    cloudSyncCooldownUntilRef.current = Date.now() + 8000;
 
     // 2. Reverter os lançamentos da fatura para COMPROMETIDO
     const revertedMonthItems = [];
     const updatedTransactions = transactions
-      .filter((t) => !paymentTx || t.id !== paymentTx.id)
+      .filter((t) => !paymentTxIds.has(t.id))
       .map((t) => {
         if (t.cardId === card.id && t.status === 'REALIZADO') {
           const due = getTxDueDate(t) || t.date;
@@ -3519,12 +3593,12 @@ export default function App() {
     setTransactions(updatedTransactions);
     saveToLocalStorage(STORAGE_KEYS.transactions, updatedTransactions);
 
-    // Sincronização
-    if (paymentTx) {
-      syncItem('transactions', paymentTx, true);
-    }
+    // Sincronização segura no Supabase
+    paymentTxs.forEach((p) => {
+      syncItem('transactions', p, true).catch(console.warn);
+    });
     if (revertedMonthItems.length > 0) {
-      syncBatchTransactions(revertedMonthItems);
+      syncBatchTransactions(revertedMonthItems).catch(console.warn);
     }
 
     // Fechar modal de pagamento se estiver aberto

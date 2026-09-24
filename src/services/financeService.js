@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase.js';
+import { calculateCardDueDate, addMonthsToIso } from '../utils/formatters.js';
 import {
   DEMO_ACCOUNTS,
   DEMO_CARDS,
@@ -472,7 +473,12 @@ export const loadInitialAppData = async (defaults = {}) => {
         const cloudTxIds = new Set(cloudTxs.map((t) => t.id));
         const unmergedLocalTxs = (localTxs || []).filter((t) => !cloudTxIds.has(t.id) && (pendingTxIds.has(t.id) || (t._localUpdatedAt && Date.now() - t._localUpdatedAt < 60000)));
         transactions = [...mergedCloudTxs, ...unmergedLocalTxs];
+        const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(transactions, cards);
+        transactions = healedTransactions;
         localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(transactions));
+        if (hasChanges && changedTxs.length > 0) {
+          syncBatchTransactions(changedTxs).catch(console.warn);
+        }
 
         // Re-sincronizar transações locais pendentes em segundo plano
         if (pendingTxIds.size > 0) {
@@ -916,98 +922,159 @@ export const saveToLocalStorage = (key, data) => {
 };
 
 /**
- * Auto-recuperação (Self-Healing) de lançamentos de fatura indevidamente migrados para o mês seguinte.
- * Detecta itens de cartão que pertenciam a uma fatura que já possui pagamento registrado no mês anterior
- * e restaura seu vencimento contábil e status para 'REALIZADO'.
+ * Auto-recuperação (Self-Healing) e reparo de integridade contábil para compras de cartão de crédito.
+ * 1. Garante consistência de dueDate e purchaseDate para todos os lançamentos.
+ * 2. Repara compras e parcelas de cartão que foram indevidamente alteradas ou forçadas para meses anteriores.
+ * 3. Restaura parcelas futuras para seus meses corretos de vencimento com status 'COMPROMETIDO'.
  */
-export const healMigratedInvoiceTransactions = (txList, cards = []) => {
+export const healMigratedInvoiceTransactions = (txList = [], cards = []) => {
   if (!Array.isArray(txList) || txList.length === 0) {
     return { healedTransactions: txList || [], hasChanges: false, changedTxs: [] };
   }
 
-  // 1. Localizar pagamentos de fatura
-  const paymentTxs = txList.filter(
-    (t) => t.isInvoicePayment && t.targetCardId && t.invoiceMonth && t.status !== 'CANCELADO'
-  );
-
-  if (paymentTxs.length === 0) {
-    let patched = false;
-    const normalized = txList.map((t) => {
-      let changed = false;
-      const u = { ...t };
-      if (!u.dueDate) {
-        u.dueDate = u.date;
-        changed = true;
-      }
-      if (!u.purchaseDate) {
-        u.purchaseDate = u.date;
-        changed = true;
-      }
-      if (changed) patched = true;
-      return u;
-    });
-    return { healedTransactions: normalized, hasChanges: patched, changedTxs: [] };
-  }
-
+  const cardMap = new Map((cards || []).map((c) => [c.id, c]));
   let hasChanges = false;
   const changedTxs = [];
+
+  // Mapear primeiro as 1ªs parcelas do grupo, prefixo de ID ou descrição para cálculo relativo seguro
+  const groupFirstMap = new Map();
+  const idBaseFirstMap = new Map();
+  const descFirstMap = new Map();
+
+  txList.forEach((t) => {
+    if (!t.cardId || t.status === 'CANCELADO') return;
+    const isFirst =
+      t.installmentNumber === 1 ||
+      String(t.id).endsWith('-1') ||
+      String(t.id).includes('-p1-') ||
+      /\(0?1\/\d+\)/.test(t.description || '');
+
+    if (isFirst) {
+      if (t.installmentGroupId) {
+        groupFirstMap.set(t.installmentGroupId, t);
+      }
+      const idBaseMatch = String(t.id).match(/^(tx(?:-imp)?-[a-zA-Z0-9_-]+)-(?:p)?\d+$/);
+      if (idBaseMatch) {
+        idBaseFirstMap.set(idBaseMatch[1], t);
+      }
+      const cleanDesc = (t.description || '').replace(/\s*\(\d+\/\d+\)/, '').replace(/parcela\s+\d+\s+de\s+\d+/i, '').trim().toLowerCase();
+      if (cleanDesc) {
+        const count = t.installmentCount || '';
+        descFirstMap.set(`${t.cardId}_${cleanDesc}_${count}`, t);
+        descFirstMap.set(`${t.cardId}_${cleanDesc}`, t);
+      }
+    }
+  });
 
   const healedTransactions = txList.map((t) => {
     const baseDueDate = t.dueDate || t.date;
     const basePurchaseDate = t.purchaseDate || t.date;
 
-    // Apenas compras de cartão de crédito ativas
-    if (!t.cardId || t.status === 'CANCELADO') {
+    // Apenas compras normais de cartão de crédito ativas (ignora pagamentos técnicos de fatura e cancelados)
+    if (!t.cardId || t.isInvoicePayment || t.status === 'CANCELADO') {
       if (!t.dueDate || !t.purchaseDate) {
         return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
       }
       return t;
     }
 
-    // Parcelas futuras legítimas geradas com -p3, -p4, etc. e installmentNumber > 1 não devem ser retrocedidas
-    if (String(t.id).includes('-p') && t.installmentNumber && t.installmentNumber > 1) {
-      if (!t.dueDate || !t.purchaseDate) {
-        return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
+    const card = cardMap.get(t.cardId);
+    const safeClosing = card?.closingDay || 25;
+    const safeDue = card?.dueDay || 5;
+
+    // Extrair número e total da parcela se existirem
+    let instNum = t.installmentNumber;
+    let instTotal = t.installmentCount;
+    if (!instNum) {
+      const match = (t.description || '').match(/\((\d+)\/(\d+)\)/) || (t.description || '').match(/parcela\s+(\d+)\s+de\s+(\d+)/i);
+      if (match) {
+        instNum = parseInt(match[1], 10);
+        instTotal = parseInt(match[2], 10);
       }
-      return t;
     }
 
-    // Lançamentos recorrentes agendados para meses futuros nunca devem ser retrocedidos para um mês já pago
-    if (t.isRecurring || (t.recurrenceRuleId && !String(t.recurrenceRuleId).startsWith('PURCHASE_DATE:'))) {
-      if (!t.dueDate || !t.purchaseDate) {
-        return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
+    // Calcular vencimento esperado correto
+    let expectedDueDate = null;
+
+    // 1. Tentar obter a partir da 1ª parcela do mesmo grupo
+    if (instNum && instNum > 1 && t.installmentGroupId && groupFirstMap.has(t.installmentGroupId)) {
+      const firstTx = groupFirstMap.get(t.installmentGroupId);
+      const firstDue = firstTx.dueDate || firstTx.date;
+      if (firstDue) {
+        expectedDueDate = addMonthsToIso(firstDue, instNum - 1);
       }
-      return t;
     }
 
-    const currentDueMonth = baseDueDate.slice(0, 7);
-    const purchaseMonth = basePurchaseDate.slice(0, 7);
+    // 2. Tentar obter a partir do prefixo base de ID da 1ª parcela
+    if (!expectedDueDate && instNum && instNum > 1) {
+      const idBaseMatch = String(t.id).match(/^(tx(?:-imp)?-[a-zA-Z0-9_-]+)-(?:p)?\d+$/);
+      if (idBaseMatch && idBaseFirstMap.has(idBaseMatch[1])) {
+        const firstTx = idBaseFirstMap.get(idBaseMatch[1]);
+        const firstDue = firstTx.dueDate || firstTx.date;
+        if (firstDue) {
+          expectedDueDate = addMonthsToIso(firstDue, instNum - 1);
+        }
+      }
+    }
 
-    // Procura se há um pagamento para este cartão referente a um mês anterior ao vencimento atual,
-    // onde a compra ocorreu no mês daquele pagamento (ou antes)
-    const matchingPayment = paymentTxs.find((p) => {
-      if (p.targetCardId !== t.cardId) return false;
-      return p.invoiceMonth < currentDueMonth && purchaseMonth <= p.invoiceMonth;
-    });
+    // 3. Tentar obter a partir da 1ª parcela da mesma descrição e cartão
+    if (!expectedDueDate && instNum && instNum > 1) {
+      const cleanDesc = (t.description || '').replace(/\s*\(\d+\/\d+\)/, '').replace(/parcela\s+\d+\s+de\s+\d+/i, '').trim().toLowerCase();
+      if (cleanDesc) {
+        const firstTx = descFirstMap.get(`${t.cardId}_${cleanDesc}_${instTotal || ''}`) || descFirstMap.get(`${t.cardId}_${cleanDesc}`);
+        if (firstTx) {
+          const firstDue = firstTx.dueDate || firstTx.date;
+          if (firstDue) {
+            expectedDueDate = addMonthsToIso(firstDue, instNum - 1);
+          }
+        }
+      }
+    }
 
-    if (matchingPayment) {
-      // O item pertencia à fatura paga em matchingPayment.invoiceMonth!
-      const card = cards.find((c) => c.id === t.cardId);
-      const safeDueDay = card?.dueDay
-        ? String(Math.min(28, card.dueDay)).padStart(2, '0')
-        : (matchingPayment.date ? matchingPayment.date.slice(8, 10) : baseDueDate.slice(8, 10));
-      const healedDueDate = `${matchingPayment.invoiceMonth}-${safeDueDay}`;
+    // 4. Fallback: calcular via purchaseDate + closing/due day
+    if (!expectedDueDate && basePurchaseDate) {
+      const calcDue = calculateCardDueDate(basePurchaseDate, safeClosing, safeDue);
+      if (instNum && instNum > 1) {
+        // Se a data de compra já é posterior ao vencimento atual, a data de compra foi registrada como mês da parcela
+        if (baseDueDate && basePurchaseDate > baseDueDate) {
+          expectedDueDate = calcDue;
+        } else {
+          expectedDueDate = addMonthsToIso(calcDue, instNum - 1);
+        }
+      } else {
+        expectedDueDate = calcDue;
+      }
+    }
 
-      hasChanges = true;
-      const healed = {
-        ...t,
-        date: healedDueDate,
-        dueDate: healedDueDate,
-        purchaseDate: basePurchaseDate,
-        status: 'REALIZADO',
-      };
-      changedTxs.push(healed);
-      return healed;
+    if (expectedDueDate) {
+      const currentDueMonth = baseDueDate ? baseDueDate.slice(0, 7) : '';
+      const expectedDueMonth = expectedDueDate.slice(0, 7);
+      // Condições de corrupção:
+      // a) Parcela N > 1 cuja competência (mês) difere do mês real esperado (ex: jogada para setembro em vez de novembro)
+      // b) Compra com vencimento anterior à data em que foi comprada
+      const isWrongInstallmentMonth = instNum && instNum > 1 && currentDueMonth && currentDueMonth !== expectedDueMonth;
+      const isDueBeforePurchase = basePurchaseDate && baseDueDate && baseDueDate < basePurchaseDate;
+
+      if (isWrongInstallmentMonth || isDueBeforePurchase) {
+        hasChanges = true;
+        const todayStr = new Date().toISOString().slice(0, 10);
+        // Se a parcela corrigida tiver vencimento futuro ou atual não vencido, reverte para COMPROMETIDO
+        const newStatus = expectedDueDate >= todayStr ? 'COMPROMETIDO' : t.status;
+
+        const repaired = {
+          ...t,
+          date: expectedDueDate,
+          dueDate: expectedDueDate,
+          purchaseDate: basePurchaseDate,
+          installmentNumber: instNum || t.installmentNumber,
+          installmentCount: instTotal || t.installmentCount,
+          status: newStatus,
+          _localUpdatedAt: Date.now(),
+        };
+
+        changedTxs.push(repaired);
+        return repaired;
+      }
     }
 
     if (!t.dueDate || !t.purchaseDate) {

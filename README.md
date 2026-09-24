@@ -239,12 +239,19 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Botão de **desfazer/estornar pagamento** de fatura, reabrindo os lançamentos vinculados como comprometidos.
   - [x] Exibição transparente no Extrato e na aba de Cartões de qual conta bancária liquidou cada fatura.
 
-- [ ] **Fase 3.2: Refinamento de Interface & Layout Clean da Barra Superior (Navbar Polish)**
-  - [ ] Redesenho da barra superior (`Navbar.jsx`) para dar destaque à marca e ao título "Finanças da Família".
-  - [ ] Transformação de botões utilitários (Olho Mágico e Assistente IA) em IconButtons minimalistas com tooltips.
-  - [ ] Unificação do perfil do usuário em um menu avatar suspenso moderno (avatar, nome, cargo e logout).
-  - [ ] Substituição do texto longo de conexão por um indicador discreto com pulso (verde/cinza/âmbar).
-  - [ ] Preservação de 100% dos callbacks, responsividade e integridade do banner do Modo Demonstração.
+- [x] **Fase 3.2: Refinamento de Interface & Layout Clean da Barra Superior (Navbar Polish)**
+  - [x] Redesenho da barra superior (`Navbar.jsx`) para dar destaque à marca e ao título "Finanças da Família".
+  - [x] Transformação de botões utilitários (Olho Mágico e Assistente IA) em IconButtons minimalistas com tooltips.
+  - [x] Unificação do perfil do usuário em um menu avatar suspenso moderno (avatar, nome, cargo e logout).
+  - [x] Substituição do texto longo de conexão por um indicador discreto com pulso (verde/cinza/âmbar).
+  - [x] Preservação de 100% dos callbacks, responsividade e integridade do banner do Modo Demonstração.
+
+- [ ] **Fase 3.3: Extratos Dedicados & Auditoria por Conta / Cartão / Categoria**
+  - [ ] **Extrato por Conta Bancária:** Botão/ícone de ação rápida no card de cada conta em `AccountsTab` para abrir o extrato exclusivo daquela conta com um único clique.
+  - [ ] **Cálculo de Saldo Progressivo (Linha a Linha):** Visualização cronológica do saldo acumulado a cada entrada e saída (idêntico ao extrato do banco real), facilitando a conferência centavo por centavo.
+  - [ ] **Extrato por Cartão de Crédito:** Atalho nos cards de cartões para visualizar o histórico de compras e parcelas exclusivas do cartão selecionado.
+  - [ ] **Extrato por Categoria / Envelope:** Possibilidade de clicar em qualquer envelope ou categoria (ex: "Supermercado") e abrir a listagem imediata de todos os gastos daquele grupo no mês.
+  - [ ] **Exportação / Impressão do Extrato Filtrado:** Opção de imprimir ou gerar relatório simples do extrato da conta/período.
 
 - [ ] **Fase 4: Multi-Tenancy, Arquitetura de Estado (`FinanceContext`) & "Acesso Individual com Impacto Familiar"**
   - [ ] Introdução do `FinanceContext` (React Context) para eliminar o *prop drilling* remanescente do `App.jsx` e centralizar o estado.

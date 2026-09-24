@@ -4096,6 +4096,34 @@ export default function App() {
     setActiveTab('transactions');
   }, []);
 
+  // Navegação direta para Extrato Dedicado de Conta Bancária
+  const handleNavigateToAccountStatement = useCallback((accountId) => {
+    setSearchTerm('');
+    setFilterType('ALL');
+    setFilterStatus('ALL');
+    setFilterSource(`acc-${accountId}`);
+    setFilterCategory('ALL');
+    setFilterScope('ALL');
+    setFilterDatePreset('ALL');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setActiveTab('transactions');
+  }, []);
+
+  // Navegação direta para Extrato de Cartão de Crédito
+  const handleNavigateToCardStatement = useCallback((cardId) => {
+    setSearchTerm('');
+    setFilterType('ALL');
+    setFilterStatus('ALL');
+    setFilterSource(`card-${cardId}`);
+    setFilterCategory('ALL');
+    setFilterScope('ALL');
+    setFilterDatePreset('ALL');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setActiveTab('transactions');
+  }, []);
+
   // Navegação interativa com Drill-Down direto para a aba de Lançamentos
   const handleDrillDownToTransactions = useCallback((categoryId, dateRangeOrMonth = null) => {
     setFilterCategory(categoryId);
@@ -4561,6 +4589,7 @@ export default function App() {
             setFilterScope={setFilterScope}
             categories={categories}
             accounts={accounts}
+            accountBalances={accountBalances}
             cards={cards}
             isAnyFilterActive={isAnyFilterActive}
             handleResetFilters={handleResetFilters}
@@ -4640,6 +4669,8 @@ export default function App() {
             handleDeleteAccount={handleDeleteAccount}
             toggleArchiveCard={toggleArchiveCard}
             handleDeleteCard={handleDeleteCard}
+            onNavigateToAccountStatement={handleNavigateToAccountStatement}
+            onNavigateToCardStatement={handleNavigateToCardStatement}
           />
         )}
 
@@ -4700,6 +4731,7 @@ export default function App() {
             getEnvelopesForMonth={getEnvelopesForMonth}
             setEnvelopeModalState={setEnvelopeModalState}
             setDeleteEnvelopeModalState={setDeleteEnvelopeModalState}
+            handleDrillDownToTransactions={handleDrillDownToTransactions}
           />
         )}
 
@@ -4710,6 +4742,7 @@ export default function App() {
             setModalState={setModalState}
             toggleArchiveCategory={toggleArchiveCategory}
             handleDeleteCategory={handleDeleteCategory}
+            handleDrillDownToTransactions={handleDrillDownToTransactions}
           />
         )}
 

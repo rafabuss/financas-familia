@@ -5,6 +5,7 @@ import {
   Plus,
   Edit2,
   Trash2,
+  ArrowUpRight,
 } from 'lucide-react';
 import { formatMoney, formatMonthLabel } from '../../utils/formatters';
 
@@ -16,6 +17,7 @@ export default function EnvelopesTab({
   getEnvelopesForMonth,
   setEnvelopeModalState,
   setDeleteEnvelopeModalState,
+  handleDrillDownToTransactions,
 }) {
   const currentEnvelopesData = getEnvelopesForMonth(envelopeSelectedMonth);
 
@@ -207,7 +209,15 @@ export default function EnvelopesTab({
                     <div className="flex items-center space-x-2">
                       <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                       <div>
-                        <h4 className="font-bold text-sm text-slate-900">{cat.name}</h4>
+                        <button
+                          type="button"
+                          onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(cat.id, envelopeSelectedMonth)}
+                          className="font-bold text-sm text-slate-900 hover:text-blue-600 transition flex items-center space-x-1 group text-left cursor-pointer"
+                          title={`Ver lançamentos de "${cat.name}" em ${formatMonthLabel(envelopeSelectedMonth)}`}
+                        >
+                          <span className="group-hover:underline">{cat.name}</span>
+                          <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 transition" />
+                        </button>
                         {env.hasRecurringSchedule && (
                           <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100 inline-block">
                             🗓️ Programado
@@ -253,9 +263,17 @@ export default function EnvelopesTab({
                   {/* Barra de Progresso */}
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-600">
-                        Gasto: <strong className="text-slate-900">{formatMoney(env.spentCents)}</strong>
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(cat.id, envelopeSelectedMonth)}
+                        className="text-slate-600 hover:text-blue-600 transition cursor-pointer text-left flex items-center space-x-1 group"
+                        title={`Filtrar lançamentos de "${cat.name}" em ${formatMonthLabel(envelopeSelectedMonth)}`}
+                      >
+                        <span>Gasto:</span>
+                        <strong className="text-slate-900 group-hover:text-blue-600 underline decoration-slate-300 underline-offset-2 group-hover:decoration-blue-500">
+                          {formatMoney(env.spentCents)}
+                        </strong>
+                      </button>
                       <span className="text-slate-500">
                         Teto: <strong className="text-slate-800">{formatMoney(env.allocatedCents)}</strong>
                       </span>
@@ -271,24 +289,36 @@ export default function EnvelopesTab({
                     </div>
                   </div>
 
-                  {/* Rodapé do Card: Situação / Restante / Alerta de Estouro */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-500">
-                      {env.percentage.toFixed(0)}% consumido
-                    </span>
-                    {env.isOver ? (
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
-                        🚨 Ultrapassou {formatMoney(env.overspentCents)}
+                  {/* Rodapé do Card: Situação / Restante / Alerta de Estouro + Botão Ver Extrato */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[11px] font-bold text-slate-500">
+                        {env.percentage.toFixed(0)}%
                       </span>
-                    ) : env.remainingCents === 0 ? (
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                        Teto Atingido
-                      </span>
-                    ) : (
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        ✓ {formatMoney(env.remainingCents)} disponíveis
-                      </span>
-                    )}
+                      {env.isOver ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                          🚨 +{formatMoney(env.overspentCents)}
+                        </span>
+                      ) : env.remainingCents === 0 ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                          Teto Atingido
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          ✓ {formatMoney(env.remainingCents)} disp.
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(cat.id, envelopeSelectedMonth)}
+                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline flex items-center space-x-0.5 cursor-pointer ml-auto shrink-0"
+                      title={`Ver extrato de lançamentos de ${cat.name} em ${formatMonthLabel(envelopeSelectedMonth)}`}
+                    >
+                      <span>Ver Extrato</span>
+                      <ArrowUpRight className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               );

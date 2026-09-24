@@ -19,6 +19,9 @@ import {
   Edit2,
   Sparkles,
   Check,
+  Receipt,
+  FileText,
+  Info,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, getTxDueDate, isTxOverdue } from '../../utils/formatters';
 
@@ -55,6 +58,7 @@ export default function TransactionsTab({
   setFilterScope,
   categories = [],
   accounts = [],
+  accountBalances = {},
   cards = [],
   isAnyFilterActive,
   handleResetFilters,
@@ -71,6 +75,56 @@ export default function TransactionsTab({
   scenarios = [],
   handleQuickPayTransaction,
 }) {
+  // Identifica se há uma conta bancária ou cartão específico filtrado
+  const selectedAccount = React.useMemo(() => {
+    if (!filterSource || filterSource === 'ALL' || filterSource === 'ACCOUNTS_ONLY' || filterSource === 'CARDS_ONLY') {
+      return null;
+    }
+    const cleanId = filterSource.startsWith('acc-') ? filterSource.replace('acc-', '') : filterSource;
+    return accounts.find((a) => a.id === cleanId) || null;
+  }, [filterSource, accounts]);
+
+  const selectedCard = React.useMemo(() => {
+    if (!filterSource || !filterSource.startsWith('card-')) return null;
+    const cleanId = filterSource.replace('card-', '');
+    return cards.find((c) => c.id === cleanId) || null;
+  }, [filterSource, cards]);
+
+  // Saldo Progressivo Linha a Linha:
+  // Saldo acumulado que resultou após cada movimentação cronológica
+  // (saldo inicial + entradas - saídas = saldo resultante na linha)
+  const progressiveBalanceMap = React.useMemo(() => {
+    if (!selectedAccount) return {};
+
+    // 1. Coleta todos os lançamentos que afetam esta conta bancária (não cancelados)
+    const accountTxs = (allDisplayTransactions || []).filter(
+      (t) => t.accountId === selectedAccount.id && t.status !== 'CANCELADO'
+    );
+
+    // 2. Ordenação estritamente cronológica (do mais antigo para o mais recente)
+    const sortedChronological = [...accountTxs].sort((a, b) => {
+      const dateA = a.date || a.dueDate || '';
+      const dateB = b.date || b.dueDate || '';
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      const timeA = a._localUpdatedAt || a.createdAt || 0;
+      const timeB = b._localUpdatedAt || b.createdAt || 0;
+      if (timeA !== timeB) return timeA - timeB;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    // 3. Acumula linha a linha a partir do saldo inicial da conta
+    let running = selectedAccount.initialBalanceCents || 0;
+    const map = {};
+
+    sortedChronological.forEach((tx) => {
+      const delta = tx.type === 'INCOME' ? tx.amountCents : -tx.amountCents;
+      running += delta;
+      map[tx.id] = running;
+    });
+
+    return map;
+  }, [selectedAccount, allDisplayTransactions]);
+
   return (
     <div className="space-y-4">
       {/* Barra de Ferramentas Superior: Busca, Período, Filtros e Ações */}
@@ -347,7 +401,37 @@ export default function TransactionsTab({
             </select>
           </div>
 
-          {/* Badge ativo com remoção rápida (X) */}
+          {/* Badges de filtros ativos com remoção rápida (X) */}
+          {selectedAccount && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-blue-100 text-blue-900 border border-blue-300 animate-in fade-in shadow-2xs">
+              <Receipt className="w-3.5 h-3.5 text-blue-700" />
+              <span>Filtrado por: <strong>{selectedAccount.name}</strong></span>
+              <button
+                type="button"
+                onClick={() => setFilterSource('ALL')}
+                className="hover:text-rose-700 p-0.5 rounded transition cursor-pointer ml-1"
+                title="Limpar Filtro da Conta"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </span>
+          )}
+
+          {selectedCard && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-purple-100 text-purple-900 border border-purple-300 animate-in fade-in shadow-2xs">
+              <CreditCard className="w-3.5 h-3.5 text-purple-700" />
+              <span>Filtrado por: <strong>{selectedCard.name}</strong></span>
+              <button
+                type="button"
+                onClick={() => setFilterSource('ALL')}
+                className="hover:text-rose-700 p-0.5 rounded transition cursor-pointer ml-1"
+                title="Limpar Filtro do Cartão"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </span>
+          )}
+
           {filterCategory !== 'ALL' && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-100 text-amber-900 border border-amber-300 animate-in fade-in">
               <span>🏷️ {categories.find((c) => c.id === filterCategory)?.name || 'Categoria'}</span>
@@ -537,6 +621,66 @@ export default function TransactionsTab({
         </div>
       </div>
 
+      {/* Banner Executivo de Extrato Dedicado da Conta Bancária */}
+      {selectedAccount && (
+        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl p-5 shadow-sm border border-blue-800 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-3.5">
+              <div className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center text-white border border-white/20 shrink-0">
+                <Receipt className="w-6 h-6 text-blue-300" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-blue-300">
+                    Extrato Dedicado da Conta
+                  </span>
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: selectedAccount.color || '#3b82f6' }}
+                  />
+                </div>
+                <h3 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                  {selectedAccount.name}
+                  <span className="text-xs font-normal text-blue-200">
+                    ({selectedAccount.bank} • Titular: <strong>{selectedAccount.holder}</strong>)
+                  </span>
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 sm:gap-6 justify-between sm:justify-end">
+              <div className="text-left sm:text-right">
+                <span className="text-[10px] uppercase tracking-wider text-blue-300 font-semibold block">
+                  Saldo Inicial Cadastrado
+                </span>
+                <span className="text-sm font-semibold text-blue-100">
+                  {formatMoney(selectedAccount.initialBalanceCents || 0)}
+                </span>
+              </div>
+
+              <div className="text-left sm:text-right">
+                <span className="text-[10px] uppercase tracking-wider text-blue-300 font-semibold block">
+                  Saldo Atual em Conta
+                </span>
+                <span className="text-2xl font-bold text-white">
+                  {formatMoney(accountBalances[selectedAccount.id] ?? selectedAccount.initialBalanceCents ?? 0)}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFilterSource('ALL')}
+                className="bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 border border-white/20 cursor-pointer shadow-2xs"
+                title="Limpar Filtro e ver todas as contas"
+              >
+                <X className="w-4 h-4" />
+                <span>Limpar Filtro</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabela de Lançamentos */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -667,6 +811,16 @@ export default function TransactionsTab({
                   </div>
                 </th>
 
+                {/* 6.1 Saldo Resultante (Exclusivo do Extrato da Conta) */}
+                {selectedAccount && (
+                  <th className="py-3 px-4 text-right whitespace-nowrap bg-blue-50/70 text-blue-900 border-l border-blue-100 text-xs font-bold">
+                    <div className="flex items-center justify-end space-x-1">
+                      <span>Saldo Resultante</span>
+                      <Info className="w-3.5 h-3.5 text-blue-500" title="Saldo acumulado da conta após este lançamento cronológico" />
+                    </div>
+                  </th>
+                )}
+
                 {/* 7. Ações */}
                 <th className="py-3 px-4 text-center text-xs">Ações</th>
               </tr>
@@ -674,7 +828,7 @@ export default function TransactionsTab({
             <tbody className="divide-y divide-slate-100">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-400 space-y-2">
+                  <td colSpan={selectedAccount ? 8 : 7} className="text-center py-12 text-slate-400 space-y-2">
                     <p className="text-sm">Nenhum lançamento encontrado para os filtros selecionados.</p>
                     {isAnyFilterActive && (
                       <button
@@ -860,6 +1014,23 @@ export default function TransactionsTab({
                             )}
                           </td>
 
+                          {/* 6.1 Saldo Resultante (se extrato por conta) */}
+                          {selectedAccount && (
+                            <td className="py-3 px-4 text-right whitespace-nowrap bg-blue-50/20 border-l border-blue-100">
+                              {progressiveBalanceMap[tx.id] !== undefined ? (
+                                <span
+                                  className={`font-bold text-xs sm:text-sm ${
+                                    progressiveBalanceMap[tx.id] >= 0 ? 'text-slate-900' : 'text-rose-600'
+                                  }`}
+                                >
+                                  {formatMoney(progressiveBalanceMap[tx.id])}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">-</span>
+                              )}
+                            </td>
+                          )}
+
                           {/* 7. Ações */}
                           <td className="py-3 px-4 text-center">
                             <div className="flex items-center justify-center space-x-1.5">
@@ -984,6 +1155,13 @@ export default function TransactionsTab({
                                 <td className="py-2.5 px-4 text-right font-medium whitespace-nowrap text-slate-700">
                                   - {formatMoney(item.amountCents)}
                                 </td>
+
+                                {/* 6.1 Saldo Resultante (se extrato por conta) */}
+                                {selectedAccount && (
+                                  <td className="py-2.5 px-4 text-right text-slate-400 text-xs italic bg-blue-50/15 border-l border-blue-50">
+                                    -
+                                  </td>
+                                )}
 
                                 {/* 7. Ações */}
                                 <td className="py-2.5 px-4 text-center">
@@ -1151,6 +1329,23 @@ export default function TransactionsTab({
                       >
                         {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
                       </td>
+
+                      {/* 6.1 Saldo Resultante (se extrato por conta) */}
+                      {selectedAccount && (
+                        <td className="py-3 px-4 text-right whitespace-nowrap bg-blue-50/20 border-l border-blue-100">
+                          {progressiveBalanceMap[tx.id] !== undefined ? (
+                            <span
+                              className={`font-bold text-xs sm:text-sm ${
+                                progressiveBalanceMap[tx.id] >= 0 ? 'text-slate-900' : 'text-rose-600'
+                              }`}
+                            >
+                              {formatMoney(progressiveBalanceMap[tx.id])}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
+                        </td>
+                      )}
 
                       {/* 7. Ações */}
                       <td className="py-3 px-4 text-center">

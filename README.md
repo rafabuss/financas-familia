@@ -246,12 +246,12 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Substituição do texto longo de conexão por um indicador discreto com pulso (verde/cinza/âmbar).
   - [x] Preservação de 100% dos callbacks, responsividade e integridade do banner do Modo Demonstração.
 
-- [ ] **Fase 3.3: Extratos Dedicados & Auditoria por Conta / Cartão / Categoria**
-  - [ ] **Extrato por Conta Bancária:** Botão/ícone de ação rápida no card de cada conta em `AccountsTab` para abrir o extrato exclusivo daquela conta com um único clique.
-  - [ ] **Cálculo de Saldo Progressivo (Linha a Linha):** Visualização cronológica do saldo acumulado a cada entrada e saída (idêntico ao extrato do banco real), facilitando a conferência centavo por centavo.
-  - [ ] **Extrato por Cartão de Crédito:** Atalho nos cards de cartões para visualizar o histórico de compras e parcelas exclusivas do cartão selecionado.
-  - [ ] **Extrato por Categoria / Envelope:** Possibilidade de clicar em qualquer envelope ou categoria (ex: "Supermercado") e abrir a listagem imediata de todos os gastos daquele grupo no mês.
-  - [ ] **Exportação / Impressão do Extrato Filtrado:** Opção de imprimir ou gerar relatório simples do extrato da conta/período.
+- [x] **Fase 3.3: Extratos Dedicados & Aglomeração de Faturas de Cartão**
+  - [x] **Aglomeração & Acordeão de Lançamentos de Faturas (`CardsInvoicesTab`):** Exibir as faturas dos cartões de forma compacta e colapsável por padrão, permitindo expandir/recolher os lançamentos sob demanda para uma navegação ágil e sem rolagem infinita.
+  - [x] **Extrato por Conta Bancária:** Botão/ícone de ação rápida no card de cada conta em `AccountsTab` para abrir o extrato exclusivo daquela conta com um único clique e banner dedicado com saldo atual.
+  - [x] **Cálculo de Saldo Progressivo (Linha a Linha):** Visualização cronológica do saldo acumulado a cada entrada e saída (saldo inicial + entradas - saídas = saldo resultante na linha), idêntico ao extrato do banco real.
+  - [x] **Extrato por Cartão de Crédito:** Atalho nos cards de cartões para visualizar o histórico de compras e parcelas exclusivas do cartão selecionado.
+  - [x] **Extrato por Categoria / Envelope:** Possibilidade de clicar em qualquer envelope ou categoria (ex: "Supermercado") e abrir a listagem imediata de todos os gastos daquele grupo no mês.
 
 - [ ] **Fase 4: Multi-Tenancy, Arquitetura de Estado (`FinanceContext`) & "Acesso Individual com Impacto Familiar"**
   - [ ] Introdução do `FinanceContext` (React Context) para eliminar o *prop drilling* remanescente do `App.jsx` e centralizar o estado.

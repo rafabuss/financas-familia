@@ -4,6 +4,8 @@ import {
   Edit2,
   Archive,
   Trash2,
+  Receipt,
+  ArrowUpRight,
 } from 'lucide-react';
 import { formatMoney } from '../../utils/formatters';
 
@@ -12,6 +14,7 @@ export default function CategoriesTab({
   setModalState,
   toggleArchiveCategory,
   handleDeleteCategory,
+  handleDrillDownToTransactions,
 }) {
   return (
     <div className="space-y-6">
@@ -47,7 +50,15 @@ export default function CategoriesTab({
                       <div className="flex items-center space-x-3">
                         <span className="w-4 h-4 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: cat.color }} />
                         <div>
-                          <h4 className="font-bold text-sm sm:text-base text-slate-900">{cat.name}</h4>
+                          <button
+                            type="button"
+                            onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(cat.id)}
+                            className="font-bold text-sm sm:text-base text-slate-900 hover:text-blue-600 transition flex items-center space-x-1 group text-left cursor-pointer"
+                            title={`Ver lançamentos da categoria "${cat.name}"`}
+                          >
+                            <span className="group-hover:underline">{cat.name}</span>
+                            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 transition" />
+                          </button>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                             <span className="text-[10px] uppercase font-bold text-slate-400">
                               {cat.type === 'INCOME' ? 'Receita' : 'Despesa'}
@@ -67,6 +78,14 @@ export default function CategoriesTab({
                       </div>
 
                       <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(cat.id)}
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                          title="Ver Extrato de lançamentos desta Categoria"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'create', data: { parentId: cat.id, type: cat.type } })}
@@ -119,17 +138,30 @@ export default function CategoriesTab({
                               key={sub.id}
                               className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100 text-xs hover:bg-slate-100/70 transition"
                             >
-                              <div className="flex items-center space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(sub.id)}
+                                className="flex items-center space-x-2 text-left hover:text-blue-600 transition group cursor-pointer"
+                                title={`Ver lançamentos da subcategoria "${sub.name}"`}
+                              >
                                 <span className="text-slate-400 font-bold">↳</span>
                                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
-                                <span className="font-semibold text-slate-800">{sub.name}</span>
+                                <span className="font-semibold text-slate-800 group-hover:underline group-hover:text-blue-600">{sub.name}</span>
                                 {sub.budgetLimitCents > 0 && (
                                   <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-100/70 text-blue-800 rounded">
                                     ✉️ {formatMoney(sub.budgetLimitCents)}/mês
                                   </span>
                                 )}
-                              </div>
+                              </button>
                               <div className="flex items-center space-x-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDrillDownToTransactions && handleDrillDownToTransactions(sub.id)}
+                                  className="p-1 text-slate-400 hover:text-blue-600 rounded transition cursor-pointer"
+                                  title="Ver Extrato da Subcategoria"
+                                >
+                                  <Receipt className="w-3 h-3" />
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => setModalState({ isOpen: true, type: 'category', mode: 'edit', data: sub })}

@@ -4,6 +4,8 @@ import {
   Edit2,
   Archive,
   Trash2,
+  Receipt,
+  CreditCard,
 } from 'lucide-react';
 import { formatMoney } from '../../utils/formatters';
 
@@ -17,6 +19,8 @@ export default function AccountsTab({
   handleDeleteAccount,
   toggleArchiveCard,
   handleDeleteCard,
+  onNavigateToAccountStatement,
+  onNavigateToCardStatement,
 }) {
   return (
     <div className="space-y-8">
@@ -55,7 +59,16 @@ export default function AccountsTab({
                   <span className="text-[10px] text-slate-400 uppercase font-semibold">Saldo Atual</span>
                   <p className="text-lg font-bold text-slate-900">{formatMoney(accountBalances[acc.id] || 0)}</p>
                 </div>
-                <div className="flex items-center space-x-1">
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToAccountStatement && onNavigateToAccountStatement(acc.id)}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                    title="Ver Extrato completo com saldo progressivo"
+                  >
+                    <Receipt className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Ver Extrato</span>
+                  </button>
                   <button
                     onClick={() => setModalState({ isOpen: true, type: 'account', mode: 'edit', data: acc })}
                     className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
@@ -129,29 +142,40 @@ export default function AccountsTab({
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end space-x-1">
-                  <button
-                    onClick={() => setModalState({ isOpen: true, type: 'card', mode: 'edit', data: card })}
-                    className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition cursor-pointer"
-                    title="Editar"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => toggleArchiveCard(card.id)}
-                    className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition cursor-pointer"
-                    title={card.archived ? 'Desarquivar' : 'Arquivar'}
-                  >
-                    <Archive className="w-4 h-4" />
-                  </button>
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
                   <button
                     type="button"
-                    onClick={() => handleDeleteCard(card)}
-                    className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                    title="Excluir Definitivamente"
+                    onClick={() => onNavigateToCardStatement && onNavigateToCardStatement(card.id)}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                    title="Ver Fatura deste Cartão"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <CreditCard className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Ver Fatura</span>
                   </button>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      onClick={() => setModalState({ isOpen: true, type: 'card', mode: 'edit', data: card })}
+                      className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition cursor-pointer"
+                      title="Editar"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => toggleArchiveCard(card.id)}
+                      className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition cursor-pointer"
+                      title={card.archived ? 'Desarquivar' : 'Arquivar'}
+                    >
+                      <Archive className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCard(card)}
+                      className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                      title="Excluir Definitivamente"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );

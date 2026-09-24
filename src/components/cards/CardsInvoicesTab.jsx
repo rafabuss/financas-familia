@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   UploadCloud,
   Plus,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Calendar,
   CheckCircle2,
   AlertTriangle,
@@ -32,6 +33,30 @@ export default function CardsInvoicesTab({
   setActiveTab,
   setModalState,
 }) {
+  // Estado local para controle de acordeão dos cartões (recolhidos por padrão)
+  const [expandedCards, setExpandedCards] = useState({});
+
+  const areAllExpanded = cards.length > 0 && cards.every((c) => Boolean(expandedCards[c.id]));
+
+  const toggleCardExpanded = (cardId) => {
+    setExpandedCards((prev) => ({
+      ...prev,
+      [cardId]: !prev[cardId],
+    }));
+  };
+
+  const toggleExpandAll = () => {
+    if (areAllExpanded) {
+      setExpandedCards({});
+    } else {
+      const next = {};
+      cards.forEach((c) => {
+        next[c.id] = true;
+      });
+      setExpandedCards(next);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -98,7 +123,17 @@ export default function CardsInvoicesTab({
           </button>
         </div>
 
-        <div className="flex items-center space-x-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2 sm:space-x-3 text-xs">
+          {cards.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleExpandAll}
+              className="font-semibold px-3 py-1.5 rounded-xl bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition active:scale-95 shadow-2xs flex items-center space-x-1.5 cursor-pointer text-xs"
+              title={areAllExpanded ? 'Recolher todas as faturas' : 'Expandir todas as faturas'}
+            >
+              <span>{areAllExpanded ? 'Recolher Todas ▴' : 'Expandir Todas ▾'}</span>
+            </button>
+          )}
           {invoiceSelectedMonth !== currentActualMonth && (
             <button
               type="button"
@@ -126,9 +161,10 @@ export default function CardsInvoicesTab({
             dueDateIso: '',
             closingDateIso: '',
           };
+          const isExpanded = Boolean(expandedCards[card.id]);
 
           return (
-            <div key={card.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div key={card.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm transition-all duration-200">
               <div className="flex flex-col md:flex-row justify-between md:items-center pb-4 border-b border-slate-100 gap-4">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -206,8 +242,8 @@ export default function CardsInvoicesTab({
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 sm:space-x-3">
-                  <div className="text-left md:text-right">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <div className="text-left md:text-right mr-1">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                       VALOR DESTA FATURA
                     </span>
@@ -271,32 +307,61 @@ export default function CardsInvoicesTab({
                       <span className="hidden sm:inline">Excluir Fatura</span>
                     </button>
                   )}
+
+                  {/* Toggle Acordeão Moderno: Ver / Recolher Lançamentos */}
+                  <button
+                    type="button"
+                    onClick={() => toggleCardExpanded(card.id)}
+                    className={`text-xs font-semibold px-3 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 cursor-pointer shadow-2xs border ${
+                      isExpanded
+                        ? 'bg-purple-100 text-purple-800 border-purple-300'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                    }`}
+                    title={isExpanded ? 'Recolher lançamentos desta fatura' : 'Ver lançamentos desta fatura'}
+                  >
+                    <span>{isExpanded ? 'Recolher Lançamentos' : 'Ver Lançamentos'}</span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                        isExpanded ? 'bg-purple-200 text-purple-900' : 'bg-slate-200 text-slate-800'
+                      }`}
+                    >
+                      {info.monthItems.length}
+                    </span>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                        isExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
 
-              <div className="mt-4">
-                <div className="flex justify-between items-center mb-3">
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    LANÇAMENTOS E PARCELAS DESTA FATURA ({info.monthItems.length}):
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const dueDay = card.dueDay || 10;
-                      const defaultDueDate = `${invoiceSelectedMonth}-${String(dueDay).padStart(2, '0')}`;
-                      openTransactionModal('create', {
-                        cardId: card.id,
-                        sourceType: 'CARD',
-                        dueDate: defaultDueDate,
-                        date: defaultDueDate,
-                      });
-                    }}
-                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center space-x-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Adicionar na Fatura</span>
-                  </button>
-                </div>
+              {/* Lançamentos Detalhados (Acordeão Colapsável) */}
+              {isExpanded && (
+                <div className="mt-4 pt-2 space-y-4 animate-in fade-in duration-200">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      LANÇAMENTOS E PARCELAS DESTA FATURA ({info.monthItems.length}):
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const dueDay = card.dueDay || 10;
+                        const defaultDueDate = `${invoiceSelectedMonth}-${String(dueDay).padStart(2, '0')}`;
+                        openTransactionModal('create', {
+                          cardId: card.id,
+                          sourceType: 'CARD',
+                          dueDate: defaultDueDate,
+                          date: defaultDueDate,
+                        });
+                      }}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center space-x-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Adicionar na Fatura</span>
+                    </button>
+                  </div>
+
 
                 {info.monthItems.length === 0 ? (
                   <p className="text-xs text-slate-400 py-4 bg-slate-50/60 rounded-xl text-center">
@@ -354,23 +419,24 @@ export default function CardsInvoicesTab({
                     })}
                   </div>
                 )}
-
-                {/* Rodapé informativo de limites do cartão */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
-                  <span>
-                    Limite Total: <strong>{formatMoney(card.limitCents)}</strong>
-                  </span>
-                  <span>
-                    Total Comprometido (Todas as Parcelas): <strong className="text-slate-700">{formatMoney(info.committedTotalCents)}</strong>
-                  </span>
-                  <span className="text-emerald-600 font-semibold">
-                    Disponível Atual: {formatMoney(info.availableCents)}
-                  </span>
-                </div>
               </div>
+            )}
+
+            {/* Rodapé informativo de limites do cartão (sempre visível) */}
+            <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+              <span>
+                Limite Total: <strong>{formatMoney(card.limitCents)}</strong>
+              </span>
+              <span>
+                Total Comprometido (Todas as Parcelas): <strong className="text-slate-700">{formatMoney(info.committedTotalCents)}</strong>
+              </span>
+              <span className="text-emerald-600 font-semibold">
+                Disponível Atual: {formatMoney(info.availableCents)}
+              </span>
             </div>
-          );
-        })}
+          </div>
+        );
+      })}
       </div>
     </div>
   );

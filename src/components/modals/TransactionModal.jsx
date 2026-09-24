@@ -24,10 +24,12 @@ export default function TransactionModal({
   setFormRecurringMonths,
   isSubmittingTx = false,
   handleSaveTransaction,
+  handleQuickPayTransaction,
   accounts = [],
   cards = [],
   categories = [],
   currentUser,
+  currentMemberId = 'user-all',
 }) {
   if (!modalState.isOpen || modalState.type !== 'transaction') return null;
 
@@ -501,7 +503,7 @@ export default function TransactionModal({
                     <button
                       type="button"
                       onClick={() => {
-                        handleQuickPayTransaction(modalState.data, 'REALIZADO');
+                        handleQuickPayTransaction?.(modalState.data, 'REALIZADO');
                         setModalState({ isOpen: false, type: null, mode: 'create', data: null });
                       }}
                       className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center space-x-1.5 shadow-xs transition active:scale-95"

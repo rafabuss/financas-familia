@@ -281,7 +281,16 @@ export default function CardsInvoicesTab({
                   </h4>
                   <button
                     type="button"
-                    onClick={() => openTransactionModal('create', { cardId: card.id, sourceType: 'CARD' })}
+                    onClick={() => {
+                      const dueDay = card.dueDay || 10;
+                      const defaultDueDate = `${invoiceSelectedMonth}-${String(dueDay).padStart(2, '0')}`;
+                      openTransactionModal('create', {
+                        cardId: card.id,
+                        sourceType: 'CARD',
+                        dueDate: defaultDueDate,
+                        date: defaultDueDate,
+                      });
+                    }}
                     className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center space-x-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />

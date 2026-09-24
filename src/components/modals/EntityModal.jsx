@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { FAMILY_MEMBERS } from '../../data/constants';
+import { formatMoney } from '../../utils/formatters';
 
 export default function EntityModal({
   modalState,
@@ -12,7 +13,14 @@ export default function EntityModal({
   handleSaveAccount,
   handleSaveCard,
   handleSaveCategory,
+  currentMemberId = 'user-all',
+  modalSourceType: controlledSourceType,
+  setModalSourceType: controlledSetSourceType,
 }) {
+  const [localSourceType, setLocalSourceType] = useState('ACCOUNT');
+  const modalSourceType = controlledSourceType !== undefined ? controlledSourceType : localSourceType;
+  const setModalSourceType = controlledSetSourceType || setLocalSourceType;
+
   if (!modalState.isOpen || !['account', 'card', 'category', 'scenario'].includes(modalState.type)) {
     return null;
   }

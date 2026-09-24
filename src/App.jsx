@@ -4759,6 +4759,7 @@ export default function App() {
             monthlyEnvelopes={monthlyEnvelopes}
             projectionSort={projectionSort}
             setProjectionSort={setProjectionSort}
+            currentMemberId={currentMemberId}
           />
         )}
 
@@ -4827,6 +4828,9 @@ export default function App() {
         handleSaveAccount={handleSaveAccount}
         handleSaveCard={handleSaveCard}
         handleSaveCategory={handleSaveCategory}
+        currentMemberId={currentMemberId}
+        modalSourceType={modalSourceType}
+        setModalSourceType={setModalSourceType}
       />
 
       <TransactionModal
@@ -4850,10 +4854,12 @@ export default function App() {
         setFormRecurringMonths={setFormRecurringMonths}
         isSubmittingTx={isSubmittingTx}
         handleSaveTransaction={handleSaveTransaction}
+        handleQuickPayTransaction={handleQuickPayTransaction}
         accounts={accounts}
         cards={cards}
         categories={categories}
         currentUser={currentUser}
+        currentMemberId={currentMemberId}
       />
 
       <DeleteTransactionModal

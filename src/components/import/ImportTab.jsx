@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatMoney, formatDateBR } from '../../utils/formatters';
+import { FAMILY_MEMBERS } from '../../data/constants';
 
 export default function ImportTab({
   cards = [],

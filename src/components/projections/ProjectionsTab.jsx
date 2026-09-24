@@ -31,6 +31,7 @@ export default function ProjectionsTab({
   monthlyEnvelopes = [],
   projectionSort = { field: 'month', direction: 'asc' },
   setProjectionSort,
+  currentMemberId = 'user-all',
 }) {
   return (
           <div className="space-y-6">

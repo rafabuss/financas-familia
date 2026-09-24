@@ -1,16 +1,43 @@
 import React from 'react';
-import { CreditCard, Calendar, AlertTriangle, X, CheckCircle2, Clock } from 'lucide-react';
+import { CreditCard, Calendar, AlertTriangle, X, CheckCircle2, Clock, Edit2, RotateCcw } from 'lucide-react';
 import { formatMoney, formatDateBR, formatMonthLabel } from '../../utils/formatters';
 
 export function InvoicePaymentModal({
   invoicePaymentModal,
   setInvoicePaymentModal,
   handleConfirmInvoicePayment,
+  handleRevertInvoicePayment,
   accounts = [],
   accountBalances = {},
   visibleTransactions = [],
   categories = [],
 }) {
+  const isEditMode = invoicePaymentModal.mode === 'edit';
+  const paymentTx = invoicePaymentModal.paymentTx;
+
+  const currentAccountId = paymentTx?.accountId || accounts[0]?.id || '';
+  const currentPaidAmount = paymentTx
+    ? (paymentTx.amountCents / 100).toFixed(2)
+    : (invoicePaymentModal.totalCents / 100).toFixed(2);
+  const currentPaymentDate = paymentTx?.date || new Date().toISOString().slice(0, 10);
+  const currentDescription =
+    paymentTx?.description ||
+    (invoicePaymentModal.card
+      ? `Pagamento Fatura ${invoicePaymentModal.card.name} (${formatMonthLabel(invoicePaymentModal.monthKey)})`
+      : '');
+
+  const resetModal = () =>
+    setInvoicePaymentModal({
+      isOpen: false,
+      card: null,
+      monthKey: '',
+      totalCents: 0,
+      monthItems: [],
+      dueDateIso: '',
+      mode: 'create',
+      paymentTx: null,
+    });
+
   return (
     <>
       {invoicePaymentModal.isOpen && invoicePaymentModal.card && (
@@ -18,11 +45,24 @@ export function InvoicePaymentModal({
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-4 border-b border-slate-100">
               <div className="flex items-center space-x-2">
-                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
-                  <CreditCard className="w-5 h-5" />
+                <div
+                  className={`p-2 rounded-xl ${
+                    isEditMode ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
+                  }`}
+                >
+                  {isEditMode ? <Edit2 className="w-5 h-5" /> : <CreditCard className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Pagamento de Fatura do Cartão</h3>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      {isEditMode ? 'Editar Pagamento de Fatura' : 'Pagamento de Fatura do Cartão'}
+                    </h3>
+                    {isEditMode && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 uppercase tracking-wide">
+                        Modo Edição
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500">
                     {invoicePaymentModal.card.name} • Competência: {formatMonthLabel(invoicePaymentModal.monthKey)}
                   </p>
@@ -30,23 +70,18 @@ export function InvoicePaymentModal({
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  setInvoicePaymentModal({
-                    isOpen: false,
-                    card: null,
-                    monthKey: '',
-                    totalCents: 0,
-                    monthItems: [],
-                    dueDateIso: '',
-                  })
-                }
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                onClick={resetModal}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmInvoicePayment} className="space-y-4 pt-4">
+            <form
+              key={`${invoicePaymentModal.card.id}-${invoicePaymentModal.monthKey}-${isEditMode ? 'edit' : 'create'}-${paymentTx?.id || 'new'}`}
+              onSubmit={handleConfirmInvoicePayment}
+              className="space-y-4 pt-4"
+            >
               {/* Box resumo da fatura */}
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                 <div className="flex justify-between items-center text-xs">
@@ -77,8 +112,8 @@ export function InvoicePaymentModal({
                 <select
                   name="accountId"
                   required
-                  defaultValue={accounts[0]?.id || ''}
-                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  defaultValue={currentAccountId}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
                 >
                   {accounts.length === 0 ? (
                     <option value="">Nenhuma conta cadastrada</option>
@@ -90,6 +125,11 @@ export function InvoicePaymentModal({
                     ))
                   )}
                 </select>
+                {isEditMode && (
+                  <p className="text-[11px] text-blue-600 mt-1">
+                    ℹ️ Se trocar a conta, o saldo da conta anterior será estornado e o novo pagamento será debitado da nova conta.
+                  </p>
+                )}
               </div>
 
               {/* Data e Valor do Pagamento */}
@@ -102,7 +142,7 @@ export function InvoicePaymentModal({
                     type="date"
                     name="paymentDate"
                     required
-                    defaultValue={new Date().toISOString().slice(0, 10)}
+                    defaultValue={currentPaymentDate}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   />
                 </div>
@@ -116,7 +156,7 @@ export function InvoicePaymentModal({
                     step="0.01"
                     name="paidAmount"
                     required
-                    defaultValue={(invoicePaymentModal.totalCents / 100).toFixed(2)}
+                    defaultValue={currentPaidAmount}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   />
                 </div>
@@ -133,43 +173,63 @@ export function InvoicePaymentModal({
                 <input
                   type="text"
                   name="description"
-                  defaultValue={`Pagamento Fatura ${invoicePaymentModal.card.name} (${formatMonthLabel(invoicePaymentModal.monthKey)})`}
+                  defaultValue={currentDescription}
                   className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
               </div>
 
-              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
-                <p className="font-semibold">Ao confirmar o pagamento:</p>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                  <li>O valor informado será debitado da conta bancária selecionada.</li>
-                  <li>Todos os {invoicePaymentModal.monthItems.length} lançamentos desta fatura serão marcados como <strong>Realizado</strong>.</li>
-                  <li>A fatura passará para a situação <strong>Paga</strong>.</li>
-                </ul>
-              </div>
+              {isEditMode ? (
+                <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-800 space-y-1">
+                  <p className="font-semibold">Atualização de Pagamento:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                    <li>Alterar a conta bancária recalcula automaticamente os saldos de ambas as contas.</li>
+                    <li>O valor e a data atualizados serão refletidos imediatamente no extrato e relatórios.</li>
+                  </ul>
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
+                  <p className="font-semibold">Ao confirmar o pagamento:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                    <li>O valor informado será debitado da conta bancária selecionada.</li>
+                    <li>Todos os {invoicePaymentModal.monthItems.length} lançamentos desta fatura serão marcados como <strong>Realizado</strong>.</li>
+                    <li>A fatura passará para a situação <strong>Paga</strong>.</li>
+                  </ul>
+                </div>
+              )}
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setInvoicePaymentModal({
-                      isOpen: false,
-                      card: null,
-                      monthKey: '',
-                      totalCents: 0,
-                      monthItems: [],
-                      dueDateIso: '',
-                    })
-                  }
-                  className="px-4 py-2 border border-slate-300 rounded-xl text-sm text-slate-700 hover:bg-slate-50 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition active:scale-95 shadow-sm"
-                >
-                  Confirmar Pagamento
-                </button>
+              <div className="pt-3 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                {isEditMode && handleRevertInvoicePayment ? (
+                  <button
+                    type="button"
+                    onClick={() => handleRevertInvoicePayment(invoicePaymentModal.card, invoicePaymentModal.monthKey)}
+                    className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs sm:text-sm font-semibold transition active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+                    title="Estornar o pagamento desta fatura"
+                  >
+                    <RotateCcw className="w-4 h-4 text-amber-600" />
+                    <span>Desfazer Pagamento</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+                <div className="flex items-center space-x-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={resetModal}
+                    className="px-4 py-2 border border-slate-300 rounded-xl text-sm text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className={`px-5 py-2 text-white rounded-xl text-sm font-semibold transition active:scale-95 shadow-sm cursor-pointer ${
+                      isEditMode
+                        ? 'bg-blue-600 hover:bg-blue-700'
+                        : 'bg-emerald-600 hover:bg-emerald-700'
+                    }`}
+                  >
+                    {isEditMode ? 'Salvar Alterações' : 'Confirmar Pagamento'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

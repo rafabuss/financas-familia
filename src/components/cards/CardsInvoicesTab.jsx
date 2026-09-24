@@ -11,6 +11,7 @@ import {
   CreditCard,
   Trash2,
   Edit2,
+  RotateCcw,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, formatMonthLabel, getTxDueDate } from '../../utils/formatters';
 
@@ -24,8 +25,10 @@ export default function CardsInvoicesTab({
   currentActualMonth,
   openInvoicePaymentModal,
   handleOpenDeleteInvoiceModal,
+  handleRevertInvoicePayment,
   openTransactionModal,
   categories = [],
+  accounts = [],
   setActiveTab,
   setModalState,
 }) {
@@ -128,7 +131,7 @@ export default function CardsInvoicesTab({
             <div key={card.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
               <div className="flex flex-col md:flex-row justify-between md:items-center pb-4 border-b border-slate-100 gap-4">
                 <div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: card.color || '#1e293b' }} />
                     <h3 className="text-base font-bold text-slate-900">{card.name}</h3>
                     <span className="text-xs text-slate-500">({card.bank} • {card.flag})</span>
@@ -150,18 +153,60 @@ export default function CardsInvoicesTab({
                       {info.invoiceStatus === 'ABERTA' && <Clock className="w-3 h-3 text-blue-600" />}
                       <span>FATURA {info.invoiceStatus}</span>
                     </span>
+
+                    {/* Botões contextuais ao lado do status quando PAGA */}
+                    {info.isPaid && (
+                      <div className="flex items-center space-x-1.5 ml-1">
+                        <button
+                          type="button"
+                          onClick={() => openInvoicePaymentModal(card, invoiceSelectedMonth, 'edit')}
+                          className="px-2 py-0.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                          title="Editar conta de débito ou dados do pagamento"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>Editar Pagamento</span>
+                        </button>
+                        {handleRevertInvoicePayment && (
+                          <button
+                            type="button"
+                            onClick={() => handleRevertInvoicePayment(card, invoiceSelectedMonth)}
+                            className="px-2 py-0.5 text-xs font-semibold rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                            title="Desfazer/estornar este pagamento"
+                          >
+                            <RotateCcw className="w-3 h-3 text-amber-600" />
+                            <span>Desfazer</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Fechamento todo dia <strong>{card.closingDay}</strong> • Vencimento todo dia <strong>{card.dueDay}</strong>
-                    {info.dueDateIso && (
-                      <span className="ml-2 font-medium text-slate-600">
-                        (Vence em: {formatDateBR(info.dueDateIso)})
+
+                  {/* Informação visual de qual conta foi debitada e datas */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
+                    <span>
+                      Fechamento todo dia <strong>{card.closingDay}</strong> • Vencimento todo dia <strong>{card.dueDay}</strong>
+                      {info.dueDateIso && (
+                        <span className="ml-1 font-medium text-slate-600">
+                          (Vence em: {formatDateBR(info.dueDateIso)})
+                        </span>
+                      )}
+                    </span>
+                    {info.isPaid && (
+                      <span className="inline-flex items-center text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        {info.paymentTx ? (
+                          <>
+                            ✓ Pago via <strong>{accounts.find((a) => a.id === info.paymentTx.accountId)?.name || 'Conta bancária'}</strong>
+                            {info.paymentTx.date && ` em ${formatDateBR(info.paymentTx.date)}`}
+                          </>
+                        ) : (
+                          '✓ Fatura Paga'
+                        )}
                       </span>
                     )}
-                  </p>
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2 sm:space-x-3">
                   <div className="text-left md:text-right">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                       VALOR DESTA FATURA
@@ -178,20 +223,41 @@ export default function CardsInvoicesTab({
                     )}
                   </div>
 
-                  {info.invoiceTotalCents > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => openInvoicePaymentModal(card, invoiceSelectedMonth)}
-                      className={`text-xs sm:text-sm font-semibold px-4 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 shadow-sm whitespace-nowrap cursor-pointer ${
-                        info.isPaid
-                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      }`}
-                      title="Efetuar débito na conta bancária e quitar faturas"
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>{info.isPaid ? 'Novo Pagamento' : 'Pagar Fatura'}</span>
-                    </button>
+                  {info.isPaid ? (
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => openInvoicePaymentModal(card, invoiceSelectedMonth, 'edit')}
+                        className="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 shadow-sm whitespace-nowrap bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 cursor-pointer"
+                        title="Editar conta de débito ou valor deste pagamento"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                        <span>Editar Pagamento</span>
+                      </button>
+                      {handleRevertInvoicePayment && (
+                        <button
+                          type="button"
+                          onClick={() => handleRevertInvoicePayment(card, invoiceSelectedMonth)}
+                          className="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 shadow-sm whitespace-nowrap bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 cursor-pointer"
+                          title="Estornar o pagamento desta fatura"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>Desfazer</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    info.invoiceTotalCents > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openInvoicePaymentModal(card, invoiceSelectedMonth, 'create')}
+                        className="text-xs sm:text-sm font-semibold px-4 py-2 rounded-xl flex items-center space-x-1.5 transition active:scale-95 shadow-sm whitespace-nowrap bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                        title="Efetuar débito na conta bancária e quitar fatura"
+                      >
+                        <CreditCard className="w-4 h-4" />
+                        <span>Pagar Fatura</span>
+                      </button>
+                    )
                   )}
 
                   {(info.monthItems.length > 0 || info.paymentTx) && (

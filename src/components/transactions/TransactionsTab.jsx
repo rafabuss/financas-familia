@@ -792,9 +792,30 @@ export default function TransactionsTab({
                             <span className="text-purple-700 font-bold block text-xs sm:text-sm">
                               💳 {tx.card?.name}
                             </span>
-                            {tx.isPaid && tx.paymentTx && (
-                              <span className="text-[11px] text-emerald-600 block">
-                                Pago via {accounts.find((a) => a.id === tx.paymentTx.accountId)?.name || 'Conta bancária'}
+                            {tx.isPaid ? (
+                              <div className="flex items-center space-x-1 mt-0.5">
+                                <span className="text-[11px] text-emerald-700 font-medium">
+                                  {tx.paymentTx ? (
+                                    <>
+                                      Pago via <strong>{accounts.find((a) => a.id === tx.paymentTx.accountId)?.name || 'Conta bancária'}</strong>
+                                      {tx.paymentTx.date && ` (${formatDateBR(tx.paymentTx.date)})`}
+                                    </>
+                                  ) : (
+                                    'Fatura Quitada'
+                                  )}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => openInvoicePaymentModal(tx.card, tx.monthKey, 'edit')}
+                                  className="text-slate-400 hover:text-blue-600 p-0.5 rounded transition cursor-pointer"
+                                  title="Editar pagamento desta fatura"
+                                >
+                                  <Edit2 className="w-3 h-3 inline" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                Aguardando pagamento
                               </span>
                             )}
                           </td>
@@ -842,10 +863,20 @@ export default function TransactionsTab({
                           {/* 7. Ações */}
                           <td className="py-3 px-4 text-center">
                             <div className="flex items-center justify-center space-x-1.5">
-                              {!tx.isPaid && (
+                              {tx.isPaid ? (
                                 <button
                                   type="button"
-                                  onClick={() => openInvoicePaymentModal(tx.card, tx.monthKey)}
+                                  onClick={() => openInvoicePaymentModal(tx.card, tx.monthKey, 'edit')}
+                                  className="px-2 py-1 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 flex items-center space-x-1 transition active:scale-95 shadow-2xs cursor-pointer"
+                                  title="Editar pagamento da fatura (trocar conta bancária, data ou valor)"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                  <span>Editar Pgto</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => openInvoicePaymentModal(tx.card, tx.monthKey, 'create')}
                                   className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center space-x-1 transition active:scale-95 shadow-2xs cursor-pointer"
                                   title="Pagar e quitar esta fatura debitando de uma conta bancária"
                                 >

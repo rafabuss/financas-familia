@@ -673,6 +673,8 @@ export default function App() {
     totalCents: 0,
     monthItems: [],
     dueDateIso: '',
+    mode: 'create',
+    paymentTx: null,
   });
 
   // Modal informativo para tentativa de quitação avulsa de compra de cartão
@@ -3321,7 +3323,7 @@ export default function App() {
   };
 
   // Abre o modal de pagamento da fatura consolidada de um cartão para um determinado mês
-  const openInvoicePaymentModal = (card, monthKey) => {
+  const openInvoicePaymentModal = (card, monthKey, requestedMode = null) => {
     if (!card) return;
     const allCardTxs = visibleTransactions.filter((t) => t.cardId === card.id && t.status !== 'CANCELADO');
     const monthItems = allCardTxs.filter((t) => {
@@ -3336,17 +3338,29 @@ export default function App() {
     const dueDayPadded = String(Math.min(28, card.dueDay || 10)).padStart(2, '0');
     const dueDateIso = `${monthKey}-${dueDayPadded}`;
 
+    const paymentTx = visibleTransactions.find(
+      (t) =>
+        t.isInvoicePayment &&
+        t.targetCardId === card.id &&
+        t.invoiceMonth === monthKey &&
+        t.status !== 'CANCELADO'
+    );
+
+    const mode = requestedMode || (paymentTx ? 'edit' : 'create');
+
     setInvoicePaymentModal({
       isOpen: true,
       card,
       monthKey,
-      totalCents,
+      totalCents: totalCents || paymentTx?.amountCents || 0,
       monthItems,
       dueDateIso,
+      mode,
+      paymentTx: paymentTx || null,
     });
   };
 
-  // Confirmação do pagamento da fatura com débito da conta bancária e quitação dos lançamentos
+  // Confirmação do pagamento da fatura com débito da conta bancária e quitação dos lançamentos (ou edição)
   const handleConfirmInvoicePayment = (e) => {
     e.preventDefault();
     const card = invoicePaymentModal.card;
@@ -3371,51 +3385,91 @@ export default function App() {
       fd.get('description') ||
       `Pagamento Fatura ${card.name} (${formatMonthLabel(invoicePaymentModal.monthKey)})`;
 
-    // 1. Quitar todos os lançamentos vinculados a esta fatura
-    const monthItemIds = new Set(invoicePaymentModal.monthItems.map((i) => i.id));
-    const updatedMonthItems = [];
+    const isEditMode = invoicePaymentModal.mode === 'edit';
+    const existingPaymentTx =
+      invoicePaymentModal.paymentTx ||
+      transactions.find(
+        (t) =>
+          t.isInvoicePayment &&
+          t.targetCardId === card.id &&
+          t.invoiceMonth === invoicePaymentModal.monthKey &&
+          t.status !== 'CANCELADO'
+      );
 
-    // 2. Transação de saída bancária para quitar a fatura
-    const paymentTx = {
-      id: `tx-invoice-pay-${card.id}-${invoicePaymentModal.monthKey}-${Date.now()}`,
-      description,
-      amountCents: paidAmountCents,
-      type: 'EXPENSE',
-      status: 'REALIZADO',
-      date: paymentDate,
-      dueDate: paymentDate,
-      accountId,
-      cardId: null,
-      targetCardId: card.id,
-      isInvoicePayment: true,
-      invoiceMonth: invoicePaymentModal.monthKey,
-      categoryId:
-        categories.find(
-          (c) =>
-            c.name.toLowerCase().includes('cart') ||
-            c.name.toLowerCase().includes('pagamento') ||
-            c.name.toLowerCase().includes('financ')
-        )?.id || categories[0]?.id || null,
-      scope: card.scope || 'FAMILY',
-      ownerId: card.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
-    };
+    if (isEditMode && existingPaymentTx) {
+      // 1. Atualizar transação de pagamento existente
+      const updatedPaymentTx = {
+        ...existingPaymentTx,
+        accountId,
+        amountCents: paidAmountCents,
+        date: paymentDate,
+        dueDate: paymentDate,
+        description,
+        _localUpdatedAt: Date.now(),
+      };
 
-    const updatedTransactions = transactions.map((t) => {
-      if (monthItemIds.has(t.id)) {
-        const u = { ...t, status: 'REALIZADO' };
-        updatedMonthItems.push(u);
-        return u;
-      }
-      return t;
-    });
+      const monthItemIds = new Set(invoicePaymentModal.monthItems.map((i) => i.id));
+      const updatedMonthItems = [];
 
-    updatedTransactions.unshift(paymentTx);
+      const updatedTransactions = transactions.map((t) => {
+        if (t.id === existingPaymentTx.id) {
+          return updatedPaymentTx;
+        }
+        if (monthItemIds.has(t.id) && t.status !== 'REALIZADO') {
+          const u = { ...t, status: 'REALIZADO', _localUpdatedAt: Date.now() };
+          updatedMonthItems.push(u);
+          return u;
+        }
+        return t;
+      });
 
-    setTransactions(updatedTransactions);
-    saveToLocalStorage('financas_transactions_v1', updatedTransactions);
+      setTransactions(updatedTransactions);
+      saveToLocalStorage(STORAGE_KEYS.transactions, updatedTransactions);
+      syncBatchTransactions([updatedPaymentTx, ...updatedMonthItems]);
+    } else {
+      // 2. Novo pagamento de fatura
+      const monthItemIds = new Set(invoicePaymentModal.monthItems.map((i) => i.id));
+      const updatedMonthItems = [];
 
-    // Sincronização
-    syncBatchTransactions([...updatedMonthItems, paymentTx]);
+      const paymentTx = {
+        id: `tx-invoice-pay-${card.id}-${invoicePaymentModal.monthKey}-${Date.now()}`,
+        description,
+        amountCents: paidAmountCents,
+        type: 'EXPENSE',
+        status: 'REALIZADO',
+        date: paymentDate,
+        dueDate: paymentDate,
+        accountId,
+        cardId: null,
+        targetCardId: card.id,
+        isInvoicePayment: true,
+        invoiceMonth: invoicePaymentModal.monthKey,
+        categoryId:
+          categories.find(
+            (c) =>
+              c.name.toLowerCase().includes('cart') ||
+              c.name.toLowerCase().includes('pagamento') ||
+              c.name.toLowerCase().includes('financ')
+          )?.id || categories[0]?.id || null,
+        scope: card.scope || 'FAMILY',
+        ownerId: card.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
+      };
+
+      const updatedTransactions = transactions.map((t) => {
+        if (monthItemIds.has(t.id)) {
+          const u = { ...t, status: 'REALIZADO' };
+          updatedMonthItems.push(u);
+          return u;
+        }
+        return t;
+      });
+
+      updatedTransactions.unshift(paymentTx);
+
+      setTransactions(updatedTransactions);
+      saveToLocalStorage(STORAGE_KEYS.transactions, updatedTransactions);
+      syncBatchTransactions([...updatedMonthItems, paymentTx]);
+    }
 
     setInvoicePaymentModal({
       isOpen: false,
@@ -3424,6 +3478,65 @@ export default function App() {
       totalCents: 0,
       monthItems: [],
       dueDateIso: '',
+      mode: 'create',
+      paymentTx: null,
+    });
+  };
+
+  // Estornar / Desfazer pagamento de uma fatura de cartão
+  const handleRevertInvoicePayment = (card, monthKey) => {
+    if (!card || !monthKey) return;
+    const confirmEstorno = window.confirm(
+      `Deseja estornar o pagamento da fatura de "${card.name}" (${formatMonthLabel(monthKey)})?\n\n• O débito na conta bancária será cancelado e o saldo restaurado.\n• As compras vinculadas voltarão para a situação "Comprometido".`
+    );
+    if (!confirmEstorno) return;
+
+    // 1. Localizar transação de pagamento de fatura
+    const paymentTx = transactions.find(
+      (t) =>
+        t.isInvoicePayment &&
+        t.targetCardId === card.id &&
+        t.invoiceMonth === monthKey &&
+        t.status !== 'CANCELADO'
+    );
+
+    // 2. Reverter os lançamentos da fatura para COMPROMETIDO
+    const revertedMonthItems = [];
+    const updatedTransactions = transactions
+      .filter((t) => !paymentTx || t.id !== paymentTx.id)
+      .map((t) => {
+        if (t.cardId === card.id && t.status === 'REALIZADO') {
+          const due = getTxDueDate(t) || t.date;
+          if (due && due.startsWith(monthKey)) {
+            const reverted = { ...t, status: 'COMPROMETIDO', _localUpdatedAt: Date.now() };
+            revertedMonthItems.push(reverted);
+            return reverted;
+          }
+        }
+        return t;
+      });
+
+    setTransactions(updatedTransactions);
+    saveToLocalStorage(STORAGE_KEYS.transactions, updatedTransactions);
+
+    // Sincronização
+    if (paymentTx) {
+      syncItem('transactions', paymentTx, true);
+    }
+    if (revertedMonthItems.length > 0) {
+      syncBatchTransactions(revertedMonthItems);
+    }
+
+    // Fechar modal de pagamento se estiver aberto
+    setInvoicePaymentModal({
+      isOpen: false,
+      card: null,
+      monthKey: '',
+      totalCents: 0,
+      monthItems: [],
+      dueDateIso: '',
+      mode: 'create',
+      paymentTx: null,
     });
   };
 
@@ -3972,17 +4085,19 @@ export default function App() {
 
       // Tratamento especial para Fatura Mestre (Consolidada)
       if (t.isInvoiceMaster) {
-        // 1. Busca por texto livre (verifica a fatura e todos os itens aninhados nela)
+        // 1. Busca por texto livre (verifica a fatura, conta debitada e todos os itens aninhados nela)
         if (searchTerm.trim()) {
           const term = searchTerm.toLowerCase();
           const masterMatch = (t.description || '').toLowerCase().includes(term) || (t.card?.name || '').toLowerCase().includes(term);
+          const debitedAcc = accounts.find((a) => a.id === t.accountId);
+          const accMatch = debitedAcc && (debitedAcc.name.toLowerCase().includes(term) || (debitedAcc.bank || '').toLowerCase().includes(term));
           const hasItemMatch = t.items.some((item) => {
             const desc = (item.description || '').toLowerCase();
             const catName = categories.find((c) => c.id === item.categoryId)?.name?.toLowerCase() || '';
             const purchaseBR = item.purchaseDate ? formatDateBR(item.purchaseDate).toLowerCase() : '';
             return desc.includes(term) || catName.includes(term) || purchaseBR.includes(term);
           });
-          if (!masterMatch && !hasItemMatch) return false;
+          if (!masterMatch && !accMatch && !hasItemMatch) return false;
         }
 
         // 2. Tipo (Fatura é saída/despesa contábil de caixa)
@@ -4466,8 +4581,10 @@ export default function App() {
             currentActualMonth={currentActualMonth}
             openInvoicePaymentModal={openInvoicePaymentModal}
             handleOpenDeleteInvoiceModal={handleOpenDeleteInvoiceModal}
+            handleRevertInvoicePayment={handleRevertInvoicePayment}
             openTransactionModal={openTransactionModal}
             categories={categories}
+            accounts={accounts}
             setActiveTab={setActiveTab}
             setModalState={setModalState}
           />
@@ -4686,6 +4803,7 @@ export default function App() {
         invoicePaymentModal={invoicePaymentModal}
         setInvoicePaymentModal={setInvoicePaymentModal}
         handleConfirmInvoicePayment={handleConfirmInvoicePayment}
+        handleRevertInvoicePayment={handleRevertInvoicePayment}
         accounts={accounts}
         accountBalances={accountBalances}
         visibleTransactions={visibleTransactions}

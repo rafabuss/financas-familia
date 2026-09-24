@@ -233,7 +233,13 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Criação de utilitários globais de formatação e regras de datas/vencimentos em `src/utils/formatters.js` e constantes em `src/data/constants.js`.
   - [x] Redução drástica da complexidade do `App.jsx` (de ~11.820 linhas para ~4.750 linhas) mantendo 100% de integridade funcional e visual com zero regressões.
 
-- [ ] **Fase 3.1: Refinamento de Interface & Layout Clean da Barra Superior (Navbar Polish)**
+- [x] **Fase 3.1: Gestão Completa de Pagamentos de Faturas (Edição, Estorno & Recálculo de Saldos)**
+  - [x] Possibilidade de **editar pagamentos de faturas já realizados** (trocar a conta bancária de débito, data e valor pago).
+  - [x] Recálculo dinâmico automático e imediato dos saldos das contas envolvidas (estorno da conta antiga e débito na nova conta informada).
+  - [x] Botão de **desfazer/estornar pagamento** de fatura, reabrindo os lançamentos vinculados como comprometidos.
+  - [x] Exibição transparente no Extrato e na aba de Cartões de qual conta bancária liquidou cada fatura.
+
+- [ ] **Fase 3.2: Refinamento de Interface & Layout Clean da Barra Superior (Navbar Polish)**
   - [ ] Redesenho da barra superior (`Navbar.jsx`) para dar destaque à marca e ao título "Finanças da Família".
   - [ ] Transformação de botões utilitários (Olho Mágico e Assistente IA) em IconButtons minimalistas com tooltips.
   - [ ] Unificação do perfil do usuário em um menu avatar suspenso moderno (avatar, nome, cargo e logout).

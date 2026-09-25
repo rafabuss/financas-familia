@@ -283,18 +283,20 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Visualização no Extrato (`TransactionsTab`):** Identificação clara com tag e ícone: `⇄ Transferência: [Itaú] ➔ [Nubank]`.
   - [x] **Integração com Extratos Dedicados:** Exibição precisa de débitos e créditos nas contas correspondentes com impacto no Saldo Progressivo.
 
-- [ ] **Fase 6: Módulo de Investimentos & Gestão Patrimonial (Cofrinhos vs. Ativos)**
-  - [ ] **Parte 1: Cofrinhos, Caixinhas & Reserva de Emergência (Liquidez e Renda Fixa):**
-    - Cadastro de cofrinhos e caixinhas (ex: Cofrinho Inter da esposa, Caixinhas Nubank, CDBs com liquidez diária).
-    - Fluxo de **Aporte Mensal** programado a partir da renda (utilizando o motor de transferência).
-    - Fluxo de **Resgate Imediato** para a conta corrente para cobrir despesas da família.
-    - Separação no Dashboard entre *Saldo Livre para o Mês* vs *Patrimônio Guardado*.
-  - [ ] **Parte 2: Carteira de Ativos & Renda Variável (Ações, FIIs, Criptomoedas e Tesouro):**
-    - Cadastro de ativos de investimento: código/ticker, quantidade de cotas/tokens e preço médio.
-    - Suporte a Criptomoedas (Bitcoin, Ethereum, etc.) no Nubank/corretoras.
-    - Suporte a Títulos do Tesouro Direto e Renda Fixa de médio/longo prazo.
-    - Suporte a Ações e Fundos Imobiliários (B3).
-    - Painel e gráfico de **Alocação de Patrimônio Líquido** (Renda Fixa, Ações, Cripto e Caixa).
+- [ ] **Fase 6.1: Cofrinhos, Caixinhas & Reserva de Emergência (Liquidez e Renda Fixa)**
+  - [ ] Cadastro de cofrinhos e caixinhas associados a contas (ex: Cofrinho Inter da esposa, Caixinhas Nubank, CDBs com liquidez diária).
+  - [ ] Metas opcionais de valor e rendimento estimado (ex: 100% CDI).
+  - [ ] Fluxo de **Aporte** a partir da conta corrente (utilizando o motor nativo de `TRANSFER`).
+  - [ ] Fluxo de **Resgate Imediato** para a conta corrente para cobrir despesas da família.
+  - [ ] Separação e totalizadores no Dashboard entre *Saldo Livre para o Mês* vs *Patrimônio Guardado / Reserva*.
+  - [ ] Extrato dedicado do Cofrinho (histórico de aportes, resgates e rendimentos).
+
+- [ ] **Fase 6.2: Carteira de Ativos & Renda Variável (Ações, FIIs, Criptomoedas e Tesouro)**
+  - [ ] Cadastro de ativos de investimento: código/ticker, quantidade de cotas/tokens e preço médio.
+  - [ ] Suporte a Criptomoedas (Bitcoin, Ethereum, etc.) no Nubank/corretoras.
+  - [ ] Suporte a Títulos do Tesouro Direto e Renda Fixa de médio/longo prazo.
+  - [ ] Suporte a Ações e Fundos Imobiliários (B3).
+  - [ ] Painel e gráfico de **Alocação de Patrimônio Líquido** (Renda Fixa, Ações, Cripto e Caixa).
 
 - [ ] **Fase 7: Importações Flexíveis & Conciliação Inteligente**
   - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).

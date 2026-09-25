@@ -624,13 +624,22 @@ export default function DashboardTab({
                     <div>
                       <div className="flex items-center space-x-2">
                         <p className="font-semibold text-sm text-slate-900">{tx.description}</p>
-                        <span
-                          className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                            tx.scope === 'PERSONAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
-                        </span>
+                        {tx.isMasked ? (
+                          <span
+                            className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-purple-100 text-purple-800 border border-purple-200"
+                            title={`Lançamento pessoal de ${tx.maskedOwnerName || 'outro membro'} — protegido por privacidade`}
+                          >
+                            🔒 Privado
+                          </span>
+                        ) : (
+                          <span
+                            className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                              tx.scope === 'PERSONAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
+                          </span>
+                        )}
                         {isOver && (
                           <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200 flex items-center space-x-1">
                             <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />

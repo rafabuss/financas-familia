@@ -106,14 +106,30 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 * **Nuvem (Supabase):** Tabelas PostgreSQL modeladas (`accounts`, `cards`, `categories`, `transactions`, `scenarios`, `monthly_envelopes`, `profiles`).
 * **Fallback e Modo Offline:** Suporte a LocalStorage para uso sem conexão ou sem configuração imediata de chaves Supabase, com fila de sincronização pendente.
 
+### 13. 👥 Multi-Tenancy Seguro & Row-Level Security (RLS)
+* **Isolamento por Família (`households` e `household_members`):** Cada família possui seu próprio espaço estritamente isolado. Nenhum usuário externo pode visualizar ou alterar dados de outra família.
+* **Adesão e Convites:** Novos usuários podem ingressar através de código de convite (com aprovação obrigatória do administrador) ou criar uma nova família independente como administrador titular.
+* **RLS Otimizado com Funções Escalares:** Políticas PostgreSQL ultra-rápidas utilizando a função `current_user_household_ids() RETURNS UUID[]` com verificação de array `= ANY(...)`.
+
+### 14. 🧠 Arquitetura Centralizada de Estado (`FinanceContext`)
+* **Eliminação de Prop Drilling Residual:** Toda a orquestração de dados, sincronização com a nuvem, listeners de rede e 100% dos cálculos financeiros de alta fidelidade são centralizados em `src/contexts/FinanceContext.jsx`.
+* **Consumo Transparente (`useFinance`):** Componentes consom o contexto através de hooks reativos com alta performance de renderização.
+
+### 15. 🔒 Acesso Individual com Impacto Familiar ("Olho Amigo / Privacidade do Cônjuge")
+* **Autonomia com Transparência Financeira:** Cada membro pode registrar gastos pessoais marcados como privados (`PERSONAL_PRIVATE`).
+* **Preservação Contábil Absoluta:** O valor em centavos abate rigorosamente o saldo bancário, as faturas de cartão e os envelopes orçamentários da família.
+* **Mascaramento Protetor:** O cônjuge visualiza o lançamento no extrato como *"Gasto Pessoal de [Nome]"*, com categoria neutra e botões de edição/exclusão travados, preservando a intimidade individual sem comprometer a exatidão financeira da casa.
+
 ---
 
 ## 🏗️ Arquitetura Modular & Estrutura de Componentes
 
-Com a conclusão da **Fase 3**, o aplicativo foi totalmente desacoplado do arquivo monolítico original, adotando uma arquitetura modular orientada a responsabilidades, contratos explícitos de propriedades (*props*) e isolamento de efeitos colaterais:
+Com a conclusão da **Fase 4**, o aplicativo adota uma arquitetura em camadas orientada a responsabilidades, contratos explícitos de estado via `FinanceContext` e isolamento modular:
 
 ```
 src/
+├── contexts/
+│   └── FinanceContext.jsx             # Estado global, cálculos e sincronização híbrida
 ├── components/
 │   ├── layout/
 │   │   └── Navbar.jsx                 # Top bar, modo demo, Olho Mágico, seletor de membro, navegação
@@ -141,7 +157,7 @@ src/
 │   │   └── ExportsTab.jsx             # Backup em JSON, exportação para planilhas e restauração
 │   └── modals/
 │       ├── EntityModal.jsx            # Modal unificado para Contas, Cartões, Categorias e Cenários
-│       ├── TransactionModal.jsx       # Modal completo de lançamento (parcelas, recorrências)
+│       ├── TransactionModal.jsx       # Modal completo de lançamento (parcelas, recorrências, privacidade)
 │       ├── DeleteModals.jsx           # Modais de exclusão (transação única, parcelas em lote, fatura)
 │       ├── InvoicePaymentModal.jsx    # Liquidação de fatura com débito em conta bancária
 │       └── EnvelopeModals.jsx         # Programação mensal, conflito de tetos e exclusão de envelopes

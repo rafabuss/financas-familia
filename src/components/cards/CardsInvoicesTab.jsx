@@ -13,6 +13,7 @@ import {
   Trash2,
   Edit2,
   RotateCcw,
+  Lock,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, formatMonthLabel, getTxDueDate } from '../../utils/formatters';
 
@@ -381,11 +382,24 @@ export default function CardsInvoicesTab({
                                   {item.installmentNumber}/{item.installmentCount}
                                 </span>
                               )}
-                              {cat && (
+                              {item.isMasked ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-500 italic">
+                                  Gasto Pessoal
+                                </span>
+                              ) : cat ? (
                                 <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${cat.color}20`, color: cat.color }}>
                                   {cat.name}
                                 </span>
-                              )}
+                              ) : null}
+                              {item.isMasked ? (
+                                <span className="text-[9px] bg-purple-100 text-purple-800 border border-purple-200 px-1.5 py-0.2 rounded font-semibold flex items-center space-x-1" title={`Lançamento pessoal de ${item.maskedOwnerName || 'outro membro'} — protegido por privacidade`}>
+                                  <span>🔒 Privado</span>
+                                </span>
+                              ) : (item.visibility === 'PERSONAL_PRIVATE' || item.scope === 'PERSONAL') ? (
+                                <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-semibold">
+                                  👤 Pessoal
+                                </span>
+                              ) : null}
                               <span
                                 className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
                                   item.status === 'REALIZADO'
@@ -405,14 +419,20 @@ export default function CardsInvoicesTab({
                           </div>
                           <div className="flex items-center space-x-3">
                             <span className="font-bold text-sm text-slate-900">{formatMoney(item.amountCents)}</span>
-                            <button
-                              type="button"
-                              onClick={() => openTransactionModal('edit', item)}
-                              className="p-1 text-slate-400 hover:text-blue-600 rounded transition cursor-pointer"
-                              title="Editar lançamento"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
+                            {item.isMasked ? (
+                              <span className="p-1 text-slate-300 cursor-not-allowed" title={`Lançamento pessoal de ${item.maskedOwnerName || 'outro membro'} — protegido por privacidade`}>
+                                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openTransactionModal('edit', item)}
+                                className="p-1 text-slate-400 hover:text-blue-600 rounded transition cursor-pointer"
+                                title="Editar lançamento"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       );

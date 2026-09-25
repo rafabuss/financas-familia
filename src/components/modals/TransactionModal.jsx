@@ -118,31 +118,50 @@ export default function TransactionModal({
                   </div>
                 )}
 
-                {/* Seletor de Escopo: Familiar vs Pessoal */}
-                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Escopo do Lançamento</label>
-                    <select
-                      name="scope"
-                      defaultValue={modalState.data?.scope || 'FAMILY'}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
-                    >
-                      <option value="FAMILY">Familiar (Padrão - Todos Veem)</option>
-                      <option value="PERSONAL">Individual / Pessoal (Privado)</option>
-                    </select>
+                {/* Seletor de Escopo & Visibilidade (Privacidade / Olho Amigo) */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Titular / Responsável</label>
+                      <select
+                        name="ownerId"
+                        defaultValue={modalState.data?.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                      >
+                        <option value="user-1">Rafael</option>
+                        <option value="user-2">Ana Débora</option>
+                        <option value="user-all">Família (Geral)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Visibilidade & Privacidade</label>
+                      <select
+                        name="visibility"
+                        defaultValue={modalState.data?.visibility || (modalState.data?.scope === 'PERSONAL' ? 'PERSONAL_PRIVATE' : 'FAMILY')}
+                        onChange={(e) => {
+                          const scopeInput = document.getElementById('transaction-scope-hidden');
+                          if (scopeInput) {
+                            scopeInput.value = e.target.value === 'PERSONAL_PRIVATE' ? 'PERSONAL' : 'FAMILY';
+                          }
+                        }}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                      >
+                        <option value="FAMILY">👨‍👩‍👧‍👦 Compartilhado (Visível para todos)</option>
+                        <option value="PERSONAL_PRIVATE">🔒 Pessoal com Impacto Familiar (Privado)</option>
+                      </select>
+                      <input
+                        type="hidden"
+                        id="transaction-scope-hidden"
+                        name="scope"
+                        defaultValue={modalState.data?.scope || 'FAMILY'}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Titular / Responsável</label>
-                    <select
-                      name="ownerId"
-                      defaultValue={modalState.data?.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId)}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
-                    >
-                      <option value="user-1">Rafael</option>
-                      <option value="user-2">Ana Débora</option>
-                      <option value="user-all">Família (Geral)</option>
-                    </select>
-                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed bg-white/70 p-2 rounded-lg border border-slate-200/60">
+                    💡 <strong>Impacto Familiar:</strong> Mesmo em lançamentos privados, o valor monetário abate o saldo e os envelopes da família com precisão. O cônjuge visualizará apenas um débito neutro (ex: <em>"Gasto Pessoal de Rafael"</em>), preservando a autonomia individual sem romper a transparência financeira.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

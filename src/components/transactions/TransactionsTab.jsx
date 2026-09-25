@@ -20,8 +20,8 @@ import {
   Sparkles,
   Check,
   Receipt,
-  FileText,
   Info,
+  Lock,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, getTxDueDate, isTxOverdue } from '../../utils/formatters';
 
@@ -1105,17 +1105,26 @@ export default function TransactionsTab({
                                         <span>Recorrente</span>
                                       </span>
                                     )}
-                                    {item.scope === 'PERSONAL' && (
+                                    {item.isMasked ? (
+                                      <span className="text-[9px] bg-purple-100 text-purple-800 border border-purple-200 px-1.5 py-0.2 rounded font-semibold flex items-center space-x-1" title="Lançamento pessoal protegido por privacidade">
+                                        <span>🔒 Pessoal (Privado)</span>
+                                      </span>
+                                    ) : (item.visibility === 'PERSONAL_PRIVATE' || item.scope === 'PERSONAL') ? (
                                       <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-semibold">
                                         👤 Pessoal
                                       </span>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </td>
 
                                 {/* 3. Categoria */}
                                 <td className="py-2.5 px-4 text-slate-600">
-                                  {itemCat ? (
+                                  {item.isMasked ? (
+                                    <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs text-slate-500 italic bg-slate-100/70 font-medium">
+                                      <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+                                      <span>Gasto Pessoal</span>
+                                    </span>
+                                  ) : itemCat ? (
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -1166,22 +1175,33 @@ export default function TransactionsTab({
                                 {/* 7. Ações */}
                                 <td className="py-2.5 px-4 text-center">
                                   <div className="flex items-center justify-center space-x-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => openTransactionModal('edit', item)}
-                                      className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition cursor-pointer"
-                                      title="Editar esta compra"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteTransaction(item)}
-                                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
-                                      title="Excluir esta compra da fatura"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    {item.isMasked ? (
+                                      <span
+                                        className="p-1 text-slate-300 cursor-not-allowed flex items-center justify-center"
+                                        title={`Lançamento pessoal de ${item.maskedOwnerName || 'outro membro'} — protegido por privacidade`}
+                                      >
+                                        <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => openTransactionModal('edit', item)}
+                                          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition cursor-pointer"
+                                          title="Editar esta compra"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteTransaction(item)}
+                                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                                          title="Excluir esta compra da fatura"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -1237,11 +1257,15 @@ export default function TransactionsTab({
                       <td className="py-3 px-4 font-medium text-slate-900">
                         <div className="flex items-center space-x-2">
                           <span>{tx.description}</span>
-                          {tx.scope === 'PERSONAL' && (
+                          {tx.isMasked ? (
+                            <span className="text-[9px] bg-purple-100 text-purple-800 border border-purple-200 px-1.5 py-0.2 rounded font-semibold flex items-center space-x-1" title={`Lançamento pessoal de ${tx.maskedOwnerName || 'outro membro'} — protegido por privacidade`}>
+                              <span>🔒 Pessoal (Privado)</span>
+                            </span>
+                          ) : (tx.visibility === 'PERSONAL_PRIVATE' || tx.scope === 'PERSONAL') ? (
                             <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-semibold whitespace-nowrap">
                               👤 Pessoal
                             </span>
-                          )}
+                          ) : null}
                           {isOverdue && (
                             <span className="text-[10px] bg-rose-100 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded font-bold flex items-center space-x-1" title="Lançamento com vencimento em atraso">
                               <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
@@ -1264,7 +1288,12 @@ export default function TransactionsTab({
 
                       {/* 3. Categoria */}
                       <td className="py-3 px-4 text-slate-600">
-                        {cat ? (
+                        {tx.isMasked ? (
+                          <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs text-slate-500 italic bg-slate-100/70 font-medium">
+                            <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+                            <span>Gasto Pessoal</span>
+                          </span>
+                        ) : cat ? (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1295,6 +1324,14 @@ export default function TransactionsTab({
                           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center space-x-1 bg-purple-100 text-purple-800 border border-purple-200 w-fit">
                             <Sparkles className="w-3 h-3 text-purple-600" />
                             <span>Hipotético</span>
+                          </span>
+                        ) : tx.isMasked ? (
+                          <span
+                            className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center space-x-1 bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed w-fit"
+                            title={`Lançamento pessoal de ${tx.maskedOwnerName || 'outro membro'} — protegido por privacidade`}
+                          >
+                            <Lock className="w-3 h-3 text-slate-400" />
+                            <span>{tx.status}</span>
                           </span>
                         ) : (
                           <button
@@ -1359,6 +1396,14 @@ export default function TransactionsTab({
                             <Sparkles className="w-3.5 h-3.5 text-blue-600" />
                             <span>Tornar Real</span>
                           </button>
+                        ) : tx.isMasked ? (
+                          <div
+                            className="flex items-center justify-center space-x-1 text-slate-400 py-1"
+                            title={`Lançamento pessoal de ${tx.maskedOwnerName || 'outro membro'} — protegido por privacidade`}
+                          >
+                            <Lock className="w-3.5 h-3.5 text-purple-600" />
+                            <span className="text-[11px] font-medium text-slate-500">Privado</span>
+                          </div>
                         ) : (
                           <div className="flex items-center justify-center space-x-1.5">
                             {/* Ação Explícita de Quitação / Pagamento / Recebimento */}

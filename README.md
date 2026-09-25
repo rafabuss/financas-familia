@@ -269,28 +269,40 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Extrato por Cartão de Crédito:** Atalho nos cards de cartões para visualizar o histórico de compras e parcelas exclusivas do cartão selecionado.
   - [x] **Extrato por Categoria / Envelope:** Possibilidade de clicar em qualquer envelope ou categoria (ex: "Supermercado") e abrir a listagem imediata de todos os gastos daquele grupo no mês.
 
-- [ ] **Fase 4: Multi-Tenancy, Arquitetura de Estado (`FinanceContext`) & "Acesso Individual com Impacto Familiar"**
-  - [ ] Introdução do `FinanceContext` (React Context) para eliminar o *prop drilling* remanescente do `App.jsx` e centralizar o estado.
-  - [ ] Modelagem de Multi-Tenancy no Supabase (`households` e `household_members`).
-  - [ ] Políticas rigorosas de Row-Level Security (RLS) no PostgreSQL, impedindo vazamento de dados entre famílias.
-  - [ ] **Diferencial Matador:** Lançamentos Pessoais Privados (visíveis com detalhes apenas para quem gastou, mas computados no saldo e apresentados de forma agregada para o cônjuge).
-  - [ ] Sistema de convites por e-mail com papéis de Administrador e Membro da família.
+- [x] **Fase 4: Multi-Tenancy, Arquitetura de Estado (`FinanceContext`) & "Acesso Individual com Impacto Familiar"**
+  - [x] Introdução do `FinanceContext` (React Context) para eliminar o *prop drilling* remanescente do `App.jsx` e centralizar o estado.
+  - [x] Modelagem de Multi-Tenancy no Supabase (`households` e `household_members`).
+  - [x] Políticas rigorosas de Row-Level Security (RLS) no PostgreSQL, impedindo vazamento de dados entre famílias.
+  - [x] **Diferencial Matador:** Lançamentos Pessoais Privados (visíveis com detalhes apenas para quem gastou, mas computados no saldo e apresentados de forma agregada para o cônjuge).
+  - [x] Sistema de convites por e-mail com papéis de Administrador e Membro da família.
 
-- [ ] **Fase 5: Transferências entre Contas (Pix) & Módulo de Cofrinhos / Metas / Investimentos**
-  - [ ] **Tipo Nativo `TRANSFER` (Transferência entre Contas):** Lançamentos que movimentam saldo entre conta de origem e conta de destino (ex: Pix do Itaú para o Nubank para pagamento de fatura) sem inflar artificialmente as receitas ou despesas da família.
-  - [ ] **Módulo de Cofrinhos / Caixinhas / Metas de Poupança:**
-    - Cadastro de cofrinhos/caixinhas associados a contas (ex: Cofrinho Inter, Caixinhas Nubank, Tesouro Direto, CDBs).
-    - Aporte programado a partir da renda mensal (destinar valores da renda para a meta/cofrinho).
-    - Resgate e transferência de valores de volta para a conta corrente para uso imediato.
-    - Acompanhamento de evolução patrimonial, saldo acumulado e rendimento das metas.
+- [ ] **Fase 5: Transferências entre Contas (Pix & TED)**
+  - [ ] **Tipo Nativo `TRANSFER` (Transferência entre Contas):** Lançamentos que movimentam saldo entre conta de origem e conta de destino (ex: Pix do Itaú para o Nubank para pagamento de fatura ou entre contas da família).
+  - [ ] **Proteção de Métricas & DRE:** Transferências ajustam os saldos bancários envolvidos mas **NÃO** inflam as Receitas nem as Despesas do mês.
+  - [ ] **Interface no Modal de Lançamentos (`TransactionModal`):** Aba dedicada "Transferência" com seleção de Conta de Origem e Conta de Destino.
+  - [ ] **Visualização no Extrato (`TransactionsTab`):** Identificação clara com tag e ícone: `⇄ Transferência: [Itaú] ➔ [Nubank]`.
+  - [ ] **Integração com Extratos Dedicados:** Exibição precisa de débitos e créditos nas contas correspondentes com impacto no Saldo Progressivo.
 
-- [ ] **Fase 6: Importações Flexíveis & Conciliação Inteligente**
+- [ ] **Fase 6: Módulo de Investimentos & Gestão Patrimonial (Cofrinhos vs. Ativos)**
+  - [ ] **Parte 1: Cofrinhos, Caixinhas & Reserva de Emergência (Liquidez e Renda Fixa):**
+    - Cadastro de cofrinhos e caixinhas (ex: Cofrinho Inter da esposa, Caixinhas Nubank, CDBs com liquidez diária).
+    - Fluxo de **Aporte Mensal** programado a partir da renda (utilizando o motor de transferência).
+    - Fluxo de **Resgate Imediato** para a conta corrente para cobrir despesas da família.
+    - Separação no Dashboard entre *Saldo Livre para o Mês* vs *Patrimônio Guardado*.
+  - [ ] **Parte 2: Carteira de Ativos & Renda Variável (Ações, FIIs, Criptomoedas e Tesouro):**
+    - Cadastro de ativos de investimento: código/ticker, quantidade de cotas/tokens e preço médio.
+    - Suporte a Criptomoedas (Bitcoin, Ethereum, etc.) no Nubank/corretoras.
+    - Suporte a Títulos do Tesouro Direto e Renda Fixa de médio/longo prazo.
+    - Suporte a Ações e Fundos Imobiliários (B3).
+    - Painel e gráfico de **Alocação de Patrimônio Líquido** (Renda Fixa, Ações, Cripto e Caixa).
+
+- [ ] **Fase 7: Importações Flexíveis & Conciliação Inteligente**
   - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).
   - [ ] **Conciliação Híbrida Inteligente:** Motor que detecta despesas manuais já cadastradas e sugere a unificação com os lançamentos bancários importados, sem duplicações.
   - [ ] Edição, recategorização e divisão (*split*) livre de qualquer lançamento importado.
   - [ ] Preparação da arquitetura para futura conexão direta via Open Finance (Pluggy / Belvo).
 
-- [ ] **Fase 7: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
+- [ ] **Fase 8: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
   - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).
   - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
   - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.

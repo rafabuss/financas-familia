@@ -355,6 +355,13 @@ export function FinanceProvider({ children }) {
                 return cloudTx;
               });
 
+            // Se a nuvem retornou 0 transações mas o usuário já tem transações no cache local,
+            // evita sobrescrever destrutivamente para se proteger de race conditions de autenticação
+            if (healedTransactions.length === 0 && (prevLocalTxs || []).length > 0) {
+              console.warn('[FinanceContext] Nuvem retornou 0 lançamentos. Mantendo cache local existente para segurança.');
+              return prevLocalTxs;
+            }
+
             // Preserva transações locais que ainda não foram sincronizadas com a nuvem (exceto as deletadas recentemente)
             const cloudIds = new Set(healedTransactions.map((t) => t.id));
             (prevLocalTxs || []).forEach((lt) => {
@@ -386,7 +393,15 @@ export function FinanceProvider({ children }) {
   // 1. Carregamento inicial de dados (ignorado no modo demo pois os dados já estão em memória)
   useEffect(() => {
     if (isDemoModeState || isDemoMode()) return;
-    reloadDataFromCloud();
+    if (isSupabaseConfigured() && supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          reloadDataFromCloud();
+        }
+      });
+    } else {
+      reloadDataFromCloud();
+    }
   }, [currentUser, reloadDataFromCloud, isDemoModeState]);
 
   // Auto-cura preventiva de parcelas de cartão com competência distorcida ao carregar a aplicação
@@ -835,14 +850,8 @@ export function FinanceProvider({ children }) {
         // Apenas lançamentos de escopo familiar compartilhado
         return t.scope === 'FAMILY' && t.visibility !== 'PERSONAL_PRIVATE';
       }
-      if (currentMemberId === 'user-1') {
-        // Apenas lançamentos do membro Rafael
-        return t.ownerId === 'user-1';
-      }
-      if (currentMemberId === 'user-2') {
-        // Apenas lançamentos da membra Ana Débora
-        return t.ownerId === 'user-2';
-      }
+      // Para um membro específico (ex: user-1 Rafael ou user-2 Ana Débora):
+      // Exibe os lançamentos familiares compartilhados + os lançamentos próprios do membro
       return t.scope === 'FAMILY' || t.ownerId === currentMemberId;
     });
 

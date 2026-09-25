@@ -105,19 +105,26 @@ export const accountToClient = (row) => ({
   color: row.color || '#2563eb',
   archived: Boolean(row.archived),
   ownerId: row.owner_id || row.ownerId || 'user-all',
+  householdId: row.household_id || row.householdId || null,
 });
 
-export const accountToDb = (acc) => ({
-  id: acc.id,
-  name: acc.name,
-  bank: acc.bank,
-  type: acc.type,
-  initial_balance_cents: acc.initialBalanceCents,
-  holder: acc.holder,
-  color: acc.color,
-  archived: acc.archived,
-  owner_id: acc.ownerId,
-});
+export const accountToDb = (acc) => {
+  const obj = {
+    id: acc.id,
+    name: acc.name,
+    bank: acc.bank,
+    type: acc.type,
+    initial_balance_cents: acc.initialBalanceCents,
+    holder: acc.holder,
+    color: acc.color,
+    archived: acc.archived,
+    owner_id: acc.ownerId,
+  };
+  if (acc.householdId || acc.household_id) {
+    obj.household_id = acc.householdId || acc.household_id;
+  }
+  return obj;
+};
 
 export const cardToClient = (row) => ({
   id: row.id,
@@ -130,20 +137,27 @@ export const cardToClient = (row) => ({
   color: row.color || '#1e293b',
   archived: Boolean(row.archived),
   ownerId: row.owner_id || row.ownerId || 'user-all',
+  householdId: row.household_id || row.householdId || null,
 });
 
-export const cardToDb = (c) => ({
-  id: c.id,
-  name: c.name,
-  bank: c.bank,
-  flag: c.flag,
-  limit_cents: c.limitCents,
-  closing_day: c.closingDay,
-  due_day: c.dueDay,
-  color: c.color,
-  archived: c.archived,
-  owner_id: c.ownerId,
-});
+export const cardToDb = (c) => {
+  const obj = {
+    id: c.id,
+    name: c.name,
+    bank: c.bank,
+    flag: c.flag,
+    limit_cents: c.limitCents,
+    closing_day: c.closingDay,
+    due_day: c.dueDay,
+    color: c.color,
+    archived: c.archived,
+    owner_id: c.ownerId,
+  };
+  if (c.householdId || c.household_id) {
+    obj.household_id = c.householdId || c.household_id;
+  }
+  return obj;
+};
 
 export const categoryToClient = (row) => ({
   id: row.id,
@@ -153,17 +167,24 @@ export const categoryToClient = (row) => ({
   archived: Boolean(row.archived),
   budgetLimitCents: Number(row.budget_limit_cents ?? row.budgetLimitCents ?? 0),
   parentId: row.parent_id || row.parentId || null,
+  householdId: row.household_id || row.householdId || null,
 });
 
-export const categoryToDb = (cat) => ({
-  id: cat.id,
-  name: cat.name,
-  type: cat.type,
-  color: cat.color,
-  archived: cat.archived,
-  budget_limit_cents: Number(cat.budgetLimitCents || 0),
-  parent_id: cat.parentId || null,
-});
+export const categoryToDb = (cat) => {
+  const obj = {
+    id: cat.id,
+    name: cat.name,
+    type: cat.type,
+    color: cat.color,
+    archived: cat.archived,
+    budget_limit_cents: Number(cat.budgetLimitCents || 0),
+    parent_id: cat.parentId || null,
+  };
+  if (cat.householdId || cat.household_id) {
+    obj.household_id = cat.householdId || cat.household_id;
+  }
+  return obj;
+};
 
 export const transactionToClient = (row) => {
   const recRule = row.recurrence_rule_id || row.recurrenceRuleId || '';
@@ -226,6 +247,7 @@ export const transactionToClient = (row) => {
         : (row.recurrence_rule_id || row.recurrenceRuleId || null),
     isInvoicePayment,
     invoiceMonth,
+    householdId: row.household_id || row.householdId || null,
   };
 };
 
@@ -240,7 +262,7 @@ export const transactionToDb = (tx) => {
     recurrenceRuleId = `PURCHASE_DATE:${tx.purchaseDate}`;
   }
 
-  return {
+  const obj = {
     id: tx.id,
     description: tx.description,
     amount_cents: tx.amountCents,
@@ -259,6 +281,10 @@ export const transactionToDb = (tx) => {
     is_recurring: Boolean(tx.isRecurring),
     recurrence_rule_id: recurrenceRuleId,
   };
+  if (tx.householdId || tx.household_id) {
+    obj.household_id = tx.householdId || tx.household_id;
+  }
+  return obj;
 };
 
 export const scenarioToClient = (row) => ({
@@ -280,24 +306,31 @@ export const scenarioToClient = (row) => ({
     ignoredExpenses: [],
     categoryReductions: [],
   },
+  householdId: row.household_id || row.householdId || null,
 });
 
-export const scenarioToDb = (scen) => ({
-  id: scen.id,
-  title: scen.title,
-  type: scen.type,
-  monthly_impact_cents: scen.monthlyImpactCents,
-  months: scen.months,
-  start_date: scen.startDate,
-  category_id: scen.categoryId || null,
-  source_type: scen.sourceType,
-  account_id: scen.accountId || null,
-  card_id: scen.cardId || null,
-  scope: scen.scope,
-  owner_id: scen.ownerId,
-  active: scen.active,
-  adjustments: scen.adjustments || null,
-});
+export const scenarioToDb = (scen) => {
+  const obj = {
+    id: scen.id,
+    title: scen.title,
+    type: scen.type,
+    monthly_impact_cents: scen.monthlyImpactCents,
+    months: scen.months,
+    start_date: scen.startDate,
+    category_id: scen.categoryId || null,
+    source_type: scen.sourceType,
+    account_id: scen.accountId || null,
+    card_id: scen.cardId || null,
+    scope: scen.scope,
+    owner_id: scen.ownerId,
+    active: scen.active,
+    adjustments: scen.adjustments || null,
+  };
+  if (scen.householdId || scen.household_id) {
+    obj.household_id = scen.householdId || scen.household_id;
+  }
+  return obj;
+};
 
 export const monthlyEnvelopeToClient = (row) => ({
   id: row.id,
@@ -306,15 +339,22 @@ export const monthlyEnvelopeToClient = (row) => ({
   amountCents: Number(row.amount_cents ?? row.amountCents ?? 0),
   ruleId: row.rule_id || row.ruleId || null,
   createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+  householdId: row.household_id || row.householdId || null,
 });
 
-export const monthlyEnvelopeToDb = (env) => ({
-  id: env.id,
-  category_id: env.categoryId,
-  month_key: env.monthKey,
-  amount_cents: env.amountCents,
-  rule_id: env.ruleId || null,
-});
+export const monthlyEnvelopeToDb = (env) => {
+  const obj = {
+    id: env.id,
+    category_id: env.categoryId,
+    month_key: env.monthKey,
+    amount_cents: env.amountCents,
+    rule_id: env.ruleId || null,
+  };
+  if (env.householdId || env.household_id) {
+    obj.household_id = env.householdId || env.household_id;
+  }
+  return obj;
+};
 
 // ==========================================
 // CARREGAMENTO INICIAL UNIFICADO
@@ -449,44 +489,59 @@ export const loadInitialAppData = async (defaults = {}) => {
 
       // 3. Contas, Cartões, Transações e Cenários
       const isAccSuccess = !accRes?.error && Array.isArray(accRes?.data);
-      const accounts = isAccSuccess ? accRes.data.map(accountToClient) : getLocal(STORAGE_KEYS.accounts, []);
-      if (isAccSuccess) localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(accounts));
+      const localAccs = getLocal(STORAGE_KEYS.accounts, []);
+      const accounts = isAccSuccess && (accRes.data.length > 0 || localAccs.length === 0)
+        ? accRes.data.map(accountToClient)
+        : localAccs;
+      if (isAccSuccess && (accRes.data.length > 0 || localAccs.length === 0)) {
+        localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(accounts));
+      }
 
       const isCardSuccess = !cardRes?.error && Array.isArray(cardRes?.data);
-      const cards = isCardSuccess ? cardRes.data.map(cardToClient) : getLocal(STORAGE_KEYS.cards, []);
-      if (isCardSuccess) localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(cards));
+      const localCards = getLocal(STORAGE_KEYS.cards, []);
+      const cards = isCardSuccess && (cardRes.data.length > 0 || localCards.length === 0)
+        ? cardRes.data.map(cardToClient)
+        : localCards;
+      if (isCardSuccess && (cardRes.data.length > 0 || localCards.length === 0)) {
+        localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(cards));
+      }
 
       const isTxSuccess = !txRes?.error && Array.isArray(txRes?.data);
       let transactions = [];
       if (isTxSuccess) {
-        const cloudTxs = txRes.data.map(transactionToClient);
-        const localTxsMap = new Map((localTxs || []).map((t) => [t.id, t]));
-        const pendingTxIds = new Set(getPendingTransactions());
+        if (txRes.data.length === 0 && (localTxs || []).length > 0) {
+          console.warn('[FinanceService] Nuvem retornou 0 transações com cache local preenchido. Preservando cache local.');
+          transactions = (localTxs || []).map(transactionToClient);
+        } else {
+          const cloudTxs = txRes.data.map(transactionToClient);
+          const localTxsMap = new Map((localTxs || []).map((t) => [t.id, t]));
+          const pendingTxIds = new Set(getPendingTransactions());
 
-        // Mescla inteligente: se o lançamento local tem edição pendente ou localUpdatedAt recente, preserva a versão local do usuário!
-        const mergedCloudTxs = cloudTxs.map((cTx) => {
-          const lTx = localTxsMap.get(cTx.id);
-          if (lTx && (pendingTxIds.has(lTx.id) || (lTx._localUpdatedAt && Date.now() - lTx._localUpdatedAt < 15000))) {
-            return { ...cTx, ...lTx };
+          // Mescla inteligente: se o lançamento local tem edição pendente ou localUpdatedAt recente, preserva a versão local do usuário!
+          const mergedCloudTxs = cloudTxs.map((cTx) => {
+            const lTx = localTxsMap.get(cTx.id);
+            if (lTx && (pendingTxIds.has(lTx.id) || (lTx._localUpdatedAt && Date.now() - lTx._localUpdatedAt < 15000))) {
+              return { ...cTx, ...lTx };
+            }
+            return cTx;
+          });
+
+          const cloudTxIds = new Set(cloudTxs.map((t) => t.id));
+          const unmergedLocalTxs = (localTxs || []).filter((t) => !cloudTxIds.has(t.id) && (pendingTxIds.has(t.id) || (t._localUpdatedAt && Date.now() - t._localUpdatedAt < 60000)));
+          transactions = [...mergedCloudTxs, ...unmergedLocalTxs];
+          const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(transactions, cards);
+          transactions = healedTransactions;
+          localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(transactions));
+          if (hasChanges && changedTxs.length > 0) {
+            syncBatchTransactions(changedTxs).catch(console.warn);
           }
-          return cTx;
-        });
 
-        const cloudTxIds = new Set(cloudTxs.map((t) => t.id));
-        const unmergedLocalTxs = (localTxs || []).filter((t) => !cloudTxIds.has(t.id) && (pendingTxIds.has(t.id) || (t._localUpdatedAt && Date.now() - t._localUpdatedAt < 60000)));
-        transactions = [...mergedCloudTxs, ...unmergedLocalTxs];
-        const { healedTransactions, hasChanges, changedTxs } = healMigratedInvoiceTransactions(transactions, cards);
-        transactions = healedTransactions;
-        localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(transactions));
-        if (hasChanges && changedTxs.length > 0) {
-          syncBatchTransactions(changedTxs).catch(console.warn);
-        }
-
-        // Re-sincronizar transações locais pendentes em segundo plano
-        if (pendingTxIds.size > 0) {
-          const txsToSync = transactions.filter((t) => pendingTxIds.has(t.id));
-          if (txsToSync.length > 0) {
-            syncBatchTransactions(txsToSync).catch(console.warn);
+          // Re-sincronizar transações locais pendentes em segundo plano
+          if (pendingTxIds.size > 0) {
+            const txsToSync = transactions.filter((t) => pendingTxIds.has(t.id));
+            if (txsToSync.length > 0) {
+              syncBatchTransactions(txsToSync).catch(console.warn);
+            }
           }
         }
       } else {

@@ -221,16 +221,24 @@ export const transactionToClient = (row) => {
     purchaseDate = recRule.replace('PURCHASE_DATE:', '').slice(0, 10);
   }
 
+  let destinationAccountId = row.destination_account_id || row.destinationAccountId || null;
+  if (!destinationAccountId && typeof recRule === 'string' && recRule.startsWith('TRANSFER_DEST:')) {
+    destinationAccountId = recRule.replace('TRANSFER_DEST:', '').trim();
+  }
+
+  const txType = row.type || (destinationAccountId ? 'TRANSFER' : 'EXPENSE');
+
   return {
     id: row.id,
     description: row.description,
     amountCents: Number(row.amount_cents ?? row.amountCents ?? 0),
-    type: row.type || 'EXPENSE',
-    status: row.status || 'COMPROMETIDO',
+    type: txType,
+    status: row.status || (txType === 'TRANSFER' ? 'REALIZADO' : 'COMPROMETIDO'),
     date: row.date,
     dueDate: dueDate || row.date,
     purchaseDate: purchaseDate || row.date,
     accountId: row.account_id || row.accountId || null,
+    destinationAccountId,
     cardId: row.card_id || row.cardId || null,
     targetCardId,
     categoryId: row.category_id || row.categoryId || null,
@@ -242,7 +250,11 @@ export const transactionToClient = (row) => {
     installmentCount: row.installment_count ? Number(row.installment_count) : null,
     isRecurring: Boolean(row.is_recurring ?? row.isRecurring),
     recurrenceRuleId:
-      isInvoicePayment || (typeof recRule === 'string' && (recRule.startsWith('PURCHASE_DATE:') || recRule.startsWith('INVOICE_PAY:')))
+      isInvoicePayment ||
+      (typeof recRule === 'string' &&
+        (recRule.startsWith('PURCHASE_DATE:') ||
+         recRule.startsWith('INVOICE_PAY:') ||
+         recRule.startsWith('TRANSFER_DEST:')))
         ? null
         : (row.recurrence_rule_id || row.recurrenceRuleId || null),
     isInvoicePayment,
@@ -260,6 +272,9 @@ export const transactionToDb = (tx) => {
   } else if (!recurrenceRuleId && tx.purchaseDate && tx.cardId && tx.purchaseDate !== tx.date) {
     // Para compras de cartão cujo purchaseDate difere do vencimento contábil da fatura (date)
     recurrenceRuleId = `PURCHASE_DATE:${tx.purchaseDate}`;
+  } else if (!recurrenceRuleId && tx.type === 'TRANSFER' && tx.destinationAccountId) {
+    // Backup de destino em recurrence_rule_id para sobreviver a esquemas sem a coluna
+    recurrenceRuleId = `TRANSFER_DEST:${tx.destinationAccountId}`;
   }
 
   const obj = {
@@ -270,6 +285,7 @@ export const transactionToDb = (tx) => {
     status: tx.status,
     date: tx.dueDate || tx.date,
     account_id: tx.accountId || null,
+    destination_account_id: tx.destinationAccountId || null,
     card_id: tx.cardId || null,
     category_id: tx.categoryId || null,
     scope: tx.scope,
@@ -862,6 +878,38 @@ export const syncItem = async (entity, item, isDelete = false) => {
             }
           }
 
+          // 2.1 Fallback para destination_account_id ou restrição CHECK de tipo TRANSFER (caso a migration ainda não tenha sido rodada no Supabase)
+          if (
+            entity === 'transactions' &&
+            (res.error.code === '42703' ||
+              res.error.code === '23514' ||
+              String(res.error.message || '').includes('destination_account_id') ||
+              String(res.error.message || '').includes('transactions_type_check'))
+          ) {
+            try {
+              const fallbackTx = { ...dbData };
+              if (String(res.error.message || '').includes('destination_account_id') || res.error.code === '42703') {
+                delete fallbackTx.destination_account_id;
+                if (!fallbackTx.recurrence_rule_id && item.destinationAccountId) {
+                  fallbackTx.recurrence_rule_id = `TRANSFER_DEST:${item.destinationAccountId}`;
+                }
+              }
+              if (String(res.error.message || '').includes('transactions_type_check') || (res.error.code === '23514' && fallbackTx.type === 'TRANSFER')) {
+                fallbackTx.type = 'EXPENSE';
+                if (!fallbackTx.recurrence_rule_id && item.destinationAccountId) {
+                  fallbackTx.recurrence_rule_id = `TRANSFER_DEST:${item.destinationAccountId}`;
+                }
+              }
+              const retryRes = await supabase.from('transactions').upsert(fallbackTx);
+              if (!retryRes?.error) {
+                clearTransactionPending(item.id);
+                return { success: true };
+              }
+            } catch (fbErr) {
+              console.warn('Falha no fallback de transferência para Supabase:', fbErr);
+            }
+          }
+
           // 3. Fallback para cenários caso coluna adjustments não exista no Supabase (código 42703)
           if (entity === 'scenarios' && (res.error.code === '42703' || String(res.error.message || '').includes('adjustments'))) {
             const { adjustments, ...fallbackScen } = dbData;
@@ -932,6 +980,35 @@ export const syncBatchTransactions = async (txList, isDelete = false) => {
 
       let res = await supabase.from('transactions').upsert(dbList);
       if (res?.error) {
+        if (
+          res.error.code === '42703' ||
+          res.error.code === '23514' ||
+          String(res.error.message || '').includes('destination_account_id') ||
+          String(res.error.message || '').includes('transactions_type_check')
+        ) {
+          const fallbackList = dbList.map((dbData, idx) => {
+            const copy = { ...dbData };
+            const origItem = txList[idx];
+            if (copy.destination_account_id) {
+              if (!copy.recurrence_rule_id && origItem?.destinationAccountId) {
+                copy.recurrence_rule_id = `TRANSFER_DEST:${origItem.destinationAccountId}`;
+              }
+              delete copy.destination_account_id;
+            }
+            if (copy.type === 'TRANSFER') {
+              copy.type = 'EXPENSE';
+              if (!copy.recurrence_rule_id && origItem?.destinationAccountId) {
+                copy.recurrence_rule_id = `TRANSFER_DEST:${origItem.destinationAccountId}`;
+              }
+            }
+            return copy;
+          });
+          const retryRes = await supabase.from('transactions').upsert(fallbackList);
+          if (!retryRes?.error) {
+            txList.forEach((t) => clearTransactionPending(t.id));
+            return { success: true };
+          }
+        }
         console.warn('Erro ao sincronizar lote de transações no Supabase:', res.error.message);
         return { success: false, error: res.error };
       }

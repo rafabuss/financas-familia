@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS public.cards (
 CREATE TABLE IF NOT EXISTS public.categories (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL DEFAULT 'EXPENSE' CHECK (type IN ('INCOME', 'EXPENSE')),
+  type TEXT NOT NULL DEFAULT 'EXPENSE' CHECK (type IN ('INCOME', 'EXPENSE', 'TRANSFER')),
   color TEXT NOT NULL DEFAULT '#475569',
   archived BOOLEAN NOT NULL DEFAULT FALSE,
   budget_limit_cents BIGINT NOT NULL DEFAULT 0,
@@ -66,10 +66,11 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   id TEXT PRIMARY KEY,
   description TEXT NOT NULL,
   amount_cents BIGINT NOT NULL,
-  type TEXT NOT NULL DEFAULT 'EXPENSE' CHECK (type IN ('INCOME', 'EXPENSE')),
+  type TEXT NOT NULL DEFAULT 'EXPENSE' CHECK (type IN ('INCOME', 'EXPENSE', 'TRANSFER')),
   status TEXT NOT NULL DEFAULT 'COMPROMETIDO' CHECK (status IN ('REALIZADO', 'COMPROMETIDO', 'PREVISTO', 'HIPOTETICO')),
   date TEXT NOT NULL,
   account_id TEXT REFERENCES public.accounts(id) ON DELETE SET NULL,
+  destination_account_id TEXT REFERENCES public.accounts(id) ON DELETE SET NULL,
   card_id TEXT REFERENCES public.cards(id) ON DELETE SET NULL,
   category_id TEXT REFERENCES public.categories(id) ON DELETE SET NULL,
   scope TEXT NOT NULL DEFAULT 'FAMILY' CHECK (scope IN ('FAMILY', 'PERSONAL')),
@@ -81,6 +82,9 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   recurrence_rule_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Garante a coluna destination_account_id em instalações prévias
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS destination_account_id TEXT REFERENCES public.accounts(id) ON DELETE SET NULL;
 
 -- 6. Tabela de Cenários & Simulações ("What-If")
 CREATE TABLE IF NOT EXISTS public.scenarios (
@@ -119,6 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions(date);
 CREATE INDEX IF NOT EXISTS idx_transactions_scope ON public.transactions(scope);
 CREATE INDEX IF NOT EXISTS idx_transactions_owner ON public.transactions(owner_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON public.transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_dest_account ON public.transactions(destination_account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_card ON public.transactions(card_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_group ON public.transactions(installment_group_id);
 CREATE INDEX IF NOT EXISTS idx_monthly_envelopes_month ON public.monthly_envelopes(month_key);
@@ -138,7 +143,8 @@ VALUES
   ('cat-5', 'Educação & Cursos', 'EXPENSE', '#7c3aed', false),
   ('cat-6', 'Saúde & Farmácia', 'EXPENSE', '#e11d48', false),
   ('cat-7', 'Lazer & Restaurantes', 'EXPENSE', '#0284c7', false),
-  ('cat-8', 'Transporte & Combustível', 'EXPENSE', '#475569', false)
+  ('cat-8', 'Transporte & Combustível', 'EXPENSE', '#475569', false),
+  ('cat-transferencia', 'Transferência entre Contas', 'TRANSFER', '#0284c7', false)
 ON CONFLICT (id) DO NOTHING;
 
 -- Contas Iniciais (Opcional - Mantido comentado para iniciar o banco 100% limpo)

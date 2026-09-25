@@ -640,6 +640,11 @@ export default function DashboardTab({
                             {tx.scope === 'PERSONAL' ? 'Pessoal' : 'Familiar'}
                           </span>
                         )}
+                        {tx.type === 'TRANSFER' && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-sky-100 text-sky-800 border border-sky-200">
+                            Transferência
+                          </span>
+                        )}
                         {isOver && (
                           <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200 flex items-center space-x-1">
                             <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />
@@ -666,8 +671,19 @@ export default function DashboardTab({
                         </span>
                       </div>
                     </div>
-                    <div className={`font-bold text-sm ${tx.type === 'INCOME' ? 'text-emerald-600' : isOver ? 'text-rose-600' : 'text-slate-900'}`}>
-                      {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
+                    <div
+                      className={`font-bold text-sm ${
+                        tx.type === 'TRANSFER'
+                          ? 'text-sky-700'
+                          : tx.type === 'INCOME'
+                          ? 'text-emerald-600'
+                          : isOver
+                          ? 'text-rose-600'
+                          : 'text-slate-900'
+                      }`}
+                    >
+                      {tx.type === 'TRANSFER' ? '⇄ ' : tx.type === 'INCOME' ? '+ ' : '- '}
+                      {formatMoney(tx.amountCents)}
                     </div>
                   </div>
                 );

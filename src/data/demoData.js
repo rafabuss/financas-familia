@@ -52,6 +52,9 @@ export const DEMO_M_PLUS_8 = getRelativeMonthKey(8);
 // 1. CATEGORIAS E SUBCATEGORIAS COM METAS (ENVELOPES)
 // ==============================================================================
 export const DEMO_CATEGORIES = [
+  // Categoria Técnica Padrão para Transferências
+  { id: 'cat-transferencia', name: 'Transferência entre Contas', type: 'TRANSFER', color: '#0284c7', archived: false, budgetLimitCents: 0, parentId: null },
+
   // Receitas
   { id: 'cat-salario', name: 'Salário & Pró-Labore', type: 'INCOME', color: '#16a34a', archived: false, budgetLimitCents: 0, parentId: null },
   { id: 'cat-renda-extra', name: 'Renda Extra & Consultoria', type: 'INCOME', color: '#0d9488', archived: false, budgetLimitCents: 0, parentId: null },
@@ -962,6 +965,38 @@ export const DEMO_TRANSACTIONS = [
   // ============================================================================
   // MÊS CORRENTE: M0 (Mês Atual em Andamento)
   // ============================================================================
+  // --- TRANSFERÊNCIAS ENTRE CONTAS (PIX / TED) ---
+  {
+    id: 'demo-tx-transfer-1',
+    description: 'Pix para Reserva de Emergência',
+    amountCents: 150000,
+    type: 'TRANSFER',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 10),
+    dueDate: getRelativeDate(0, 10),
+    accountId: 'demo-acc-1',
+    destinationAccountId: 'demo-acc-2',
+    categoryId: 'cat-transferencia',
+    scope: 'FAMILY',
+    visibility: 'FAMILY',
+    ownerId: 'user-1',
+  },
+  {
+    id: 'demo-tx-transfer-2',
+    description: 'Pix Agendado para Inter',
+    amountCents: 60000,
+    type: 'TRANSFER',
+    status: 'PREVISTO',
+    date: getRelativeDate(0, 28),
+    dueDate: getRelativeDate(0, 28),
+    accountId: 'demo-acc-1',
+    destinationAccountId: 'demo-acc-4',
+    categoryId: 'cat-transferencia',
+    scope: 'FAMILY',
+    visibility: 'FAMILY',
+    ownerId: 'user-1',
+  },
+
   // --- RECEITAS DO MÊS ATUAL ---
   {
     id: 'demo-tx-inc-1',

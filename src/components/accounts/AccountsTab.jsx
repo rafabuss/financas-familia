@@ -6,6 +6,7 @@ import {
   Trash2,
   Receipt,
   CreditCard,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { formatMoney } from '../../utils/formatters';
 
@@ -15,6 +16,7 @@ export default function AccountsTab({
   visibleCards = [],
   cardStats = {},
   setModalState,
+  openTransactionModal,
   toggleArchiveAccount,
   handleDeleteAccount,
   toggleArchiveCard,
@@ -26,18 +28,31 @@ export default function AccountsTab({
     <div className="space-y-8">
       {/* Contas */}
       <div className="space-y-4">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Contas Bancárias e Carteiras</h2>
             <p className="text-xs text-slate-500">Cadastre e edite contas correntes e reservas</p>
           </div>
-          <button
-            onClick={() => setModalState({ isOpen: true, type: 'account', mode: 'create', data: null })}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 cursor-pointer shadow-sm transition active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nova Conta</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            {openTransactionModal && (
+              <button
+                type="button"
+                onClick={() => openTransactionModal(null, 'TRANSFER')}
+                className="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1.5 cursor-pointer shadow-sm transition active:scale-95"
+                title="Transferir saldo entre contas (Pix / TED)"
+              >
+                <ArrowLeftRight className="w-4 h-4" />
+                <span>Transferir / Pix</span>
+              </button>
+            )}
+            <button
+              onClick={() => setModalState({ isOpen: true, type: 'account', mode: 'create', data: null })}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 cursor-pointer shadow-sm transition active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nova Conta</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -54,12 +69,23 @@ export default function AccountsTab({
                 <p className="text-xs text-slate-500">{acc.bank} • Titular: <strong>{acc.holder}</strong></p>
               </div>
 
-              <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
+              <div className="mt-5 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-semibold">Saldo Atual</span>
                   <p className="text-lg font-bold text-slate-900">{formatMoney(accountBalances[acc.id] || 0)}</p>
                 </div>
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                  {openTransactionModal && (
+                    <button
+                      type="button"
+                      onClick={() => openTransactionModal({ accountId: acc.id }, 'TRANSFER')}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
+                      title={`Fazer transferência / Pix a partir de ${acc.name}`}
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Pix</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onNavigateToAccountStatement && onNavigateToAccountStatement(acc.id)}
@@ -67,7 +93,7 @@ export default function AccountsTab({
                     title="Ver Extrato completo com saldo progressivo"
                   >
                     <Receipt className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Ver Extrato</span>
+                    <span>Extrato</span>
                   </button>
                   <button
                     onClick={() => setModalState({ isOpen: true, type: 'account', mode: 'edit', data: acc })}

@@ -94,9 +94,24 @@ export function DeleteTransactionModal({
                       <p className="text-xs text-slate-500 mt-0.5">
                         Data: {formatDateBR(tx.date)}
                       </p>
+                      {tx.type === 'TRANSFER' && (
+                        <p className="text-xs text-sky-700 font-medium mt-1">
+                          ⇄ {accounts.find((a) => a.id === tx.accountId)?.name || 'Conta de Origem'} ➔{' '}
+                          {accounts.find((a) => a.id === tx.destinationAccountId)?.name || 'Conta de Destino'}
+                        </p>
+                      )}
                     </div>
-                    <span className={`text-sm font-bold ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                      {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
+                    <span
+                      className={`text-sm font-bold ${
+                        tx.type === 'TRANSFER'
+                          ? 'text-sky-700'
+                          : tx.type === 'INCOME'
+                          ? 'text-emerald-600'
+                          : 'text-slate-900'
+                      }`}
+                    >
+                      {tx.type === 'TRANSFER' ? '⇄ ' : tx.type === 'INCOME' ? '+ ' : '- '}
+                      {formatMoney(tx.amountCents)}
                     </span>
                   </div>
                 </div>

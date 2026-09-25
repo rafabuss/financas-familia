@@ -415,6 +415,7 @@ function AppContent() {
             visibleCards={visibleCards}
             cardStats={cardStats}
             setModalState={setModalState}
+            openTransactionModal={openTransactionModal}
             toggleArchiveAccount={toggleArchiveAccount}
             handleDeleteAccount={handleDeleteAccount}
             toggleArchiveCard={toggleArchiveCard}

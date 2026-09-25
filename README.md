@@ -276,12 +276,12 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Diferencial Matador:** Lançamentos Pessoais Privados (visíveis com detalhes apenas para quem gastou, mas computados no saldo e apresentados de forma agregada para o cônjuge).
   - [x] Sistema de convites por e-mail com papéis de Administrador e Membro da família.
 
-- [ ] **Fase 5: Transferências entre Contas (Pix & TED)**
-  - [ ] **Tipo Nativo `TRANSFER` (Transferência entre Contas):** Lançamentos que movimentam saldo entre conta de origem e conta de destino (ex: Pix do Itaú para o Nubank para pagamento de fatura ou entre contas da família).
-  - [ ] **Proteção de Métricas & DRE:** Transferências ajustam os saldos bancários envolvidos mas **NÃO** inflam as Receitas nem as Despesas do mês.
-  - [ ] **Interface no Modal de Lançamentos (`TransactionModal`):** Aba dedicada "Transferência" com seleção de Conta de Origem e Conta de Destino.
-  - [ ] **Visualização no Extrato (`TransactionsTab`):** Identificação clara com tag e ícone: `⇄ Transferência: [Itaú] ➔ [Nubank]`.
-  - [ ] **Integração com Extratos Dedicados:** Exibição precisa de débitos e créditos nas contas correspondentes com impacto no Saldo Progressivo.
+- [x] **Fase 5: Transferências entre Contas (Pix & TED)**
+  - [x] **Tipo Nativo `TRANSFER` (Transferência entre Contas):** Lançamentos que movimentam saldo entre conta de origem e conta de destino (ex: Pix do Itaú para o Nubank para pagamento de fatura ou entre contas da família).
+  - [x] **Proteção de Métricas & DRE:** Transferências ajustam os saldos bancários envolvidos mas **NÃO** inflam as Receitas nem as Despesas do mês.
+  - [x] **Interface no Modal de Lançamentos (`TransactionModal`):** Aba dedicada "Transferência" com seleção de Conta de Origem e Conta de Destino.
+  - [x] **Visualização no Extrato (`TransactionsTab`):** Identificação clara com tag e ícone: `⇄ Transferência: [Itaú] ➔ [Nubank]`.
+  - [x] **Integração com Extratos Dedicados:** Exibição precisa de débitos e créditos nas contas correspondentes com impacto no Saldo Progressivo.
 
 - [ ] **Fase 6: Módulo de Investimentos & Gestão Patrimonial (Cofrinhos vs. Ativos)**
   - [ ] **Parte 1: Cofrinhos, Caixinhas & Reserva de Emergência (Liquidez e Renda Fixa):**

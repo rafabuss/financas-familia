@@ -772,12 +772,15 @@ export function FinanceProvider({ children }) {
       alert(`Este lançamento pessoal pertence a ${data.maskedOwnerName || 'outro membro'} e está protegido por privacidade. Apenas o titular pode editá-lo.`);
       return;
     }
-    const sType = data?.sourceType || (data?.cardId ? 'CARD' : 'ACCOUNT');
+    const isTransfer = data?.type === 'TRANSFER';
+    const sType = isTransfer ? 'ACCOUNT' : (data?.sourceType || (data?.cardId ? 'CARD' : 'ACCOUNT'));
     const isActualRec = Boolean(
-      data?.isRecurring ||
+      !isTransfer &&
+      (data?.isRecurring ||
       (data?.recurrenceRuleId &&
         !String(data.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
-        !String(data.recurrenceRuleId).startsWith('INVOICE_PAY:'))
+        !String(data.recurrenceRuleId).startsWith('INVOICE_PAY:') &&
+        !String(data.recurrenceRuleId).startsWith('TRANSFER_DEST:')))
     );
     setModalSourceType(sType);
     setEditScope(data?.installmentGroupId || isActualRec ? 'all' : 'single');
@@ -866,11 +869,21 @@ export function FinanceProvider({ children }) {
     });
 
     visibleTransactions.forEach((tx) => {
-      if (tx.status === 'REALIZADO' && tx.accountId && balances[tx.accountId] !== undefined) {
-        if (tx.type === 'INCOME') {
-          balances[tx.accountId] += tx.amountCents;
-        } else if (tx.type === 'EXPENSE') {
-          balances[tx.accountId] -= tx.amountCents;
+      if (tx.status === 'REALIZADO') {
+        if (tx.type === 'TRANSFER') {
+          // Na transferência, deduz da conta de origem e credita na conta de destino
+          if (tx.accountId && balances[tx.accountId] !== undefined) {
+            balances[tx.accountId] -= tx.amountCents;
+          }
+          if (tx.destinationAccountId && balances[tx.destinationAccountId] !== undefined) {
+            balances[tx.destinationAccountId] += tx.amountCents;
+          }
+        } else if (tx.accountId && balances[tx.accountId] !== undefined) {
+          if (tx.type === 'INCOME') {
+            balances[tx.accountId] += tx.amountCents;
+          } else if (tx.type === 'EXPENSE') {
+            balances[tx.accountId] -= tx.amountCents;
+          }
         }
       }
     });
@@ -2655,10 +2668,82 @@ export function FinanceProvider({ children }) {
       const visibility = fd.get('visibility') || (scope === 'PERSONAL' ? 'PERSONAL_PRIVATE' : 'FAMILY');
       const ownerId = fd.get('ownerId') || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId);
 
+      const type = fd.get('type') || original.type || 'EXPENSE';
+
+      if (type === 'TRANSFER') {
+        const originAccountId = fd.get('accountId');
+        const destinationAccountId = fd.get('destinationAccountId');
+
+        if (!originAccountId || !destinationAccountId) {
+          alert('Por favor, selecione a Conta de Origem e a Conta de Destino.');
+          setIsSubmittingTx(false);
+          isSavingRef.current = false;
+          return;
+        }
+
+        if (originAccountId === destinationAccountId) {
+          alert('A Conta de Origem e a Conta de Destino não podem ser iguais.');
+          setIsSubmittingTx(false);
+          isSavingRef.current = false;
+          return;
+        }
+
+        const originAcc = accounts.find((a) => a.id === originAccountId);
+        const destAcc = accounts.find((a) => a.id === destinationAccountId);
+        const description =
+          (fd.get('description') || '').trim() ||
+          `Transferência: ${originAcc?.name || 'Origem'} ➔ ${destAcc?.name || 'Destino'}`;
+
+        const transferCategory = categories.find((c) => c.id === 'cat-transferencia' || c.type === 'TRANSFER');
+        const categoryId = fd.get('categoryId') || transferCategory?.id || 'cat-transferencia';
+        const date = fd.get('date');
+        const status = fd.get('status') || 'REALIZADO';
+
+        const transferTx = {
+          id: isEditing ? original.id : `tx-${Date.now()}`,
+          description,
+          amountCents: amount,
+          type: 'TRANSFER',
+          status,
+          date,
+          dueDate: date,
+          purchaseDate: date,
+          accountId: originAccountId,
+          destinationAccountId,
+          cardId: null,
+          categoryId,
+          scope,
+          visibility,
+          ownerId,
+          installmentGroupId: null,
+          installmentNumber: null,
+          installmentCount: null,
+          isRecurring: false,
+          recurrenceRuleId: null,
+          _localUpdatedAt: Date.now(),
+        };
+
+        markTransactionPending(transferTx.id);
+        const updated = isEditing
+          ? transactions.map((t) => (t.id === original.id ? transferTx : t))
+          : [...transactions, transferTx];
+
+        setTransactions(updated);
+        saveToLocalStorage(STORAGE_KEYS.transactions, updated);
+        await syncItem('transactions', transferTx);
+
+        setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null });
+        setEditScope('single');
+        setIsSubmittingTx(false);
+        isSavingRef.current = false;
+        return;
+      }
+
       const isActualRecurrence = Boolean(
         original.recurrenceRuleId &&
         !String(original.recurrenceRuleId).startsWith('PURCHASE_DATE:') &&
-        !String(original.recurrenceRuleId).startsWith('INVOICE_PAY:')
+        !String(original.recurrenceRuleId).startsWith('INVOICE_PAY:') &&
+        !String(original.recurrenceRuleId).startsWith('TRANSFER_DEST:')
       );
 
       if (isEditing) {
@@ -3649,8 +3734,13 @@ export function FinanceProvider({ children }) {
       return;
     }
 
-    // Lançamentos normais de conta corrente / dinheiro
-    const nextStatus = tx.status === 'REALIZADO' ? 'COMPROMETIDO' : 'REALIZADO';
+    // Lançamentos normais de conta corrente / dinheiro ou transferências
+    const nextStatus =
+      tx.status === 'REALIZADO'
+        ? tx.type === 'TRANSFER'
+          ? 'PREVISTO'
+          : 'COMPROMETIDO'
+        : 'REALIZADO';
     const updatedTx = { ...tx, status: nextStatus, _localUpdatedAt: Date.now() };
     markTransactionPending(updatedTx.id);
     const updated = transactions.map((t) => (t.id === tx.id ? updatedTx : t));
@@ -4225,7 +4315,7 @@ export function FinanceProvider({ children }) {
         }
 
         // 2. Tipo (Fatura é saída/despesa contábil de caixa)
-        if (filterType === 'INCOME') return false;
+        if (filterType === 'INCOME' || filterType === 'TRANSFER') return false;
 
         // 3. Situação
         if (filterStatus === 'OVERDUE') {
@@ -4267,6 +4357,7 @@ export function FinanceProvider({ children }) {
         const term = searchTerm.toLowerCase();
         const catName = categories.find((c) => c.id === t.categoryId)?.name?.toLowerCase() || '';
         const accName = accounts.find((a) => a.id === t.accountId)?.name?.toLowerCase() || '';
+        const destAccName = accounts.find((a) => a.id === t.destinationAccountId)?.name?.toLowerCase() || '';
         const cardName = cards.find((c) => c.id === t.cardId)?.name?.toLowerCase() || '';
         const desc = (t.description || '').toLowerCase();
         const dateBR = formatDateBR(effectiveDate).toLowerCase();
@@ -4276,15 +4367,17 @@ export function FinanceProvider({ children }) {
           desc.includes(term) ||
           catName.includes(term) ||
           accName.includes(term) ||
+          destAccName.includes(term) ||
           cardName.includes(term) ||
           effectiveDate.includes(term) ||
           dateBR.includes(term) ||
-          purchaseBR.includes(term);
+          purchaseBR.includes(term) ||
+          (t.type === 'TRANSFER' && (term === 'pix' || term === 'ted' || term.includes('transf')));
 
         if (!match) return false;
       }
 
-      // 2. Tipo (Receita / Despesa)
+      // 2. Tipo (Receita / Despesa / Transferência)
       if (filterType !== 'ALL' && t.type !== filterType) {
         return false;
       }
@@ -4303,7 +4396,11 @@ export function FinanceProvider({ children }) {
         if (!t.cardId) return false;
       } else if (filterSource.startsWith('acc-')) {
         const targetAccId = filterSource.replace('acc-', '');
-        if (t.accountId !== targetAccId) return false;
+        if (t.type === 'TRANSFER') {
+          if (t.accountId !== targetAccId && t.destinationAccountId !== targetAccId) return false;
+        } else {
+          if (t.accountId !== targetAccId) return false;
+        }
       } else if (filterSource.startsWith('card-')) {
         const targetCardId = filterSource.replace('card-', '');
         if (t.cardId !== targetCardId) return false;
@@ -4454,6 +4551,7 @@ export function FinanceProvider({ children }) {
     let expenseCents = 0;
     let totalCount = 0;
     const isCategoryOrSearchActive = filterCategory !== 'ALL' || Boolean(searchTerm && searchTerm.trim());
+    const selectedAccId = filterSource?.startsWith('acc-') ? filterSource.replace('acc-', '') : null;
 
     filteredTransactions.forEach((tx) => {
       if (tx.status === 'CANCELADO') return;
@@ -4468,6 +4566,15 @@ export function FinanceProvider({ children }) {
           expenseCents += tx.amountCents;
           totalCount += 1;
         }
+      } else if (tx.type === 'TRANSFER') {
+        if (selectedAccId) {
+          if (tx.destinationAccountId === selectedAccId) {
+            incomeCents += tx.amountCents;
+          } else if (tx.accountId === selectedAccId) {
+            expenseCents += tx.amountCents;
+          }
+        }
+        totalCount += 1;
       } else {
         if (tx.type === 'INCOME') {
           incomeCents += tx.amountCents;
@@ -4484,7 +4591,7 @@ export function FinanceProvider({ children }) {
       netCents: incomeCents - expenseCents,
       count: totalCount,
     };
-  }, [filteredTransactions, filterCategory, searchTerm, getMatchingInvoiceItems]);
+  }, [filteredTransactions, filterCategory, searchTerm, getMatchingInvoiceItems, filterSource]);
 
   // Alternador de ordenação de colunas da tabela de lançamentos
   const handleSortTransactions = (field) => {

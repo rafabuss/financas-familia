@@ -6,8 +6,18 @@ export const FAMILY_MEMBERS = [
   { id: 'user-2', name: '👤 Ana Débora (Apenas Pessoal / Membro)', isFamily: false },
 ];
 
+// Categoria Técnica Padrão para Transferências entre Contas
+export const DEFAULT_TRANSFER_CATEGORY = {
+  id: 'cat-transferencia',
+  name: 'Transferência entre Contas',
+  type: 'TRANSFER',
+  color: '#0284c7',
+  archived: false,
+};
+
 // Categorias Padrão Essenciais do Sistema
 export const DEFAULT_CATEGORIES = [
+  DEFAULT_TRANSFER_CATEGORY,
   { id: 'cat-1', name: 'Salário & Dividendos', type: 'INCOME', color: '#16a34a', archived: false },
   { id: 'cat-2', name: 'Renda Extra & Consultoria', type: 'INCOME', color: '#0d9488', archived: false },
   { id: 'cat-3', name: 'Moradia (Aluguel/Condomínio)', type: 'EXPENSE', color: '#2563eb', archived: false },
@@ -17,3 +27,4 @@ export const DEFAULT_CATEGORIES = [
   { id: 'cat-7', name: 'Lazer & Restaurantes', type: 'EXPENSE', color: '#0284c7', archived: false },
   { id: 'cat-8', name: 'Transporte & Combustível', type: 'EXPENSE', color: '#475569', archived: false },
 ];
+

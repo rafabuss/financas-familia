@@ -22,6 +22,9 @@ import {
   Receipt,
   Info,
   Lock,
+  ArrowLeftRight,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, getTxDueDate, isTxOverdue } from '../../utils/formatters';
 
@@ -98,7 +101,10 @@ export default function TransactionsTab({
 
     // 1. Coleta todos os lançamentos que afetam esta conta bancária (não cancelados)
     const accountTxs = (allDisplayTransactions || []).filter(
-      (t) => t.accountId === selectedAccount.id && t.status !== 'CANCELADO'
+      (t) =>
+        t.status !== 'CANCELADO' &&
+        (t.accountId === selectedAccount.id ||
+          (t.type === 'TRANSFER' && t.destinationAccountId === selectedAccount.id))
     );
 
     // 2. Ordenação estritamente cronológica (do mais antigo para o mais recente)
@@ -117,7 +123,16 @@ export default function TransactionsTab({
     const map = {};
 
     sortedChronological.forEach((tx) => {
-      const delta = tx.type === 'INCOME' ? tx.amountCents : -tx.amountCents;
+      let delta = 0;
+      if (tx.type === 'TRANSFER') {
+        if (tx.destinationAccountId === selectedAccount.id) {
+          delta = tx.amountCents; // Entrada no destino (+)
+        } else if (tx.accountId === selectedAccount.id) {
+          delta = -tx.amountCents; // Saída na origem (-)
+        }
+      } else {
+        delta = tx.type === 'INCOME' ? tx.amountCents : -tx.amountCents;
+      }
       running += delta;
       map[tx.id] = running;
     });
@@ -253,11 +268,21 @@ export default function TransactionsTab({
               </button>
             )}
 
+            {/* Botão Nova Transferência */}
+            <button
+              type="button"
+              onClick={() => openTransactionModal('create', { type: 'TRANSFER' })}
+              className="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
+            >
+              <ArrowLeftRight className="w-4 h-4" />
+              <span>Nova Transferência</span>
+            </button>
+
             {/* Botão Novo Lançamento (CTA Principal) */}
             <button
               type="button"
               onClick={() => openTransactionModal('create')}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95 cursor-pointer"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               <span>Novo Lançamento</span>
@@ -309,6 +334,19 @@ export default function TransactionsTab({
             }`}
           >
             💰 Receitas
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterType(filterType === 'TRANSFER' ? 'ALL' : 'TRANSFER')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer flex items-center space-x-1 ${
+              filterType === 'TRANSFER'
+                ? 'bg-sky-100 text-sky-800 border border-sky-300 font-semibold'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+            }`}
+          >
+            <ArrowLeftRight className="w-3.5 h-3.5" />
+            <span>Transferências</span>
           </button>
 
           <button
@@ -1211,12 +1249,16 @@ export default function TransactionsTab({
                     );
                   }
 
-                  // Lançamento normal de conta corrente ou dinheiro
+                  // Lançamento normal de conta corrente ou dinheiro ou transferência
                   const cat = categories.find((c) => c.id === tx.categoryId);
                   const acc = accounts.find((a) => a.id === tx.accountId);
+                  const destAcc = accounts.find((a) => a.id === tx.destinationAccountId);
                   const card = cards.find((c) => c.id === tx.cardId);
                   const isOverdue = isTxOverdue(tx, cards);
                   const effectiveDue = getTxDueDate(tx, cards);
+                  const isTransfer = tx.type === 'TRANSFER';
+                  const isTransferIn = isTransfer && selectedAccount && selectedAccount.id === tx.destinationAccountId;
+                  const isTransferOut = isTransfer && selectedAccount && selectedAccount.id === tx.accountId;
 
                   return (
                     <tr
@@ -1226,6 +1268,8 @@ export default function TransactionsTab({
                           ? 'bg-purple-50/20 hover:bg-purple-50/40 border-l-2 border-purple-500'
                           : isOverdue
                           ? 'bg-rose-50/40 hover:bg-rose-50/70 border-l-4 border-rose-500'
+                          : isTransfer && !selectedAccount
+                          ? 'bg-sky-50/15 hover:bg-sky-50/30'
                           : 'hover:bg-slate-50/80'
                       }`}
                     >
@@ -1255,13 +1299,34 @@ export default function TransactionsTab({
 
                       {/* 2. Descrição */}
                       <td className="py-3 px-4 font-medium text-slate-900">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                           <span>{tx.description}</span>
+                          {isTransfer && !selectedAccount && (
+                            <span
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-sky-50 text-sky-700 border border-sky-200"
+                              title={`Transferência interna: ${acc?.name || 'Origem'} ➔ ${destAcc?.name || 'Destino'}`}
+                            >
+                              <ArrowLeftRight className="w-3 h-3 text-sky-600 shrink-0" />
+                              <span>Transferência: {acc?.name || 'Origem'} ➔ {destAcc?.name || 'Destino'}</span>
+                            </span>
+                          )}
+                          {isTransferIn && (
+                            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <ArrowDownLeft className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span>Entrada (Pix de {acc?.name || 'Conta Origem'})</span>
+                            </span>
+                          )}
+                          {isTransferOut && (
+                            <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <ArrowUpRight className="w-3 h-3 text-rose-600 shrink-0" />
+                              <span>Saída (Pix p/ {destAcc?.name || 'Conta Destino'})</span>
+                            </span>
+                          )}
                           {tx.isMasked ? (
                             <span className="text-[9px] bg-purple-100 text-purple-800 border border-purple-200 px-1.5 py-0.2 rounded font-semibold flex items-center space-x-1" title={`Lançamento pessoal de ${tx.maskedOwnerName || 'outro membro'} — protegido por privacidade`}>
                               <span>🔒 Pessoal (Privado)</span>
                             </span>
-                          ) : (tx.visibility === 'PERSONAL_PRIVATE' || tx.scope === 'PERSONAL') ? (
+                          ) : (tx.visibility === 'PERSONAL_PRIVATE' || tx.scope === 'PERSONAL') && !isTransfer ? (
                             <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-semibold whitespace-nowrap">
                               👤 Pessoal
                             </span>
@@ -1277,7 +1342,7 @@ export default function TransactionsTab({
                               {tx.installmentNumber}/{tx.installmentCount}
                             </span>
                           )}
-                          {!tx.installmentCount && (tx.recurrenceRuleId || tx.isRecurring) && (
+                          {!tx.installmentCount && (tx.recurrenceRuleId || tx.isRecurring) && !isTransfer && (
                             <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold flex items-center space-x-1 whitespace-nowrap" title="Lançamento com repetição mensal recorrente">
                               <RefreshCw className="w-2.5 h-2.5" />
                               <span>Recorrente</span>
@@ -1288,7 +1353,12 @@ export default function TransactionsTab({
 
                       {/* 3. Categoria */}
                       <td className="py-3 px-4 text-slate-600">
-                        {tx.isMasked ? (
+                        {isTransfer ? (
+                          <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-medium text-sky-700 bg-sky-50 border border-sky-100">
+                            <ArrowLeftRight className="w-3 h-3 text-sky-600 shrink-0" />
+                            <span>Transferência</span>
+                          </span>
+                        ) : tx.isMasked ? (
                           <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs text-slate-500 italic bg-slate-100/70 font-medium">
                             <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
                             <span>Gasto Pessoal</span>
@@ -1313,9 +1383,31 @@ export default function TransactionsTab({
 
                       {/* 4. Conta / Cartão */}
                       <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
-                        {acc && <span className="text-blue-700 font-medium">{acc.name}</span>}
-                        {card && <span className="text-purple-700 font-medium">💳 {card.name}</span>}
-                        {!acc && !card && <span className="text-slate-400">-</span>}
+                        {isTransfer ? (
+                          selectedAccount ? (
+                            selectedAccount.id === tx.destinationAccountId ? (
+                              <span className="text-xs text-slate-700">
+                                De: <strong className="text-blue-700">{acc?.name || 'Origem'}</strong>
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-700">
+                                Para: <strong className="text-emerald-700">{destAcc?.name || 'Destino'}</strong>
+                              </span>
+                            )
+                          ) : (
+                            <div className="flex items-center space-x-1 text-xs font-medium">
+                              <span className="text-blue-700 font-semibold">{acc?.name || 'Origem'}</span>
+                              <span className="text-slate-400">➔</span>
+                              <span className="text-emerald-700 font-semibold">{destAcc?.name || 'Destino'}</span>
+                            </div>
+                          )
+                        ) : (
+                          <>
+                            {acc && <span className="text-blue-700 font-medium">{acc.name}</span>}
+                            {card && <span className="text-purple-700 font-medium">💳 {card.name}</span>}
+                            {!acc && !card && <span className="text-slate-400">-</span>}
+                          </>
+                        )}
                       </td>
 
                       {/* 5. Situação */}
@@ -1342,6 +1434,8 @@ export default function TransactionsTab({
                                 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                                 : isOverdue
                                 ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300'
+                                : isTransfer
+                                ? 'bg-sky-100 text-sky-800 hover:bg-sky-200'
                                 : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
                             }`}
                             title={isOverdue ? 'Conta em atraso! Clique para marcar como Realizado' : 'Clique para alternar situação'}
@@ -1361,10 +1455,35 @@ export default function TransactionsTab({
                       {/* 6. Valor */}
                       <td
                         className={`py-3 px-4 text-right font-bold whitespace-nowrap ${
-                          tx.type === 'INCOME' ? 'text-emerald-600' : isOverdue ? 'text-rose-600' : 'text-slate-900'
+                          isTransfer
+                            ? selectedAccount
+                              ? isTransferIn
+                                ? 'text-emerald-600'
+                                : 'text-rose-600'
+                              : 'text-sky-600'
+                            : tx.type === 'INCOME'
+                            ? 'text-emerald-600'
+                            : isOverdue
+                            ? 'text-rose-600'
+                            : 'text-slate-900'
                         }`}
                       >
-                        {tx.type === 'INCOME' ? '+' : '-'} {formatMoney(tx.amountCents)}
+                        {isTransfer ? (
+                          selectedAccount ? (
+                            isTransferIn ? (
+                              `+ ${formatMoney(tx.amountCents)}`
+                            ) : (
+                              `- ${formatMoney(tx.amountCents)}`
+                            )
+                          ) : (
+                            <span className="inline-flex items-center space-x-1 text-sky-600 font-bold">
+                              <ArrowLeftRight className="w-3.5 h-3.5 text-sky-500 mr-1 shrink-0" />
+                              <span>{formatMoney(tx.amountCents)}</span>
+                            </span>
+                          )
+                        ) : (
+                          `${tx.type === 'INCOME' ? '+' : '-'} ${formatMoney(tx.amountCents)}`
+                        )}
                       </td>
 
                       {/* 6.1 Saldo Resultante (se extrato por conta) */}
@@ -1406,8 +1525,8 @@ export default function TransactionsTab({
                           </div>
                         ) : (
                           <div className="flex items-center justify-center space-x-1.5">
-                            {/* Ação Explícita de Quitação / Pagamento / Recebimento */}
-                            {tx.status === 'COMPROMETIDO' && (
+                            {/* Ação Explícita de Quitação / Pagamento / Recebimento / Efetivação */}
+                            {(tx.status === 'COMPROMETIDO' || (isTransfer && tx.status === 'PREVISTO')) && (
                               tx.cardId ? (
                                 <button
                                   type="button"
@@ -1427,18 +1546,22 @@ export default function TransactionsTab({
                                   type="button"
                                   onClick={() => handleQuickPayTransaction(tx, 'REALIZADO')}
                                   className={`px-2 py-1 text-xs font-semibold rounded-lg flex items-center space-x-1 transition active:scale-95 shadow-2xs cursor-pointer ${
-                                    isOverdue
+                                    isTransfer
+                                      ? 'bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200'
+                                      : isOverdue
                                       ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-300 animate-pulse'
                                       : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
                                   }`}
                                   title={
-                                    tx.type === 'INCOME'
+                                    isTransfer
+                                      ? 'Efetivar e confirmar esta transferência'
+                                      : tx.type === 'INCOME'
                                       ? 'Confirmar recebimento deste valor'
                                       : 'Quitar e marcar esta despesa como paga'
                                   }
                                 >
                                   <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>{tx.type === 'INCOME' ? 'Receber' : 'Pagar'}</span>
+                                  <span>{isTransfer ? 'Efetivar' : tx.type === 'INCOME' ? 'Receber' : 'Pagar'}</span>
                                 </button>
                               )
                             )}

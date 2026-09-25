@@ -138,6 +138,14 @@ function AppContent() {
     getChartDateRange,
     visibleAccounts,
     visibleCards,
+    savingsGoals,
+    visibleSavingsGoals,
+    savingsGoalBalances,
+    handleSaveSavingsGoal,
+    handleDeleteSavingsGoal,
+    handleSavingsGoalAporte,
+    handleSavingsGoalResgate,
+    handleSavingsGoalYield,
     toggleArchiveAccount,
     handleDeleteAccount,
     toggleArchiveCard,
@@ -301,6 +309,8 @@ function AppContent() {
             cardStats={cardStats}
             setInvoiceSelectedMonth={setInvoiceSelectedMonth}
             openInvoicePaymentModal={openInvoicePaymentModal}
+            visibleSavingsGoals={visibleSavingsGoals}
+            savingsGoalBalances={savingsGoalBalances}
           />
         )}
 
@@ -422,6 +432,16 @@ function AppContent() {
             handleDeleteCard={handleDeleteCard}
             onNavigateToAccountStatement={handleNavigateToAccountStatement}
             onNavigateToCardStatement={handleNavigateToCardStatement}
+            visibleSavingsGoals={visibleSavingsGoals}
+            savingsGoalBalances={savingsGoalBalances}
+            handleSaveSavingsGoal={handleSaveSavingsGoal}
+            handleDeleteSavingsGoal={handleDeleteSavingsGoal}
+            handleSavingsGoalAporte={handleSavingsGoalAporte}
+            handleSavingsGoalResgate={handleSavingsGoalResgate}
+            handleSavingsGoalYield={handleSavingsGoalYield}
+            transactions={transactions}
+            accounts={accounts}
+            currentMemberId={currentMemberId}
           />
         )}
 

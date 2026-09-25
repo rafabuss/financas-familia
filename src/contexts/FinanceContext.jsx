@@ -27,6 +27,7 @@ import {
 } from '../services/financeService';
 import {
   DEMO_ACCOUNTS,
+  DEMO_SAVINGS_GOALS,
   DEMO_CARDS,
   DEMO_CATEGORIES,
   DEMO_TRANSACTIONS,
@@ -194,6 +195,23 @@ export function FinanceProvider({ children }) {
       return local ? JSON.parse(local) : [];
     } catch {
       return isDemoMode() ? DEMO_MONTHLY_ENVELOPES : [];
+    }
+  });
+
+  const [savingsGoals, setSavingsGoals] = useState(() => {
+    try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.savingsGoals);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_SAVINGS_GOALS;
+      }
+      const local = localStorage.getItem(STORAGE_KEYS.savingsGoals);
+      return local ? JSON.parse(local) : [];
+    } catch {
+      return isDemoMode() ? DEMO_SAVINGS_GOALS : [];
     }
   });
 
@@ -384,6 +402,7 @@ export function FinanceProvider({ children }) {
         }
         if (res.scenarios) setScenarios(res.scenarios);
         if (res.monthlyEnvelopes) setMonthlyEnvelopes(res.monthlyEnvelopes);
+        if (res.savingsGoals) setSavingsGoals(res.savingsGoals);
       }
     } catch (err) {
       console.warn('Erro ao recarregar dados da nuvem:', err);
@@ -500,12 +519,14 @@ export function FinanceProvider({ children }) {
         sessionStorage.setItem('financas_is_demo', 'true');
       } catch {}
       saveToLocalStorage(STORAGE_KEYS.accounts, DEMO_ACCOUNTS);
+      saveToLocalStorage(STORAGE_KEYS.savingsGoals, DEMO_SAVINGS_GOALS);
       saveToLocalStorage(STORAGE_KEYS.cards, DEMO_CARDS);
       saveToLocalStorage(STORAGE_KEYS.categories, DEMO_CATEGORIES);
       saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
       saveToLocalStorage(STORAGE_KEYS.scenarios, DEMO_SCENARIOS);
       saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, DEMO_MONTHLY_ENVELOPES);
       setAccounts(DEMO_ACCOUNTS);
+      setSavingsGoals(DEMO_SAVINGS_GOALS);
       setCards(DEMO_CARDS);
       setCategories(DEMO_CATEGORIES);
       setTransactions(DEMO_TRANSACTIONS);
@@ -521,6 +542,7 @@ export function FinanceProvider({ children }) {
       sessionStorage.setItem('financas_is_demo', 'true');
     } catch {}
     saveToLocalStorage(STORAGE_KEYS.accounts, DEMO_ACCOUNTS);
+    saveToLocalStorage(STORAGE_KEYS.savingsGoals, DEMO_SAVINGS_GOALS);
     saveToLocalStorage(STORAGE_KEYS.cards, DEMO_CARDS);
     saveToLocalStorage(STORAGE_KEYS.categories, DEMO_CATEGORIES);
     saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
@@ -529,6 +551,7 @@ export function FinanceProvider({ children }) {
 
     setIsDemoModeState(true);
     setAccounts(DEMO_ACCOUNTS);
+    setSavingsGoals(DEMO_SAVINGS_GOALS);
     setCards(DEMO_CARDS);
     setCategories(DEMO_CATEGORIES);
     setTransactions(DEMO_TRANSACTIONS);
@@ -569,8 +592,9 @@ export function FinanceProvider({ children }) {
     const demoAccs = accounts.filter((a) => String(a.id || '').startsWith('demo-'));
     const demoCards = cards.filter((c) => String(c.id || '').startsWith('demo-'));
     const demoScens = scenarios.filter((s) => String(s.id || '').startsWith('demo-'));
+    const demoGoals = savingsGoals.filter((g) => String(g.id || '').startsWith('demo-'));
 
-    const totalDemoItems = demoTxs.length + demoAccs.length + demoCards.length + demoScens.length;
+    const totalDemoItems = demoTxs.length + demoAccs.length + demoCards.length + demoScens.length + demoGoals.length;
 
     if (totalDemoItems === 0) {
       alert('Não há dados de demonstração pendentes. Todos os seus lançamentos e contas atuais são dados reais!');
@@ -588,11 +612,13 @@ export function FinanceProvider({ children }) {
         scenarios,
         accounts,
         cards,
+        savingsGoals,
       });
       setTransactions(res.transactions);
       setScenarios(res.scenarios);
       setAccounts(res.accounts);
       setCards(res.cards);
+      if (res.savingsGoals) setSavingsGoals(res.savingsGoals);
       alert('Dados fictícios de exemplo removidos com sucesso! Seus dados reais permanecem intactos.');
     }
   };
@@ -609,6 +635,7 @@ export function FinanceProvider({ children }) {
       setScenarios(res.scenarios);
       setAccounts(res.accounts);
       setCards(res.cards);
+      setSavingsGoals(res.savingsGoals || []);
       alert('Sistema resetado com sucesso.');
     } else if (confirmInput !== null) {
       alert('Operação cancelada. A palavra "ZERAR" não foi digitada corretamente.');
@@ -908,6 +935,46 @@ export function FinanceProvider({ children }) {
       return c.ownerId === 'user-all' || c.ownerId === currentMemberId;
     });
   }, [cards, currentMemberId]);
+
+  // Cofrinhos e Metas de Reserva filtrados pelo titular selecionado
+  const visibleSavingsGoals = useMemo(() => {
+    return savingsGoals.filter((g) => {
+      if (currentMemberId === 'user-all') return true; // Admin vê todos os cofrinhos
+      if (currentMemberId === 'family-shared') return g.ownerId === 'user-all' || !g.ownerId;
+      return g.ownerId === 'user-all' || g.ownerId === currentMemberId;
+    });
+  }, [savingsGoals, currentMemberId]);
+
+  // Recálculo do Saldo Atual por Cofrinho / Reserva (dinâmico e preciso)
+  const savingsGoalBalances = useMemo(() => {
+    const balances = {};
+    savingsGoals.forEach((goal) => {
+      balances[goal.id] = Number(goal.currentBalanceCents || 0);
+    });
+
+    visibleTransactions.forEach((tx) => {
+      if (tx.status === 'REALIZADO' && tx.savingsGoalId && balances[tx.savingsGoalId] !== undefined) {
+        if (tx.type === 'TRANSFER') {
+          // Aporte: Dinheiro sai da conta corrente e entra no cofrinho
+          if (tx.accountId) {
+            balances[tx.savingsGoalId] += tx.amountCents;
+          }
+          // Resgate: Dinheiro sai do cofrinho e retorna para a conta corrente
+          if (tx.destinationAccountId) {
+            balances[tx.savingsGoalId] -= tx.amountCents;
+          }
+        } else if (tx.type === 'INCOME') {
+          // Rendimento CDI ou juros creditados diretamente no cofrinho
+          balances[tx.savingsGoalId] += tx.amountCents;
+        } else if (tx.type === 'EXPENSE') {
+          // Débito direto do cofrinho (se houver)
+          balances[tx.savingsGoalId] -= tx.amountCents;
+        }
+      }
+    });
+
+    return balances;
+  }, [savingsGoals, visibleTransactions]);
 
   // Lançamentos dos cenários ativos como Hipotéticos (para lançamentos, gráficos e projeções)
   const hypotheticalTransactions = useMemo(() => {
@@ -1828,6 +1895,18 @@ export function FinanceProvider({ children }) {
     const expenseTotal = expenseRealized + expensePending;
 
     const totalBankBalance = Object.values(accountBalances).reduce((a, b) => a + b, 0);
+    // Saldo Operacional Livre (Contas correntes e dinheiro físico para o dia a dia)
+    const totalOperationalBalance = accounts
+      .filter((a) => !a.archived && (a.type === 'corrente' || a.type === 'dinheiro' || !a.type))
+      .reduce((sum, a) => sum + (accountBalances[a.id] || 0), 0);
+    // Patrimônio Guardado / Cofrinhos (reserva protegida e de alta liquidez)
+    const totalSavingsBalance = visibleSavingsGoals
+      .reduce((sum, g) => sum + (savingsGoalBalances[g.id] || 0), 0);
+    // Contas de Investimento Tradicional (XP, etc.)
+    const totalInvestmentsBalance = accounts
+      .filter((a) => !a.archived && a.type === 'investimento')
+      .reduce((sum, a) => sum + (accountBalances[a.id] || 0), 0);
+
     const totalCardsAvailable = Object.values(cardStats).reduce((a, b) => a + b.availableCents, 0);
     const projectedEndBalance = totalBankBalance + incomePending - expensePending;
     const envelopesCommitted = dashboardEnvelopes.totalResidualCommittedCents;
@@ -1847,10 +1926,13 @@ export function FinanceProvider({ children }) {
       envelopesCommitted,
       freeProjectedBalance,
       totalBankBalance,
+      totalOperationalBalance,
+      totalSavingsBalance,
+      totalInvestmentsBalance,
       totalCardsAvailable,
       projectedEndBalance,
     };
-  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes]);
+  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes, accounts, visibleSavingsGoals, savingsGoalBalances]);
 
   // Maiores Gastos por Categoria no Mês do Dashboard
   const dashboardCategoryChartData = useMemo(() => {
@@ -2175,6 +2257,193 @@ export function FinanceProvider({ children }) {
     syncItem('accounts', newAcc);
 
     setModalState({ isOpen: false, type: null, mode: 'create', data: null });
+  };
+
+  // Salvar Cofrinhos / Metas de Reserva (Fase 6.1)
+  const handleSaveSavingsGoal = async (dataOrEvent) => {
+    let goalData = {};
+    if (dataOrEvent && dataOrEvent.preventDefault) {
+      dataOrEvent.preventDefault();
+      const fd = new FormData(dataOrEvent.target);
+      const id = modalState.mode === 'edit' ? modalState.data.id : `goal-${Date.now()}`;
+      goalData = {
+        id,
+        name: fd.get('name'),
+        linkedAccountId: fd.get('linkedAccountId') || null,
+        targetCents: Math.round(parseFloat(fd.get('target') || '0') * 100),
+        currentBalanceCents: Math.round(parseFloat(fd.get('initialBalance') || fd.get('currentBalance') || '0') * 100),
+        yieldRate: fd.get('yieldRate') || '100% CDI',
+        color: fd.get('color') || '#10b981',
+        icon: fd.get('icon') || 'PiggyBank',
+        ownerId: fd.get('ownerId') || 'user-all',
+      };
+    } else {
+      goalData = dataOrEvent || {};
+    }
+
+    const isEdit = Boolean(goalData.id && savingsGoals.some((g) => g.id === goalData.id));
+    const id = goalData.id || `goal-${Date.now()}`;
+    const newGoal = {
+      id,
+      name: goalData.name,
+      linkedAccountId: goalData.linkedAccountId || null,
+      targetCents: Number(goalData.targetCents || 0),
+      currentBalanceCents: Number(goalData.currentBalanceCents || 0),
+      yieldRate: goalData.yieldRate || '100% CDI',
+      color: goalData.color || '#10b981',
+      icon: goalData.icon || 'PiggyBank',
+      ownerId: goalData.ownerId || (currentMemberId === 'user-all' ? 'user-all' : currentMemberId),
+    };
+
+    let updated;
+    if (isEdit) {
+      updated = savingsGoals.map((g) => (g.id === id ? newGoal : g));
+    } else {
+      updated = [...savingsGoals, newGoal];
+    }
+    setSavingsGoals(updated);
+    saveToLocalStorage(STORAGE_KEYS.savingsGoals, updated);
+    await syncItem('savings_goals', newGoal);
+
+    if (modalState.isOpen && modalState.type === 'savings_goal') {
+      setModalState({ isOpen: false, type: null, mode: 'create', data: null });
+    }
+    return newGoal;
+  };
+
+  // Excluir Cofrinho
+  const handleDeleteSavingsGoal = async (goalOrId) => {
+    const goalId = typeof goalOrId === 'string' ? goalOrId : goalOrId?.id;
+    const goal = savingsGoals.find((g) => g.id === goalId);
+    if (!goal) return;
+
+    if (!confirm(`Deseja realmente excluir o cofrinho "${goal.name}"? As movimentações passadas serão preservadas.`)) {
+      return;
+    }
+
+    const updated = savingsGoals.filter((g) => g.id !== goalId);
+    setSavingsGoals(updated);
+    saveToLocalStorage(STORAGE_KEYS.savingsGoals, updated);
+    await syncItem('savings_goals', { id: goalId }, true);
+  };
+
+  // Fluxo de Aporte: Guardar dinheiro da Conta Corrente no Cofrinho (Motor TRANSFER)
+  const handleSavingsGoalAporte = async ({ goalId, originAccountId, amountCents, date, description }) => {
+    const goal = savingsGoals.find((g) => g.id === goalId);
+    const originAcc = accounts.find((a) => a.id === originAccountId);
+    if (!goal || !originAcc) throw new Error('Cofrinho ou conta de origem não encontrados');
+    if (!amountCents || amountCents <= 0) throw new Error('Informe um valor válido');
+
+    const transferCategory = categories.find((c) => c.id === 'cat-transferencia' || c.type === 'TRANSFER');
+    const txDate = date || new Date().toISOString().slice(0, 10);
+    const desc = description?.trim() || `Aporte Cofrinho: ${originAcc.name} ➔ ${goal.name}`;
+
+    const tx = {
+      id: `tx-aporte-${Date.now()}`,
+      description: desc,
+      amountCents: Number(amountCents),
+      type: 'TRANSFER',
+      status: 'REALIZADO',
+      date: txDate,
+      dueDate: txDate,
+      purchaseDate: txDate,
+      accountId: originAccountId,
+      destinationAccountId: null,
+      savingsGoalId: goalId,
+      categoryId: transferCategory?.id || 'cat-transferencia',
+      scope: 'FAMILY',
+      visibility: 'FAMILY',
+      ownerId: goal.ownerId || originAcc.ownerId || 'user-all',
+      _localUpdatedAt: Date.now(),
+    };
+
+    setTransactions((prev) => {
+      const next = [tx, ...prev];
+      saveToLocalStorage(STORAGE_KEYS.transactions, next);
+      return next;
+    });
+
+    await syncItem('transactions', tx);
+    return tx;
+  };
+
+  // Fluxo de Resgate: Devolver dinheiro do Cofrinho para a Conta Corrente (Motor TRANSFER invertido)
+  const handleSavingsGoalResgate = async ({ goalId, destinationAccountId, amountCents, date, description }) => {
+    const goal = savingsGoals.find((g) => g.id === goalId);
+    const destAcc = accounts.find((a) => a.id === destinationAccountId);
+    if (!goal || !destAcc) throw new Error('Cofrinho ou conta de destino não encontrados');
+    if (!amountCents || amountCents <= 0) throw new Error('Informe um valor válido');
+
+    const transferCategory = categories.find((c) => c.id === 'cat-transferencia' || c.type === 'TRANSFER');
+    const txDate = date || new Date().toISOString().slice(0, 10);
+    const desc = description?.trim() || `Resgate Cofrinho: ${goal.name} ➔ ${destAcc.name}`;
+
+    const tx = {
+      id: `tx-resgate-${Date.now()}`,
+      description: desc,
+      amountCents: Number(amountCents),
+      type: 'TRANSFER',
+      status: 'REALIZADO',
+      date: txDate,
+      dueDate: txDate,
+      purchaseDate: txDate,
+      accountId: null,
+      destinationAccountId: destinationAccountId,
+      savingsGoalId: goalId,
+      categoryId: transferCategory?.id || 'cat-transferencia',
+      scope: 'FAMILY',
+      visibility: 'FAMILY',
+      ownerId: goal.ownerId || destAcc.ownerId || 'user-all',
+      _localUpdatedAt: Date.now(),
+    };
+
+    setTransactions((prev) => {
+      const next = [tx, ...prev];
+      saveToLocalStorage(STORAGE_KEYS.transactions, next);
+      return next;
+    });
+
+    await syncItem('transactions', tx);
+    return tx;
+  };
+
+  // Registro de Rendimentos: Creditar juros/CDI creditados pelo banco
+  const handleSavingsGoalYield = async ({ goalId, amountCents, date, description }) => {
+    const goal = savingsGoals.find((g) => g.id === goalId);
+    if (!goal) throw new Error('Cofrinho não encontrado');
+    if (!amountCents || amountCents <= 0) throw new Error('Informe um valor de rendimento válido');
+
+    const yieldCategory = categories.find((c) => c.id === 'cat-investimentos' || c.name.toLowerCase().includes('rendimento') || c.type === 'INCOME');
+    const txDate = date || new Date().toISOString().slice(0, 10);
+    const desc = description?.trim() || `Rendimento ${goal.yieldRate || 'CDI'}: ${goal.name}`;
+
+    const tx = {
+      id: `tx-yield-${Date.now()}`,
+      description: desc,
+      amountCents: Number(amountCents),
+      type: 'INCOME',
+      status: 'REALIZADO',
+      date: txDate,
+      dueDate: txDate,
+      purchaseDate: txDate,
+      accountId: null,
+      destinationAccountId: null,
+      savingsGoalId: goalId,
+      categoryId: yieldCategory?.id || 'cat-investimentos',
+      scope: 'FAMILY',
+      visibility: 'FAMILY',
+      ownerId: goal.ownerId || 'user-all',
+      _localUpdatedAt: Date.now(),
+    };
+
+    setTransactions((prev) => {
+      const next = [tx, ...prev];
+      saveToLocalStorage(STORAGE_KEYS.transactions, next);
+      return next;
+    });
+
+    await syncItem('transactions', tx);
+    return tx;
   };
 
   // Salvar Cartões
@@ -2671,17 +2940,18 @@ export function FinanceProvider({ children }) {
       const type = fd.get('type') || original.type || 'EXPENSE';
 
       if (type === 'TRANSFER') {
-        const originAccountId = fd.get('accountId');
-        const destinationAccountId = fd.get('destinationAccountId');
+        const savingsGoalId = fd.get('savingsGoalId') || original.savingsGoalId || null;
+        const originAccountId = fd.get('accountId') || (savingsGoalId ? original.accountId : null);
+        const destinationAccountId = fd.get('destinationAccountId') || (savingsGoalId ? original.destinationAccountId : null);
 
-        if (!originAccountId || !destinationAccountId) {
+        if (!savingsGoalId && (!originAccountId || !destinationAccountId)) {
           alert('Por favor, selecione a Conta de Origem e a Conta de Destino.');
           setIsSubmittingTx(false);
           isSavingRef.current = false;
           return;
         }
 
-        if (originAccountId === destinationAccountId) {
+        if (!savingsGoalId && originAccountId === destinationAccountId) {
           alert('A Conta de Origem e a Conta de Destino não podem ser iguais.');
           setIsSubmittingTx(false);
           isSavingRef.current = false;
@@ -2690,12 +2960,21 @@ export function FinanceProvider({ children }) {
 
         const originAcc = accounts.find((a) => a.id === originAccountId);
         const destAcc = accounts.find((a) => a.id === destinationAccountId);
-        const description =
-          (fd.get('description') || '').trim() ||
-          `Transferência: ${originAcc?.name || 'Origem'} ➔ ${destAcc?.name || 'Destino'}`;
+        const goal = savingsGoals.find((g) => g.id === savingsGoalId);
+
+        let defaultDesc = `Transferência: ${originAcc?.name || 'Origem'} ➔ ${destAcc?.name || 'Destino'}`;
+        if (savingsGoalId && goal) {
+          if (originAccountId) {
+            defaultDesc = `Aporte Cofrinho: ${originAcc?.name || 'Conta'} ➔ ${goal.name}`;
+          } else if (destinationAccountId) {
+            defaultDesc = `Resgate Cofrinho: ${goal.name} ➔ ${destAcc?.name || 'Conta'}`;
+          }
+        }
+
+        const description = (fd.get('description') || '').trim() || defaultDesc;
 
         const transferCategory = categories.find((c) => c.id === 'cat-transferencia' || c.type === 'TRANSFER');
-        const categoryId = fd.get('categoryId') || transferCategory?.id || 'cat-transferencia';
+        const categoryId = fd.get('categoryId') || original.categoryId || transferCategory?.id || 'cat-transferencia';
         const date = fd.get('date');
         const status = fd.get('status') || 'REALIZADO';
 
@@ -2708,8 +2987,9 @@ export function FinanceProvider({ children }) {
           date,
           dueDate: date,
           purchaseDate: date,
-          accountId: originAccountId,
-          destinationAccountId,
+          accountId: originAccountId || null,
+          destinationAccountId: destinationAccountId || null,
+          savingsGoalId: savingsGoalId || null,
           cardId: null,
           categoryId,
           scope,
@@ -4358,6 +4638,7 @@ export function FinanceProvider({ children }) {
         const catName = categories.find((c) => c.id === t.categoryId)?.name?.toLowerCase() || '';
         const accName = accounts.find((a) => a.id === t.accountId)?.name?.toLowerCase() || '';
         const destAccName = accounts.find((a) => a.id === t.destinationAccountId)?.name?.toLowerCase() || '';
+        const goalName = savingsGoals.find((g) => g.id === t.savingsGoalId)?.name?.toLowerCase() || '';
         const cardName = cards.find((c) => c.id === t.cardId)?.name?.toLowerCase() || '';
         const desc = (t.description || '').toLowerCase();
         const dateBR = formatDateBR(effectiveDate).toLowerCase();
@@ -4368,10 +4649,12 @@ export function FinanceProvider({ children }) {
           catName.includes(term) ||
           accName.includes(term) ||
           destAccName.includes(term) ||
+          goalName.includes(term) ||
           cardName.includes(term) ||
           effectiveDate.includes(term) ||
           dateBR.includes(term) ||
           purchaseBR.includes(term) ||
+          (t.savingsGoalId && (term === 'cofrinho' || term === 'caixinha' || term === 'reserva' || term === 'aporte' || term === 'resgate')) ||
           (t.type === 'TRANSFER' && (term === 'pix' || term === 'ted' || term.includes('transf')));
 
         if (!match) return false;
@@ -4389,7 +4672,7 @@ export function FinanceProvider({ children }) {
         if (t.status !== filterStatus) return false;
       }
 
-      // 4. Conta / Cartão
+      // 4. Conta / Cartão / Cofrinho
       if (filterSource === 'ACCOUNTS_ONLY') {
         if (!t.accountId || t.cardId) return false;
       } else if (filterSource === 'CARDS_ONLY') {
@@ -4401,6 +4684,9 @@ export function FinanceProvider({ children }) {
         } else {
           if (t.accountId !== targetAccId) return false;
         }
+      } else if (filterSource.startsWith('goal-')) {
+        const targetGoalId = filterSource.replace('goal-', '');
+        if (t.savingsGoalId !== targetGoalId) return false;
       } else if (filterSource.startsWith('card-')) {
         const targetCardId = filterSource.replace('card-', '');
         if (t.cardId !== targetCardId) return false;
@@ -4507,6 +4793,7 @@ export function FinanceProvider({ children }) {
     categories,
     accounts,
     cards,
+    savingsGoals,
     getTxDueDate,
     isTxOverdue,
   ]);
@@ -4754,6 +5041,10 @@ export function FinanceProvider({ children }) {
     setIsMoreMenuOpen,
     visibleAccounts,
     visibleCards,
+    savingsGoals,
+    setSavingsGoals,
+    visibleSavingsGoals,
+    savingsGoalBalances,
     visibleTransactions,
     accountBalances,
     cardStats,
@@ -4818,6 +5109,11 @@ export function FinanceProvider({ children }) {
     handleSaveAccount,
     handleSaveCard,
     handleSaveCategory,
+    handleSaveSavingsGoal,
+    handleDeleteSavingsGoal,
+    handleSavingsGoalAporte,
+    handleSavingsGoalResgate,
+    handleSavingsGoalYield,
     handleSaveTransaction,
     handleConfirmDeleteTransaction,
     handleConfirmDeleteInvoice,

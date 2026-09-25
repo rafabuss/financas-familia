@@ -18,8 +18,10 @@ import {
   ArrowRight,
   Mail,
   Clock,
+  PiggyBank,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, formatMonthLabel, getTxDueDate, isTxOverdue } from '../../utils/formatters';
+import { useFinance } from '../../contexts/FinanceContext';
 
 export default function DashboardTab({
   currentMemberId,
@@ -53,7 +55,12 @@ export default function DashboardTab({
   cardStats = {},
   setInvoiceSelectedMonth,
   openInvoicePaymentModal,
+  visibleSavingsGoals: propVisibleSavingsGoals,
+  savingsGoalBalances: propSavingsGoalBalances,
 }) {
+  const finance = useFinance ? useFinance() : {};
+  const visibleSavingsGoals = propVisibleSavingsGoals || finance.visibleSavingsGoals || [];
+  const savingsGoalBalances = propSavingsGoalBalances || finance.savingsGoalBalances || {};
   return (
     <div className="space-y-6">
       {/* Aviso de Visão Ativa */}
@@ -237,9 +244,17 @@ export default function DashboardTab({
           </div>
           <div className="mt-3 pt-2 border-t border-slate-700/60 text-[10px] text-slate-300 space-y-0.5">
             <div className="flex justify-between">
-              <span>Em conta:</span>
-              <span className="font-semibold text-white">{formatMoney(monthSummary.totalBankBalance)}</span>
+              <span>Em conta (operacional):</span>
+              <span className="font-semibold text-white">
+                {formatMoney(monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance)}
+              </span>
             </div>
+            {monthSummary.totalSavingsBalance > 0 && (
+              <div className="flex justify-between text-emerald-300">
+                <span>🛡️ Cofrinhos (reserva):</span>
+                <span className="font-semibold">+{formatMoney(monthSummary.totalSavingsBalance)}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-emerald-300">+ A receber:</span>
               <span className="font-semibold text-emerald-300">+{formatMoney(monthSummary.incomePending)}</span>
@@ -250,7 +265,7 @@ export default function DashboardTab({
             </div>
             {monthSummary.envelopesCommitted > 0 && (
               <div className="flex justify-between pt-1 border-t border-slate-700/40 text-amber-300 font-medium">
-                <span>- Envelopes (reserva):</span>
+                <span>- Envelopes (teto):</span>
                 <span>-{formatMoney(monthSummary.envelopesCommitted)}</span>
               </div>
             )}
@@ -263,11 +278,11 @@ export default function DashboardTab({
           </div>
         </div>
 
-        {/* Card 2: Saldo em Contas */}
+        {/* Card 2: Saldo Operacional Livre */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-slate-400 mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo em Contas</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Saldo Operacional Livre</span>
               <div className="flex items-center space-x-1.5">
                 <button
                   type="button"
@@ -280,11 +295,22 @@ export default function DashboardTab({
                 <Wallet className="w-5 h-5 text-blue-500" />
               </div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">{formatMoney(monthSummary.totalBankBalance)}</div>
-            <div className="text-xs text-slate-400 mt-1">Soma atual de todas as contas</div>
+            <div className="text-2xl font-bold text-slate-900">
+              {formatMoney(monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance)}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">Disponível em contas para o dia a dia</div>
           </div>
-          <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
-            Disponível agora nos bancos
+          <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500 flex flex-col space-y-0.5">
+            <div className="flex justify-between">
+              <span>💳 Contas Correntes:</span>
+              <strong className="text-slate-800">{formatMoney(monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance)}</strong>
+            </div>
+            {monthSummary.totalSavingsBalance > 0 && (
+              <div className="flex justify-between text-emerald-700">
+                <span>🛡️ Cofrinhos / Reserva:</span>
+                <strong className="text-emerald-700 font-bold">{formatMoney(monthSummary.totalSavingsBalance)}</strong>
+              </div>
+            )}
           </div>
         </div>
 
@@ -371,6 +397,79 @@ export default function DashboardTab({
           Explorar Projeção Completa &gt;
         </button>
       </div>
+
+      {/* Seção Cofrinhos & Reserva de Emergência (Renda Fixa / CDI) */}
+      {visibleSavingsGoals.length > 0 && (
+        <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-emerald-800/40">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center space-x-2 mb-1">
+                <PiggyBank className="w-5 h-5 text-emerald-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+                  Patrimônio Guardado & Reservas de Emergência
+                </span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
+                  100% CDI Liquidez Diária
+                </span>
+              </div>
+              <h2 className="text-xl font-bold flex items-center space-x-2">
+                <span>Total Guardado: {formatMoney(monthSummary.totalSavingsBalance || 0)}</span>
+              </h2>
+              <p className="text-xs text-emerald-200/80 mt-1 max-w-xl">
+                Recursos protegidos e rendendo diariamente, separados do saldo operacional das contas correntes.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('accounts')}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition whitespace-nowrap self-start md:self-auto shadow cursor-pointer flex items-center space-x-1.5"
+            >
+              <span>Gerenciar Cofrinhos</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Mini preview dos cofrinhos */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5 pt-4 border-t border-emerald-800/60">
+            {visibleSavingsGoals.slice(0, 4).map((goal) => {
+              const bal = savingsGoalBalances[goal.id] || 0;
+              const pct = goal.targetCents > 0 ? Math.min(100, Math.round((bal / goal.targetCents) * 100)) : null;
+              return (
+                <div
+                  key={goal.id}
+                  onClick={() => setActiveTab('accounts')}
+                  className="bg-white/10 hover:bg-white/15 p-3 rounded-xl border border-white/10 transition cursor-pointer flex flex-col justify-between"
+                  title={`Ver detalhes de ${goal.name}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-xs text-white truncate max-w-[140px]">{goal.name}</span>
+                    <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                      {goal.yieldRate || '100% CDI'}
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    <div className="text-base font-bold text-white">{formatMoney(bal)}</div>
+                    {pct !== null ? (
+                      <div className="mt-1">
+                        <div className="w-full bg-emerald-950/60 h-1.5 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="text-[10px] text-emerald-300 mt-0.5 flex justify-between">
+                          <span>{pct}% da meta</span>
+                          <span>{formatMoney(goal.targetCents)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-emerald-200/60">Reserva livre</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Grid de Widgets do Dashboard: Gráficos por Categoria & Envelopes de Orçamento */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

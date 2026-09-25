@@ -120,6 +120,12 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 * **Preservação Contábil Absoluta:** O valor em centavos abate rigorosamente o saldo bancário, as faturas de cartão e os envelopes orçamentários da família.
 * **Mascaramento Protetor:** O cônjuge visualiza o lançamento no extrato como *"Gasto Pessoal de [Nome]"*, com categoria neutra e botões de edição/exclusão travados, preservando a intimidade individual sem comprometer a exatidão financeira da casa.
 
+### 16. 🐷 Cofrinhos, Caixinhas & Metas de Reserva (Liquidez e Renda Fixa)
+* **Gestão de Liquidez Diária:** Separação entre o dinheiro livre para as contas correntes do dia a dia e os recursos protegidos em cofrinhos e caixinhas com rendimento (ex: 100% do CDI no Inter ou Caixinhas Nubank).
+* **Aportes e Resgates sem Distorção Contábil:** O motor nativo de `TRANSFER` transfere fundos entre a conta bancária e o cofrinho sem inflar despesas ou receitas do mês, mantendo a DRE familiar 100% íntegra.
+* **Extrato Cronológico do Cofrinho:** Linha do tempo com saldo progressivo, totais aportados, resgatados e rendimentos creditados.
+* **Barras de Progresso e Metas:** Acompanhamento visual da meta estipulada para cada objetivo (Reserva de Emergência, Viagem, IPVA, etc.).
+
 ---
 
 ## 🏗️ Arquitetura Modular & Estrutura de Componentes
@@ -283,13 +289,14 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Visualização no Extrato (`TransactionsTab`):** Identificação clara com tag e ícone: `⇄ Transferência: [Itaú] ➔ [Nubank]`.
   - [x] **Integração com Extratos Dedicados:** Exibição precisa de débitos e créditos nas contas correspondentes com impacto no Saldo Progressivo.
 
-- [ ] **Fase 6.1: Cofrinhos, Caixinhas & Reserva de Emergência (Liquidez e Renda Fixa)**
-  - [ ] Cadastro de cofrinhos e caixinhas associados a contas (ex: Cofrinho Inter da esposa, Caixinhas Nubank, CDBs com liquidez diária).
-  - [ ] Metas opcionais de valor e rendimento estimado (ex: 100% CDI).
-  - [ ] Fluxo de **Aporte** a partir da conta corrente (utilizando o motor nativo de `TRANSFER`).
-  - [ ] Fluxo de **Resgate Imediato** para a conta corrente para cobrir despesas da família.
-  - [ ] Separação e totalizadores no Dashboard entre *Saldo Livre para o Mês* vs *Patrimônio Guardado / Reserva*.
-  - [ ] Extrato dedicado do Cofrinho (histórico de aportes, resgates e rendimentos).
+- [x] **Fase 6.1: Cofrinhos, Caixinhas & Reserva de Emergência (Liquidez e Renda Fixa)**
+  - [x] Cadastro de cofrinhos e caixinhas associados a contas (ex: Cofrinho Inter da esposa, Caixinhas Nubank, CDBs com liquidez diária).
+  - [x] Metas opcionais de valor, progresso percentual e rendimento estimado (ex: 100% CDI, 102% CDI).
+  - [x] Fluxo de **Aporte** a partir da conta corrente com o motor nativo `TRANSFER` (débito em conta corrente e crédito no cofrinho sem inflar despesas/receitas).
+  - [x] Fluxo de **Resgate Imediato** para a conta corrente para cobrir despesas da família com disponibilização instantânea do saldo.
+  - [x] Lançamento ágil de **Rendimentos CDI** mensais diretamente creditados no cofrinho.
+  - [x] Separação e totalizadores no Dashboard entre **Saldo Operacional Livre** (para despesas do dia a dia) vs **Patrimônio Guardado / Cofrinhos** (reserva familiar protegida).
+  - [x] **Extrato Dedicado do Cofrinho (`SavingsGoalStatementModal`):** Linha do tempo cronológica com cálculo de saldo progressivo e resumo de totais aportados, resgatados e rendimentos.
 
 - [ ] **Fase 6.2: Carteira de Ativos & Renda Variável (Ações, FIIs, Criptomoedas e Tesouro)**
   - [ ] Cadastro de ativos de investimento: código/ticker, quantidade de cotas/tokens e preço médio.

@@ -153,6 +153,56 @@ export const DEMO_ACCOUNTS = [
 ];
 
 // ==============================================================================
+// 2.1 COFRINHOS, CAIXINHAS & RESERVA DE EMERGÊNCIA (FASE 6.1)
+// ==============================================================================
+export const DEMO_SAVINGS_GOALS = [
+  {
+    id: 'demo-goal-1',
+    name: 'Reserva de Emergência Familiar',
+    linkedAccountId: 'demo-acc-2', // Nubank
+    targetCents: 5000000, // Meta: R$ 50.000,00
+    currentBalanceCents: 3850000, // Saldo inicial: R$ 38.500,00
+    yieldRate: '100% CDI',
+    color: '#10b981',
+    icon: 'ShieldCheck',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-goal-2',
+    name: 'Caixinha Viagem de Férias & Praia',
+    linkedAccountId: 'demo-acc-4', // Inter
+    targetCents: 1200000, // Meta: R$ 12.000,00
+    currentBalanceCents: 780000, // Saldo inicial: R$ 7.800,00
+    yieldRate: '102% CDI',
+    color: '#0ea5e9',
+    icon: 'Plane',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-goal-3',
+    name: 'Cofrinho IPVA & Seguro do Carro',
+    linkedAccountId: 'demo-acc-1', // Banco do Brasil
+    targetCents: 600000, // Meta: R$ 6.000,00
+    currentBalanceCents: 420000, // Saldo inicial: R$ 4.200,00
+    yieldRate: '100% CDI',
+    color: '#f59e0b',
+    icon: 'Car',
+    ownerId: 'user-1',
+  },
+  {
+    id: 'demo-goal-4',
+    name: 'Caixinha Pós-Graduação Ana',
+    linkedAccountId: 'demo-acc-5', // C6 Bank
+    targetCents: 800000, // Meta: R$ 8.000,00
+    currentBalanceCents: 560000, // Saldo inicial: R$ 5.600,00
+    yieldRate: '100% CDI',
+    color: '#8b5cf6',
+    icon: 'GraduationCap',
+    ownerId: 'user-2',
+  },
+];
+
+// ==============================================================================
 // 3. CARTÕES DE CRÉDITO COM CICLOS E LIMITES
 // ==============================================================================
 export const DEMO_CARDS = [
@@ -995,6 +1045,55 @@ export const DEMO_TRANSACTIONS = [
     scope: 'FAMILY',
     visibility: 'FAMILY',
     ownerId: 'user-1',
+  },
+
+  // --- MOVIMENTAÇÕES DE COFRINHOS & RESERVA (FASE 6.1) ---
+  {
+    id: 'demo-tx-goal-aporte-1',
+    description: 'Aporte Cofrinho: BB ➔ Caixinha Viagem de Férias & Praia',
+    amountCents: 50000,
+    type: 'TRANSFER',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 12),
+    dueDate: getRelativeDate(0, 12),
+    accountId: 'demo-acc-1',
+    destinationAccountId: null,
+    savingsGoalId: 'demo-goal-2',
+    categoryId: 'cat-transferencia',
+    scope: 'FAMILY',
+    visibility: 'FAMILY',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-tx-goal-resgate-1',
+    description: 'Resgate Cofrinho: Cofrinho IPVA ➔ Conta BB',
+    amountCents: 30000,
+    type: 'TRANSFER',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 8),
+    dueDate: getRelativeDate(0, 8),
+    accountId: null,
+    destinationAccountId: 'demo-acc-1',
+    savingsGoalId: 'demo-goal-3',
+    categoryId: 'cat-transferencia',
+    scope: 'FAMILY',
+    visibility: 'FAMILY',
+    ownerId: 'user-1',
+  },
+  {
+    id: 'demo-tx-goal-yield-1',
+    description: 'Rendimento CDI - Reserva de Emergência Familiar',
+    amountCents: 38500,
+    type: 'INCOME',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 15),
+    dueDate: getRelativeDate(0, 15),
+    accountId: null,
+    savingsGoalId: 'demo-goal-1',
+    categoryId: 'cat-investimentos',
+    scope: 'FAMILY',
+    visibility: 'FAMILY',
+    ownerId: 'user-all',
   },
 
   // --- RECEITAS DO MÊS ATUAL ---

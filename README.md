@@ -147,6 +147,9 @@ src/
 │   │   └── AccountsTab.jsx            # Contas correntes, investimentos, carteiras e cartões
 │   ├── cards/
 │   │   └── CardsInvoicesTab.jsx       # Gestão de cartões, faturas mensais e parcelas futuras
+│   ├── investments/
+│   │   ├── SavingsGoalsTab.jsx        # Cofrinhos, caixinhas e metas de reserva com rendimento CDI (Fase 6.1)
+│   │   └── PortfolioTab.jsx           # Carteira de ativos e renda variável (Fase 6.2)
 │   ├── envelopes/
 │   │   └── EnvelopesTab.jsx           # Metodologia dos envelopes e tetos orçamentários por mês
 │   ├── categories/
@@ -164,6 +167,7 @@ src/
 │   └── modals/
 │       ├── EntityModal.jsx            # Modal unificado para Contas, Cartões, Categorias e Cenários
 │       ├── TransactionModal.jsx       # Modal completo de lançamento (parcelas, recorrências, privacidade)
+│       ├── SavingsGoalModals.jsx      # Modais de Cofrinho (Aporte, Resgate, Extrato Progressivo e Rendimento)
 │       ├── DeleteModals.jsx           # Modais de exclusão (transação única, parcelas em lote, fatura)
 │       ├── InvoicePaymentModal.jsx    # Liquidação de fatura com débito em conta bancária
 │       └── EnvelopeModals.jsx         # Programação mensal, conflito de tetos e exclusão de envelopes

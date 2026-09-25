@@ -6,6 +6,8 @@ import {
   Calendar,
   Sliders,
   Mail,
+  PiggyBank,
+  TrendingUp,
 } from 'lucide-react';
 import AuthModal from './components/AuthModal';
 import AIChatDrawer from './components/AIChatDrawer';
@@ -14,6 +16,8 @@ import DashboardTab from './components/dashboard/DashboardTab';
 import TransactionsTab from './components/transactions/TransactionsTab';
 import AccountsTab from './components/accounts/AccountsTab';
 import CardsInvoicesTab from './components/cards/CardsInvoicesTab';
+import SavingsGoalsTab from './components/investments/SavingsGoalsTab';
+import PortfolioTab from './components/investments/PortfolioTab';
 import EnvelopesTab from './components/envelopes/EnvelopesTab';
 import CategoriesTab from './components/categories/CategoriesTab';
 import ProjectionsTab from './components/projections/ProjectionsTab';
@@ -432,16 +436,7 @@ function AppContent() {
             handleDeleteCard={handleDeleteCard}
             onNavigateToAccountStatement={handleNavigateToAccountStatement}
             onNavigateToCardStatement={handleNavigateToCardStatement}
-            visibleSavingsGoals={visibleSavingsGoals}
-            savingsGoalBalances={savingsGoalBalances}
-            handleSaveSavingsGoal={handleSaveSavingsGoal}
-            handleDeleteSavingsGoal={handleDeleteSavingsGoal}
-            handleSavingsGoalAporte={handleSavingsGoalAporte}
-            handleSavingsGoalResgate={handleSavingsGoalResgate}
-            handleSavingsGoalYield={handleSavingsGoalYield}
-            transactions={transactions}
-            accounts={accounts}
-            currentMemberId={currentMemberId}
+            setActiveTab={setActiveTab}
           />
         )}
 
@@ -464,6 +459,54 @@ function AppContent() {
             setActiveTab={setActiveTab}
             setModalState={setModalState}
           />
+        )}
+
+        {/* ===================== SUB-ABAS DO MÓDULO: INVESTIMENTOS & RESERVAS ===================== */}
+        {['savings', 'portfolio', 'investments'].includes(activeTab) && (
+          <div className="flex items-center space-x-1.5 bg-slate-200/80 p-1 rounded-xl w-fit mb-6 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('savings')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                ['savings', 'investments'].includes(activeTab) ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <PiggyBank className="w-4 h-4 text-emerald-600" />
+              <span>🐷 Cofrinhos & Reservas (CDI)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('portfolio')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                activeTab === 'portfolio' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4 text-blue-600" />
+              <span>📈 Carteira & Renda Variável</span>
+            </button>
+          </div>
+        )}
+
+        {/* ===================== ABA: COFRINHOS & RESERVAS ===================== */}
+        {['savings', 'investments'].includes(activeTab) && (
+          <SavingsGoalsTab
+            visibleSavingsGoals={visibleSavingsGoals}
+            savingsGoalBalances={savingsGoalBalances}
+            handleSaveSavingsGoal={handleSaveSavingsGoal}
+            handleDeleteSavingsGoal={handleDeleteSavingsGoal}
+            handleSavingsGoalAporte={handleSavingsGoalAporte}
+            handleSavingsGoalResgate={handleSavingsGoalResgate}
+            handleSavingsGoalYield={handleSavingsGoalYield}
+            accounts={accounts}
+            accountBalances={accountBalances}
+            transactions={transactions}
+            currentMemberId={currentMemberId}
+          />
+        )}
+
+        {/* ===================== ABA: CARTEIRA DE ATIVOS ===================== */}
+        {activeTab === 'portfolio' && (
+          <PortfolioTab />
         )}
 
         {/* ===================== SUB-ABAS DO MÓDULO: ENVELOPES & CATEGORIAS ===================== */}

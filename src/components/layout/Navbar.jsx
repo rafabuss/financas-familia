@@ -17,6 +17,7 @@ import {
   PieChart,
   UploadCloud,
   Download,
+  TrendingUp,
 } from 'lucide-react';
 import { FAMILY_MEMBERS } from '../../data/constants';
 
@@ -347,6 +348,21 @@ export default function Navbar({
             >
               <Wallet className="w-4 h-4" />
               <span>Contas & Faturas</span>
+            </button>
+
+            {/* 4. Investimentos */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!['savings', 'portfolio'].includes(activeTab)) setActiveTab('savings');
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition cursor-pointer ${
+                ['savings', 'portfolio', 'investments'].includes(activeTab) ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span>Investimentos</span>
             </button>
 
             {/* 4. Envelopes & Categorias */}

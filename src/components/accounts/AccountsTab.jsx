@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Plus,
   Edit2,
@@ -8,21 +8,10 @@ import {
   CreditCard,
   ArrowLeftRight,
   PiggyBank,
-  TrendingUp,
-  ArrowDownLeft,
-  ArrowUpRight,
+  ArrowRight,
 } from 'lucide-react';
 import { formatMoney } from '../../utils/formatters';
-import { FAMILY_MEMBERS } from '../../data/constants';
 import { useFinance } from '../../contexts/FinanceContext';
-import {
-  SavingsGoalModal,
-  SavingsGoalAporteModal,
-  SavingsGoalResgateModal,
-  SavingsGoalYieldModal,
-  SavingsGoalStatementModal,
-  SAVINGS_GOAL_ICONS,
-} from '../modals/SavingsGoalModals';
 
 export default function AccountsTab({
   visibleAccounts: propVisibleAccounts,
@@ -37,43 +26,18 @@ export default function AccountsTab({
   handleDeleteCard,
   onNavigateToAccountStatement,
   onNavigateToCardStatement,
-  visibleSavingsGoals: propVisibleSavingsGoals,
-  savingsGoalBalances: propSavingsGoalBalances,
-  handleSaveSavingsGoal: propHandleSaveSavingsGoal,
-  handleDeleteSavingsGoal: propHandleDeleteSavingsGoal,
-  handleSavingsGoalAporte: propHandleSavingsGoalAporte,
-  handleSavingsGoalResgate: propHandleSavingsGoalResgate,
-  handleSavingsGoalYield: propHandleSavingsGoalYield,
-  transactions: propTransactions,
-  currentMemberId: propCurrentMemberId,
+  setActiveTab: propSetActiveTab,
 }) {
-  // Consome via hook com fallback para as props passadas
   const finance = useFinance ? useFinance() : {};
 
   const visibleAccounts = propVisibleAccounts || finance.visibleAccounts || [];
-  const accounts = finance.accounts || visibleAccounts || [];
   const accountBalances = propAccountBalances || finance.accountBalances || {};
   const visibleCards = propVisibleCards || finance.visibleCards || [];
   const cardStats = propCardStats || finance.cardStats || {};
-  const visibleSavingsGoals = propVisibleSavingsGoals || finance.visibleSavingsGoals || [];
-  const savingsGoalBalances = propSavingsGoalBalances || finance.savingsGoalBalances || {};
-  const handleSaveSavingsGoal = propHandleSaveSavingsGoal || finance.handleSaveSavingsGoal;
-  const handleDeleteSavingsGoal = propHandleDeleteSavingsGoal || finance.handleDeleteSavingsGoal;
-  const handleSavingsGoalAporte = propHandleSavingsGoalAporte || finance.handleSavingsGoalAporte;
-  const handleSavingsGoalResgate = propHandleSavingsGoalResgate || finance.handleSavingsGoalResgate;
-  const handleSavingsGoalYield = propHandleSavingsGoalYield || finance.handleSavingsGoalYield;
-  const transactions = propTransactions || finance.transactions || [];
-  const currentMemberId = propCurrentMemberId || finance.currentMemberId || 'user-all';
-
-  // Estados dos Modais de Cofrinhos
-  const [goalModalState, setGoalModalState] = useState({ isOpen: false, mode: 'create', data: null });
-  const [aporteModalGoal, setAporteModalGoal] = useState(null);
-  const [resgateModalGoal, setResgateModalGoal] = useState(null);
-  const [yieldModalGoal, setYieldModalGoal] = useState(null);
-  const [statementModalGoal, setStatementModalGoal] = useState(null);
+  const setActiveTab = propSetActiveTab || finance.setActiveTab;
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       {/* ===================== CONTAS BANCÁRIAS E CARTEIRAS ===================== */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -172,249 +136,33 @@ export default function AccountsTab({
         </div>
       </div>
 
-      {/* ===================== COFRINHOS, CAIXINHAS & RESERVA DE EMERGÊNCIA ===================== */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* ===================== BANNER: INVESTIMENTOS & COFRINHOS ===================== */}
+      <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200/80 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start space-x-3.5">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <PiggyBank className="w-6 h-6" />
+          </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg">
-                <PiggyBank className="w-5 h-5" />
+              <h3 className="font-bold text-slate-900 text-sm sm:text-base">Cofrinhos & Reservas de Emergência</h3>
+              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full uppercase">
+                Aba Investimentos
               </span>
-              <h2 className="text-lg font-bold text-slate-900">Cofrinhos & Metas de Reserva</h2>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Caixinhas Nubank, Cofrinhos Inter e reservas com liquidez diária e rendimento CDI
+            <p className="text-xs text-slate-600 mt-1 max-w-xl">
+              Suas caixinhas, cofrinhos com rendimento 100% CDI e metas de reserva agora contam com um módulo exclusivo de <strong>Investimentos</strong>, com acompanhamento de metas, aportes, resgates e extratos completos.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setGoalModalState({ isOpen: true, mode: 'create', data: null })}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 cursor-pointer shadow-sm transition active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Novo Cofrinho / Meta</span>
-          </button>
         </div>
 
-        {/* Resumo consolidado dos cofrinhos */}
-        {visibleSavingsGoals.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-emerald-50/60 border border-emerald-200/70 p-4 rounded-2xl">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Total Guardado em Cofrinhos</span>
-              <div className="text-xl font-black text-emerald-950">
-                {formatMoney(
-                  visibleSavingsGoals.reduce((sum, g) => sum + (savingsGoalBalances[g.id] || 0), 0)
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Total de Metas Planejadas</span>
-              <div className="text-xl font-bold text-emerald-900">
-                {formatMoney(
-                  visibleSavingsGoals.reduce((sum, g) => sum + (g.targetCents || 0), 0)
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Progresso Médio Geral</span>
-              <div className="text-xl font-bold text-emerald-900">
-                {(() => {
-                  const totalSaved = visibleSavingsGoals.reduce((sum, g) => sum + (savingsGoalBalances[g.id] || 0), 0);
-                  const totalTarget = visibleSavingsGoals.reduce((sum, g) => sum + (g.targetCents || 0), 0);
-                  return totalTarget > 0 ? `${Math.min(100, Math.round((totalSaved / totalTarget) * 100))}%` : 'Livre';
-                })()}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Grid dos Cofrinhos */}
-        {visibleSavingsGoals.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center flex flex-col items-center justify-center space-y-3">
-            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <PiggyBank className="w-6 h-6" />
-            </div>
-            <div className="max-w-md">
-              <h3 className="font-bold text-slate-800 text-sm">Nenhum cofrinho ou caixinha cadastrado ainda</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Separe dinheiro para a Reserva de Emergência, férias, IPVA ou metas futuras com rendimento CDI sem misturar com o saldo das contas do dia a dia.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setGoalModalState({ isOpen: true, mode: 'create', data: null })}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition cursor-pointer flex items-center space-x-1.5 shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Criar Primeiro Cofrinho</span>
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {visibleSavingsGoals.map((goal) => {
-              const balance = savingsGoalBalances[goal.id] || 0;
-              const hasTarget = goal.targetCents > 0;
-              const pct = hasTarget ? Math.min(100, Math.round((balance / goal.targetCents) * 100)) : 0;
-              const isGoalReached = hasTarget && balance >= goal.targetCents;
-              const linkedAcc = accounts.find((a) => a.id === goal.linkedAccountId);
-              const IconComp = SAVINGS_GOAL_ICONS[goal.icon] || PiggyBank;
-              const ownerMember = FAMILY_MEMBERS.find((m) => m.id === goal.ownerId);
-
-              return (
-                <div
-                  key={goal.id}
-                  className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
-                >
-                  <div>
-                    {/* Header do Card */}
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center space-x-3">
-                        <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-xs shrink-0"
-                          style={{ backgroundColor: goal.color || '#10b981' }}
-                        >
-                          <IconComp className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-slate-900 text-base leading-snug">{goal.name}</h3>
-                          <div className="flex items-center space-x-1.5 flex-wrap text-xs text-slate-500 mt-0.5">
-                            {linkedAcc ? (
-                              <span>{linkedAcc.name}</span>
-                            ) : (
-                              <span>Geral da Família</span>
-                            )}
-                            {goal.ownerId && goal.ownerId !== 'user-all' && (
-                              <>
-                                <span>•</span>
-                                <span className="bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded text-[10px] font-bold">
-                                  {ownerMember?.name || 'Membro'}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80 px-2 py-0.5 rounded-full whitespace-nowrap">
-                        {goal.yieldRate || '100% CDI'}
-                      </span>
-                    </div>
-
-                    {/* Saldo Atual */}
-                    <div className="mt-4 pt-3 border-t border-slate-100">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">Saldo Acumulado</span>
-                        {isGoalReached && (
-                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                            🎉 Meta Atingida!
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-2xl font-black text-slate-900 mt-0.5">
-                        {formatMoney(balance)}
-                      </div>
-                    </div>
-
-                    {/* Barra de Progresso em relação à Meta */}
-                    <div className="mt-3 space-y-1.5">
-                      {hasTarget ? (
-                        <>
-                          <div className="flex justify-between text-xs text-slate-500 font-medium">
-                            <span>Meta: <strong>{formatMoney(goal.targetCents)}</strong></span>
-                            <span className="font-bold text-emerald-700">{pct}%</span>
-                          </div>
-                          <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: isGoalReached ? '#10b981' : goal.color || '#10b981',
-                              }}
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-[11px] text-slate-400 italic">
-                          Reserva livre sem teto estipulado (rendendo {goal.yieldRate || '100% CDI'})
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Ações Rápidas */}
-                  <div className="mt-5 pt-3 border-t border-slate-100">
-                    <div className="flex flex-wrap items-center justify-between gap-1.5">
-                      <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-                        {/* Aportar */}
-                        <button
-                          type="button"
-                          onClick={() => setAporteModalGoal(goal)}
-                          className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
-                          title={`Guardar dinheiro em ${goal.name}`}
-                        >
-                          <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Aportar</span>
-                        </button>
-
-                        {/* Resgatar */}
-                        <button
-                          type="button"
-                          onClick={() => setResgateModalGoal(goal)}
-                          className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
-                          title={`Resgatar saldo de ${goal.name} para Conta Corrente`}
-                        >
-                          <ArrowUpRight className="w-3.5 h-3.5 text-sky-600" />
-                          <span>Resgatar</span>
-                        </button>
-
-                        {/* Ver Extrato */}
-                        <button
-                          type="button"
-                          onClick={() => setStatementModalGoal(goal)}
-                          className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
-                          title="Ver Extrato completo com saldo progressivo e linha do tempo"
-                        >
-                          <Receipt className="w-3.5 h-3.5 text-slate-600" />
-                          <span>Extrato</span>
-                        </button>
-
-                        {/* + Rendimento */}
-                        <button
-                          type="button"
-                          onClick={() => setYieldModalGoal(goal)}
-                          className="px-2 py-1.5 text-xs font-semibold rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1 transition active:scale-95 cursor-pointer shadow-2xs"
-                          title={`Lançar rendimento mensal CDI para ${goal.name}`}
-                        >
-                          <TrendingUp className="w-3.5 h-3.5 text-amber-600" />
-                          <span>+ CDI</span>
-                        </button>
-                      </div>
-
-                      {/* Editar & Excluir */}
-                      <div className="flex items-center space-x-1 ml-auto">
-                        <button
-                          type="button"
-                          onClick={() => setGoalModalState({ isOpen: true, mode: 'edit', data: goal })}
-                          className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
-                          title="Editar Metas e Configurações"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteSavingsGoal(goal)}
-                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                          title="Excluir Cofrinho"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => setActiveTab && setActiveTab('savings')}
+          className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition active:scale-95 shadow-sm whitespace-nowrap self-start sm:self-auto cursor-pointer flex items-center space-x-1.5"
+        >
+          <span>Acessar Investimentos</span>
+          <ArrowRight className="w-4 h-4" />
+        </button>
       </div>
 
       {/* ===================== CARTÕES DE CRÉDITO ===================== */}
@@ -501,61 +249,6 @@ export default function AccountsTab({
           })}
         </div>
       </div>
-
-      {/* ===================== MODAIS DE COFRINHOS ===================== */}
-      <SavingsGoalModal
-        isOpen={goalModalState.isOpen}
-        onClose={() => setGoalModalState({ isOpen: false, mode: 'create', data: null })}
-        mode={goalModalState.mode}
-        initialData={goalModalState.data}
-        accounts={accounts}
-        onSave={handleSaveSavingsGoal}
-        currentMemberId={currentMemberId}
-      />
-
-      <SavingsGoalAporteModal
-        isOpen={!!aporteModalGoal}
-        onClose={() => setAporteModalGoal(null)}
-        goal={aporteModalGoal}
-        accounts={accounts}
-        accountBalances={accountBalances}
-        onConfirmAporte={handleSavingsGoalAporte}
-      />
-
-      <SavingsGoalResgateModal
-        isOpen={!!resgateModalGoal}
-        onClose={() => setResgateModalGoal(null)}
-        goal={resgateModalGoal}
-        accounts={accounts}
-        onConfirmResgate={handleSavingsGoalResgate}
-      />
-
-      <SavingsGoalYieldModal
-        isOpen={!!yieldModalGoal}
-        onClose={() => setYieldModalGoal(null)}
-        goal={yieldModalGoal}
-        onConfirmYield={handleSavingsGoalYield}
-      />
-
-      <SavingsGoalStatementModal
-        isOpen={!!statementModalGoal}
-        onClose={() => setStatementModalGoal(null)}
-        goal={statementModalGoal}
-        accounts={accounts}
-        transactions={transactions}
-        onOpenAporte={(g) => {
-          setStatementModalGoal(null);
-          setAporteModalGoal(g);
-        }}
-        onOpenResgate={(g) => {
-          setStatementModalGoal(null);
-          setResgateModalGoal(g);
-        }}
-        onOpenYield={(g) => {
-          setStatementModalGoal(null);
-          setYieldModalGoal(g);
-        }}
-      />
     </div>
   );
 }

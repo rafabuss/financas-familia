@@ -422,7 +422,7 @@ export default function DashboardTab({
 
             <button
               type="button"
-              onClick={() => setActiveTab('accounts')}
+              onClick={() => setActiveTab('savings')}
               className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition whitespace-nowrap self-start md:self-auto shadow cursor-pointer flex items-center space-x-1.5"
             >
               <span>Gerenciar Cofrinhos</span>
@@ -438,7 +438,7 @@ export default function DashboardTab({
               return (
                 <div
                   key={goal.id}
-                  onClick={() => setActiveTab('accounts')}
+                  onClick={() => setActiveTab('savings')}
                   className="bg-white/10 hover:bg-white/15 p-3 rounded-xl border border-white/10 transition cursor-pointer flex flex-col justify-between"
                   title={`Ver detalhes de ${goal.name}`}
                 >

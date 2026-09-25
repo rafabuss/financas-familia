@@ -19,6 +19,7 @@ import {
   Mail,
   Clock,
   PiggyBank,
+  TrendingUp,
 } from 'lucide-react';
 import { formatMoney, formatDateBR, formatMonthLabel, getTxDueDate, isTxOverdue } from '../../utils/formatters';
 import { useFinance } from '../../contexts/FinanceContext';
@@ -57,10 +58,19 @@ export default function DashboardTab({
   openInvoicePaymentModal,
   visibleSavingsGoals: propVisibleSavingsGoals,
   savingsGoalBalances: propSavingsGoalBalances,
+  visiblePortfolioAssets: propVisiblePortfolioAssets,
+  portfolioSummary: propPortfolioSummary,
 }) {
-  const finance = useFinance ? useFinance() : {};
+  const finance = useFinance();
   const visibleSavingsGoals = propVisibleSavingsGoals || finance.visibleSavingsGoals || [];
   const savingsGoalBalances = propSavingsGoalBalances || finance.savingsGoalBalances || {};
+  const visiblePortfolioAssets = propVisiblePortfolioAssets || finance.visiblePortfolioAssets || [];
+  const portfolioSummary = propPortfolioSummary || finance.portfolioSummary || {
+    totalInvestedCents: 0,
+    currentValueCents: 0,
+    profitLossCents: 0,
+    profitLossPercent: 0,
+  };
   return (
     <div className="space-y-6">
       {/* Aviso de Visão Ativa */}
@@ -255,6 +265,12 @@ export default function DashboardTab({
                 <span className="font-semibold">+{formatMoney(monthSummary.totalSavingsBalance)}</span>
               </div>
             )}
+            {monthSummary.totalPortfolioBalance > 0 && (
+              <div className="flex justify-between text-blue-300">
+                <span>📈 Carteira & Cripto:</span>
+                <span className="font-semibold">+{formatMoney(monthSummary.totalPortfolioBalance)}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-emerald-300">+ A receber:</span>
               <span className="font-semibold text-emerald-300">+{formatMoney(monthSummary.incomePending)}</span>
@@ -311,6 +327,16 @@ export default function DashboardTab({
                 <strong className="text-emerald-700 font-bold">{formatMoney(monthSummary.totalSavingsBalance)}</strong>
               </div>
             )}
+            {(monthSummary.totalPortfolioBalance > 0 || visiblePortfolioAssets.length > 0) && (
+              <div className="flex justify-between text-blue-700">
+                <span>📈 Carteira de Ativos:</span>
+                <strong className="text-blue-700 font-bold">{formatMoney(monthSummary.totalPortfolioBalance || portfolioSummary.currentValueCents)}</strong>
+              </div>
+            )}
+            <div className="flex justify-between pt-1 border-t border-slate-100 text-indigo-900 font-extrabold text-[10px]">
+              <span>💎 Patrimônio Total:</span>
+              <span>{formatMoney(monthSummary.totalFamilyNetWorth || ((monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance ?? 0) + (monthSummary.totalSavingsBalance || 0) + (monthSummary.totalPortfolioBalance || portfolioSummary.currentValueCents || 0)))}</span>
+            </div>
           </div>
         </div>
 
@@ -398,71 +424,179 @@ export default function DashboardTab({
         </button>
       </div>
 
-      {/* Seção Cofrinhos & Reserva de Emergência (Renda Fixa / CDI) */}
-      {visibleSavingsGoals.length > 0 && (
-        <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-emerald-800/40">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Seção de Patrimônio Consolidado da Família (Contas Correntes + Cofrinhos CDI + Carteira de Ativos) */}
+      {(visibleSavingsGoals.length > 0 || visiblePortfolioAssets.length > 0) && (
+        <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 sm:p-7 shadow-md border border-slate-800">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
             <div>
-              <div className="flex items-center space-x-2 mb-1">
-                <PiggyBank className="w-5 h-5 text-emerald-400" />
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
-                  Patrimônio Guardado & Reservas de Emergência
+              <div className="flex items-center space-x-2 mb-1.5">
+                <Sparkles className="w-5 h-5 text-amber-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                  Patrimônio Consolidado da Família
                 </span>
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
-                  100% CDI Liquidez Diária
+                <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-semibold">
+                  Visão Global 360°
                 </span>
               </div>
-              <h2 className="text-xl font-bold flex items-center space-x-2">
-                <span>Total Guardado: {formatMoney(monthSummary.totalSavingsBalance || 0)}</span>
+              <h2 className="text-2xl sm:text-3xl font-black text-white flex items-baseline space-x-2">
+                <span>{formatMoney(monthSummary.totalFamilyNetWorth || ((monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance ?? 0) + (monthSummary.totalSavingsBalance || 0) + (monthSummary.totalPortfolioBalance || portfolioSummary.currentValueCents || 0)))}</span>
               </h2>
-              <p className="text-xs text-emerald-200/80 mt-1 max-w-xl">
-                Recursos protegidos e rendendo diariamente, separados do saldo operacional das contas correntes.
+              <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                Riqueza líquida familiar distribuída entre saldo operacional de contas correntes, reserva de liquidez em cofrinhos CDI e carteira de ativos de longo prazo.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('savings')}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm px-5 py-2.5 rounded-xl transition whitespace-nowrap self-start md:self-auto shadow cursor-pointer flex items-center space-x-1.5"
-            >
-              <span>Gerenciar Cofrinhos</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setActiveTab('savings')}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1.5"
+              >
+                <PiggyBank className="w-4 h-4" />
+                <span>Cofrinhos CDI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('portfolio')}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1.5"
+              >
+                <TrendingUp className="w-4 h-4" />
+                <span>Carteira de Ativos</span>
+              </button>
+            </div>
           </div>
 
-          {/* Mini preview dos cofrinhos */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5 pt-4 border-t border-emerald-800/60">
-            {visibleSavingsGoals.slice(0, 4).map((goal) => {
+          {/* 3 Pilares do Patrimônio Consolidado */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-6 pt-5 border-t border-slate-800">
+            {/* Pilar 1: Contas Correntes */}
+            <div
+              onClick={() => setActiveTab('accounts')}
+              className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 transition cursor-pointer flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="flex items-center space-x-1.5">
+                  <Wallet className="w-4 h-4 text-blue-400" />
+                  <span className="font-semibold text-slate-300">Contas Correntes</span>
+                </span>
+                <span className="text-[10px] bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded font-bold">Dia a dia</span>
+              </div>
+              <div className="mt-3">
+                <div className="text-xl font-bold text-white">
+                  {formatMoney(monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Saldo operacional livre</div>
+              </div>
+            </div>
+
+            {/* Pilar 2: Cofrinhos & Reservas CDI */}
+            <div
+              onClick={() => setActiveTab('savings')}
+              className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 transition cursor-pointer flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="flex items-center space-x-1.5">
+                  <PiggyBank className="w-4 h-4 text-emerald-400" />
+                  <span className="font-semibold text-slate-300">Cofrinhos & Reservas</span>
+                </span>
+                <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-1.5 py-0.5 rounded font-bold">100% CDI</span>
+              </div>
+              <div className="mt-3">
+                <div className="text-xl font-bold text-emerald-400">
+                  {formatMoney(monthSummary.totalSavingsBalance || 0)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Reserva familiar protegida</div>
+              </div>
+            </div>
+
+            {/* Pilar 3: Carteira de Ativos & Cripto */}
+            <div
+              onClick={() => setActiveTab('portfolio')}
+              className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 transition cursor-pointer flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="flex items-center space-x-1.5">
+                  <TrendingUp className="w-4 h-4 text-amber-400" />
+                  <span className="font-semibold text-slate-300">Carteira & Cripto</span>
+                </span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                  portfolioSummary.profitLossPercent >= 0 ? 'bg-emerald-900/60 text-emerald-300' : 'bg-rose-900/60 text-rose-300'
+                }`}>
+                  {portfolioSummary.profitLossPercent >= 0 ? '+' : ''}{portfolioSummary.profitLossPercent.toFixed(1)}%
+                </span>
+              </div>
+              <div className="mt-3">
+                <div className="text-xl font-bold text-amber-300">
+                  {formatMoney(monthSummary.totalPortfolioBalance || portfolioSummary.currentValueCents || 0)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{visiblePortfolioAssets.length} ativos em custódia</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Mini preview dos ativos e cofrinhos */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-800">
+            {/* 2 Cofrinhos principais */}
+            {visibleSavingsGoals.slice(0, 2).map((goal) => {
               const bal = savingsGoalBalances[goal.id] || 0;
               const pct = goal.targetCents > 0 ? Math.min(100, Math.round((bal / goal.targetCents) * 100)) : null;
               return (
                 <div
                   key={goal.id}
                   onClick={() => setActiveTab('savings')}
-                  className="bg-white/10 hover:bg-white/15 p-3 rounded-xl border border-white/10 transition cursor-pointer flex flex-col justify-between"
+                  className="bg-emerald-950/40 hover:bg-emerald-900/40 p-3 rounded-xl border border-emerald-800/40 transition cursor-pointer flex flex-col justify-between"
                   title={`Ver detalhes de ${goal.name}`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-xs text-white truncate max-w-[140px]">{goal.name}</span>
-                    <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                    <span className="font-semibold text-xs text-white truncate max-w-[130px]">{goal.name}</span>
+                    <span className="text-[10px] text-emerald-300 font-bold bg-emerald-950/80 px-1.5 py-0.5 rounded">
                       {goal.yieldRate || '100% CDI'}
                     </span>
                   </div>
                   <div className="mt-2">
-                    <div className="text-base font-bold text-white">{formatMoney(bal)}</div>
+                    <div className="text-sm font-bold text-emerald-200">{formatMoney(bal)}</div>
                     {pct !== null ? (
                       <div className="mt-1">
                         <div className="w-full bg-emerald-950/60 h-1.5 rounded-full overflow-hidden">
                           <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
-                        <div className="text-[10px] text-emerald-300 mt-0.5 flex justify-between">
+                        <div className="text-[9px] text-emerald-300/80 mt-0.5 flex justify-between">
                           <span>{pct}% da meta</span>
-                          <span>{formatMoney(goal.targetCents)}</span>
                         </div>
                       </div>
                     ) : (
                       <span className="text-[10px] text-emerald-200/60">Reserva livre</span>
                     )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 2 Ativos da Carteira principais */}
+            {visiblePortfolioAssets.slice(0, 2).map((asset) => {
+              const qty = Number(asset.quantity || 0);
+              const curVal = Math.round(qty * Number(asset.currentPriceCents || 0));
+              const invVal = Math.round(qty * Number(asset.averagePriceCents || 0));
+              const diffPct = invVal > 0 ? ((curVal - invVal) / invVal) * 100 : 0;
+              return (
+                <div
+                  key={asset.id}
+                  onClick={() => setActiveTab('portfolio')}
+                  className="bg-blue-950/40 hover:bg-blue-900/40 p-3 rounded-xl border border-blue-800/40 transition cursor-pointer flex flex-col justify-between"
+                  title={`Ver detalhes de ${asset.ticker} - ${asset.name}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-xs text-white">{asset.ticker}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      diffPct >= 0 ? 'bg-emerald-950/80 text-emerald-300' : 'bg-rose-950/80 text-rose-300'
+                    }`}>
+                      {diffPct >= 0 ? '+' : ''}{diffPct.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    <div className="text-sm font-bold text-blue-200">{formatMoney(curVal)}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                      {asset.institution} • {qty} cotas
+                    </div>
                   </div>
                 </div>
               );

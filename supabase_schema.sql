@@ -105,6 +105,23 @@ CREATE TABLE IF NOT EXISTS public.savings_goals (
 -- Garante a coluna savings_goal_id em transações
 ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS savings_goal_id TEXT REFERENCES public.savings_goals(id) ON DELETE SET NULL;
 
+-- 7. Tabela de Ativos da Carteira & Renda Variável (Fase 6.2)
+CREATE TABLE IF NOT EXISTS public.portfolio_assets (
+  id TEXT PRIMARY KEY,
+  household_id UUID,
+  name TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  asset_type TEXT NOT NULL DEFAULT 'STOCK',
+  institution TEXT NOT NULL DEFAULT '',
+  quantity NUMERIC NOT NULL DEFAULT 0,
+  average_price_cents BIGINT NOT NULL DEFAULT 0,
+  current_price_cents BIGINT NOT NULL DEFAULT 0,
+  notes TEXT,
+  owner_id TEXT NOT NULL DEFAULT 'user-all',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 7. Tabela de Cenários & Simulações ("What-If")
 CREATE TABLE IF NOT EXISTS public.scenarios (
   id TEXT PRIMARY KEY,
@@ -147,6 +164,10 @@ CREATE INDEX IF NOT EXISTS idx_transactions_card ON public.transactions(card_id)
 CREATE INDEX IF NOT EXISTS idx_transactions_group ON public.transactions(installment_group_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_savings_goal ON public.transactions(savings_goal_id);
 CREATE INDEX IF NOT EXISTS idx_savings_goals_household ON public.savings_goals(household_id);
+CREATE INDEX IF NOT EXISTS idx_portfolio_assets_household ON public.portfolio_assets(household_id);
+CREATE INDEX IF NOT EXISTS idx_portfolio_assets_type ON public.portfolio_assets(asset_type);
+CREATE INDEX IF NOT EXISTS idx_portfolio_assets_owner ON public.portfolio_assets(owner_id);
+CREATE INDEX IF NOT EXISTS idx_portfolio_assets_ticker ON public.portfolio_assets(ticker);
 CREATE INDEX IF NOT EXISTS idx_monthly_envelopes_month ON public.monthly_envelopes(month_key);
 CREATE INDEX IF NOT EXISTS idx_monthly_envelopes_cat ON public.monthly_envelopes(category_id);
 
@@ -192,6 +213,7 @@ ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scenarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.monthly_envelopes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.savings_goals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.portfolio_assets ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para perfis
 CREATE POLICY "Permitir leitura de perfis para todos"
@@ -223,6 +245,9 @@ CREATE POLICY "Permitir leitura e escrita de envelopes"
 
 CREATE POLICY "Permitir acesso completo aos cofrinhos para autenticados"
   ON public.savings_goals FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY "Permitir acesso completo aos ativos de carteira para autenticados"
+  ON public.portfolio_assets FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- Trigger para sincronização automática de novo usuário do Supabase Auth para a tabela profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()

@@ -28,6 +28,7 @@ import {
 import {
   DEMO_ACCOUNTS,
   DEMO_SAVINGS_GOALS,
+  DEMO_PORTFOLIO_ASSETS,
   DEMO_CARDS,
   DEMO_CATEGORIES,
   DEMO_TRANSACTIONS,
@@ -212,6 +213,23 @@ export function FinanceProvider({ children }) {
       return local ? JSON.parse(local) : [];
     } catch {
       return isDemoMode() ? DEMO_SAVINGS_GOALS : [];
+    }
+  });
+
+  const [portfolioAssets, setPortfolioAssets] = useState(() => {
+    try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.portfolioAssets);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_PORTFOLIO_ASSETS;
+      }
+      const local = localStorage.getItem(STORAGE_KEYS.portfolioAssets);
+      return local ? JSON.parse(local) : [];
+    } catch {
+      return isDemoMode() ? DEMO_PORTFOLIO_ASSETS : [];
     }
   });
 
@@ -403,6 +421,7 @@ export function FinanceProvider({ children }) {
         if (res.scenarios) setScenarios(res.scenarios);
         if (res.monthlyEnvelopes) setMonthlyEnvelopes(res.monthlyEnvelopes);
         if (res.savingsGoals) setSavingsGoals(res.savingsGoals);
+        if (res.portfolioAssets) setPortfolioAssets(res.portfolioAssets);
       }
     } catch (err) {
       console.warn('Erro ao recarregar dados da nuvem:', err);
@@ -520,6 +539,7 @@ export function FinanceProvider({ children }) {
       } catch {}
       saveToLocalStorage(STORAGE_KEYS.accounts, DEMO_ACCOUNTS);
       saveToLocalStorage(STORAGE_KEYS.savingsGoals, DEMO_SAVINGS_GOALS);
+      saveToLocalStorage(STORAGE_KEYS.portfolioAssets, DEMO_PORTFOLIO_ASSETS);
       saveToLocalStorage(STORAGE_KEYS.cards, DEMO_CARDS);
       saveToLocalStorage(STORAGE_KEYS.categories, DEMO_CATEGORIES);
       saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
@@ -527,6 +547,7 @@ export function FinanceProvider({ children }) {
       saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, DEMO_MONTHLY_ENVELOPES);
       setAccounts(DEMO_ACCOUNTS);
       setSavingsGoals(DEMO_SAVINGS_GOALS);
+      setPortfolioAssets(DEMO_PORTFOLIO_ASSETS);
       setCards(DEMO_CARDS);
       setCategories(DEMO_CATEGORIES);
       setTransactions(DEMO_TRANSACTIONS);
@@ -543,6 +564,7 @@ export function FinanceProvider({ children }) {
     } catch {}
     saveToLocalStorage(STORAGE_KEYS.accounts, DEMO_ACCOUNTS);
     saveToLocalStorage(STORAGE_KEYS.savingsGoals, DEMO_SAVINGS_GOALS);
+    saveToLocalStorage(STORAGE_KEYS.portfolioAssets, DEMO_PORTFOLIO_ASSETS);
     saveToLocalStorage(STORAGE_KEYS.cards, DEMO_CARDS);
     saveToLocalStorage(STORAGE_KEYS.categories, DEMO_CATEGORIES);
     saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
@@ -552,6 +574,7 @@ export function FinanceProvider({ children }) {
     setIsDemoModeState(true);
     setAccounts(DEMO_ACCOUNTS);
     setSavingsGoals(DEMO_SAVINGS_GOALS);
+    setPortfolioAssets(DEMO_PORTFOLIO_ASSETS);
     setCards(DEMO_CARDS);
     setCategories(DEMO_CATEGORIES);
     setTransactions(DEMO_TRANSACTIONS);
@@ -593,8 +616,9 @@ export function FinanceProvider({ children }) {
     const demoCards = cards.filter((c) => String(c.id || '').startsWith('demo-'));
     const demoScens = scenarios.filter((s) => String(s.id || '').startsWith('demo-'));
     const demoGoals = savingsGoals.filter((g) => String(g.id || '').startsWith('demo-'));
+    const demoAssets = portfolioAssets.filter((a) => String(a.id || '').startsWith('demo-'));
 
-    const totalDemoItems = demoTxs.length + demoAccs.length + demoCards.length + demoScens.length + demoGoals.length;
+    const totalDemoItems = demoTxs.length + demoAccs.length + demoCards.length + demoScens.length + demoGoals.length + demoAssets.length;
 
     if (totalDemoItems === 0) {
       alert('Não há dados de demonstração pendentes. Todos os seus lançamentos e contas atuais são dados reais!');
@@ -613,12 +637,14 @@ export function FinanceProvider({ children }) {
         accounts,
         cards,
         savingsGoals,
+        portfolioAssets,
       });
       setTransactions(res.transactions);
       setScenarios(res.scenarios);
       setAccounts(res.accounts);
       setCards(res.cards);
       if (res.savingsGoals) setSavingsGoals(res.savingsGoals);
+      if (res.portfolioAssets) setPortfolioAssets(res.portfolioAssets);
       alert('Dados fictícios de exemplo removidos com sucesso! Seus dados reais permanecem intactos.');
     }
   };
@@ -636,6 +662,7 @@ export function FinanceProvider({ children }) {
       setAccounts(res.accounts);
       setCards(res.cards);
       setSavingsGoals(res.savingsGoals || []);
+      setPortfolioAssets(res.portfolioAssets || []);
       alert('Sistema resetado com sucesso.');
     } else if (confirmInput !== null) {
       alert('Operação cancelada. A palavra "ZERAR" não foi digitada corretamente.');
@@ -975,6 +1002,60 @@ export function FinanceProvider({ children }) {
 
     return balances;
   }, [savingsGoals, visibleTransactions]);
+
+  // Ativos de Carteira & Renda Variável filtrados pelo titular selecionado
+  const visiblePortfolioAssets = useMemo(() => {
+    return portfolioAssets.filter((a) => {
+      if (currentMemberId === 'user-all') return true; // Admin vê todos os ativos
+      if (currentMemberId === 'family-shared') return a.ownerId === 'user-all' || a.ownerId === 'family-shared' || !a.ownerId;
+      return a.ownerId === 'user-all' || a.ownerId === 'family-shared' || a.ownerId === currentMemberId;
+    });
+  }, [portfolioAssets, currentMemberId]);
+
+  // Resumo Financeiro da Carteira de Ativos
+  const portfolioSummary = useMemo(() => {
+    let totalInvestedCents = 0;
+    let currentValueCents = 0;
+
+    const byType = {
+      CRYPTO: { count: 0, investedCents: 0, currentValueCents: 0 },
+      STOCK: { count: 0, investedCents: 0, currentValueCents: 0 },
+      FII: { count: 0, investedCents: 0, currentValueCents: 0 },
+      TREASURY: { count: 0, investedCents: 0, currentValueCents: 0 },
+      FIXED_INCOME: { count: 0, investedCents: 0, currentValueCents: 0 },
+    };
+
+    visiblePortfolioAssets.forEach((asset) => {
+      const qty = Number(asset.quantity || 0);
+      const avg = Number(asset.averagePriceCents || 0);
+      const cur = Number(asset.currentPriceCents || 0);
+
+      const invested = Math.round(qty * avg);
+      const current = Math.round(qty * cur);
+
+      totalInvestedCents += invested;
+      currentValueCents += current;
+
+      const typeKey = byType[asset.assetType] ? asset.assetType : 'STOCK';
+      byType[typeKey].count += 1;
+      byType[typeKey].investedCents += invested;
+      byType[typeKey].currentValueCents += current;
+    });
+
+    const profitLossCents = currentValueCents - totalInvestedCents;
+    const profitLossPercent = totalInvestedCents > 0
+      ? ((currentValueCents - totalInvestedCents) / totalInvestedCents) * 100
+      : 0;
+
+    return {
+      totalInvestedCents,
+      currentValueCents,
+      profitLossCents,
+      profitLossPercent,
+      byType,
+      totalAssetsCount: visiblePortfolioAssets.length,
+    };
+  }, [visiblePortfolioAssets]);
 
   // Lançamentos dos cenários ativos como Hipotéticos (para lançamentos, gráficos e projeções)
   const hypotheticalTransactions = useMemo(() => {
@@ -1902,10 +1983,15 @@ export function FinanceProvider({ children }) {
     // Patrimônio Guardado / Cofrinhos (reserva protegida e de alta liquidez)
     const totalSavingsBalance = visibleSavingsGoals
       .reduce((sum, g) => sum + (savingsGoalBalances[g.id] || 0), 0);
+    // Carteira de Ativos & Cripto (valor de mercado atual consolidado)
+    const totalPortfolioBalance = visiblePortfolioAssets
+      .reduce((sum, a) => sum + Math.round(Number(a.quantity || 0) * Number(a.currentPriceCents || 0)), 0);
     // Contas de Investimento Tradicional (XP, etc.)
     const totalInvestmentsBalance = accounts
       .filter((a) => !a.archived && a.type === 'investimento')
       .reduce((sum, a) => sum + (accountBalances[a.id] || 0), 0);
+    // Patrimônio Total Consolidado da Família (Contas Correntes + Cofrinhos/Reservas + Carteira de Ativos/Cripto)
+    const totalFamilyNetWorth = totalOperationalBalance + totalSavingsBalance + totalPortfolioBalance;
 
     const totalCardsAvailable = Object.values(cardStats).reduce((a, b) => a + b.availableCents, 0);
     const projectedEndBalance = totalBankBalance + incomePending - expensePending;
@@ -1928,11 +2014,13 @@ export function FinanceProvider({ children }) {
       totalBankBalance,
       totalOperationalBalance,
       totalSavingsBalance,
+      totalPortfolioBalance,
+      totalFamilyNetWorth,
       totalInvestmentsBalance,
       totalCardsAvailable,
       projectedEndBalance,
     };
-  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes, accounts, visibleSavingsGoals, savingsGoalBalances]);
+  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes, accounts, visibleSavingsGoals, savingsGoalBalances, visiblePortfolioAssets]);
 
   // Maiores Gastos por Categoria no Mês do Dashboard
   const dashboardCategoryChartData = useMemo(() => {
@@ -2444,6 +2532,94 @@ export function FinanceProvider({ children }) {
 
     await syncItem('transactions', tx);
     return tx;
+  };
+
+  // Salvar ou Editar Ativo de Carteira (Fase 6.2)
+  const handleSavePortfolioAsset = async (dataOrEvent) => {
+    let assetData;
+    if (dataOrEvent && dataOrEvent.preventDefault) {
+      dataOrEvent.preventDefault();
+      const fd = new FormData(dataOrEvent.target);
+      assetData = {
+        id: fd.get('id') || null,
+        name: fd.get('name') || '',
+        ticker: fd.get('ticker') || '',
+        assetType: fd.get('assetType') || 'STOCK',
+        institution: fd.get('institution') || '',
+        quantity: parseFloat(fd.get('quantity') || '0'),
+        averagePriceCents: Math.round(parseFloat(fd.get('averagePrice') || '0') * 100),
+        currentPriceCents: Math.round(parseFloat(fd.get('currentPrice') || '0') * 100),
+        notes: fd.get('notes') || '',
+        ownerId: fd.get('ownerId') || 'user-all',
+      };
+    } else {
+      assetData = dataOrEvent || {};
+    }
+
+    const isEdit = Boolean(assetData.id && portfolioAssets.some((a) => a.id === assetData.id));
+    const id = assetData.id || `asset-${Date.now()}`;
+    const nowIso = new Date().toISOString();
+
+    const newAsset = {
+      id,
+      name: (assetData.name || '').trim(),
+      ticker: (assetData.ticker || '').trim().toUpperCase(),
+      assetType: assetData.assetType || 'STOCK',
+      institution: (assetData.institution || '').trim(),
+      quantity: Number(assetData.quantity || 0),
+      averagePriceCents: Math.round(Number(assetData.averagePriceCents || 0)),
+      currentPriceCents: Math.round(Number(assetData.currentPriceCents || 0)),
+      notes: (assetData.notes || '').trim(),
+      ownerId: assetData.ownerId || (currentMemberId === 'user-all' ? 'user-all' : currentMemberId),
+      updatedAt: nowIso,
+      createdAt: isEdit ? (assetData.createdAt || nowIso) : nowIso,
+    };
+
+    let updated;
+    if (isEdit) {
+      updated = portfolioAssets.map((a) => (a.id === id ? newAsset : a));
+    } else {
+      updated = [newAsset, ...portfolioAssets];
+    }
+    setPortfolioAssets(updated);
+    saveToLocalStorage(STORAGE_KEYS.portfolioAssets, updated);
+    await syncItem('portfolioAssets', newAsset);
+
+    return newAsset;
+  };
+
+  // Excluir Ativo de Carteira
+  const handleDeletePortfolioAsset = async (assetOrId) => {
+    const assetId = typeof assetOrId === 'string' ? assetOrId : assetOrId?.id;
+    const asset = portfolioAssets.find((a) => a.id === assetId);
+    if (!asset) return;
+
+    if (!confirm(`Deseja realmente remover o ativo "${asset.ticker} - ${asset.name}" da carteira?`)) {
+      return;
+    }
+
+    const updated = portfolioAssets.filter((a) => a.id !== assetId);
+    setPortfolioAssets(updated);
+    saveToLocalStorage(STORAGE_KEYS.portfolioAssets, updated);
+    await syncItem('portfolioAssets', { id: assetId }, true);
+  };
+
+  // Atualização rápida de cotação atual
+  const handleUpdateAssetPrice = async (assetId, newCurrentPriceCents) => {
+    const asset = portfolioAssets.find((a) => a.id === assetId);
+    if (!asset) return;
+
+    const updatedAsset = {
+      ...asset,
+      currentPriceCents: Math.round(Number(newCurrentPriceCents || 0)),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = portfolioAssets.map((a) => (a.id === assetId ? updatedAsset : a));
+    setPortfolioAssets(updated);
+    saveToLocalStorage(STORAGE_KEYS.portfolioAssets, updated);
+    await syncItem('portfolioAssets', updatedAsset);
+    return updatedAsset;
   };
 
   // Salvar Cartões
@@ -5045,6 +5221,10 @@ export function FinanceProvider({ children }) {
     setSavingsGoals,
     visibleSavingsGoals,
     savingsGoalBalances,
+    portfolioAssets,
+    setPortfolioAssets,
+    visiblePortfolioAssets,
+    portfolioSummary,
     visibleTransactions,
     accountBalances,
     cardStats,
@@ -5114,6 +5294,9 @@ export function FinanceProvider({ children }) {
     handleSavingsGoalAporte,
     handleSavingsGoalResgate,
     handleSavingsGoalYield,
+    handleSavePortfolioAsset,
+    handleDeletePortfolioAsset,
+    handleUpdateAssetPrice,
     handleSaveTransaction,
     handleConfirmDeleteTransaction,
     handleConfirmDeleteInvoice,

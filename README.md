@@ -147,9 +147,11 @@ src/
 │   │   └── AccountsTab.jsx            # Contas correntes, investimentos, carteiras e cartões
 │   ├── cards/
 │   │   └── CardsInvoicesTab.jsx       # Gestão de cartões, faturas mensais e parcelas futuras
-│   ├── investments/
 │   │   ├── SavingsGoalsTab.jsx        # Cofrinhos, caixinhas e metas de reserva com rendimento CDI (Fase 6.1)
 │   │   └── PortfolioTab.jsx           # Carteira de ativos e renda variável (Fase 6.2)
+│   ├── modals/
+│   │   ├── AssetModal.jsx             # Cadastro, edição e atualização de cotação de ativos (Fase 6.2)
+│   │   └── SavingsGoalModals.jsx      # Modais de aporte, resgate, rendimento CDI e extrato
 │   ├── envelopes/
 │   │   └── EnvelopesTab.jsx           # Metodologia dos envelopes e tetos orçamentários por mês
 │   ├── categories/
@@ -302,12 +304,15 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Separação e totalizadores no Dashboard entre **Saldo Operacional Livre** (para despesas do dia a dia) vs **Patrimônio Guardado / Cofrinhos** (reserva familiar protegida).
   - [x] **Extrato Dedicado do Cofrinho (`SavingsGoalStatementModal`):** Linha do tempo cronológica com cálculo de saldo progressivo e resumo de totais aportados, resgatados e rendimentos.
 
-- [ ] **Fase 6.2: Carteira de Ativos & Renda Variável (Ações, FIIs, Criptomoedas e Tesouro)**
-  - [ ] Cadastro de ativos de investimento: código/ticker, quantidade de cotas/tokens e preço médio.
-  - [ ] Suporte a Criptomoedas (Bitcoin, Ethereum, etc.) no Nubank/corretoras.
-  - [ ] Suporte a Títulos do Tesouro Direto e Renda Fixa de médio/longo prazo.
-  - [ ] Suporte a Ações e Fundos Imobiliários (B3).
-  - [ ] Painel e gráfico de **Alocação de Patrimônio Líquido** (Renda Fixa, Ações, Cripto e Caixa).
+- [x] **Fase 6.2: Carteira de Ativos & Renda Variável (Ações, FIIs, Criptomoedas e Tesouro)**
+  - [x] Cadastro completo de ativos de investimento: ticker/código, quantidade de cotas/tokens com frações decimais, preço médio e cotação atual.
+  - [x] Suporte nativo a Criptomoedas (Bitcoin, Ethereum, etc.) custodiadas no Nubank Cripto ou carteiras/corretoras.
+  - [x] Suporte a Títulos do Tesouro Direto (Selic, IPCA+, Prefixado) e Renda Fixa longa privada (CDB, LCI, LCA).
+  - [x] Suporte a Ações e Fundos Imobiliários (FIIs) listados na B3 com cálculo automático de rentabilidade nominal e percentual.
+  - [x] **Painel de Alocação de Ativos Consolidado (Asset Allocation):** Visualização gráfica proporcional integrando Cofrinhos & Reservas (CDI), Tesouro & Renda Fixa, Ações/FIIs e Criptoativos para visão de 100% do patrimônio investido.
+  - [x] **Ação Rápida "Atualizar Cotação":** Modal ágil para reajuste imediato de preços de mercado sem necessidade de editar toda a ficha do ativo.
+  - [x] **Métrica de Patrimônio Total da Família no Dashboard:** Totalizador consolidado calculado por `Saldo das Contas Correntes + Cofrinhos/Reservas + Carteira de Ativos/Cripto` com detalhamento dos 3 pilares e atalhos diretos de navegação.
+  - [x] Persistência em nuvem multi-tenancy no Supabase (`portfolio_assets`), migração SQL com RLS e dados de demonstração realistas.
 
 - [ ] **Fase 7: Importações Flexíveis & Conciliação Inteligente**
   - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).

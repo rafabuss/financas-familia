@@ -203,6 +203,96 @@ export const DEMO_SAVINGS_GOALS = [
 ];
 
 // ==============================================================================
+// 2.2 CARTEIRA DE ATIVOS & RENDA VARIÁVEL (FASE 6.2)
+// ==============================================================================
+export const DEMO_PORTFOLIO_ASSETS = [
+  {
+    id: 'demo-asset-1',
+    name: 'Bitcoin',
+    ticker: 'BTC',
+    assetType: 'CRYPTO',
+    institution: 'Nubank Cripto',
+    quantity: 0.045,
+    averagePriceCents: 34000000, // R$ 340.000,00 / un
+    currentPriceCents: 38500000, // R$ 385.000,00 / un
+    notes: 'Reserva de valor global e proteção patrimonial de longo prazo',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-asset-2',
+    name: 'Ethereum',
+    ticker: 'ETH',
+    assetType: 'CRYPTO',
+    institution: 'Nubank Cripto',
+    quantity: 0.65,
+    averagePriceCents: 1720000, // R$ 17.200,00 / un
+    currentPriceCents: 1890000, // R$ 18.900,00 / un
+    notes: 'Contratos inteligentes e ecossistema DeFi',
+    ownerId: 'user-1',
+  },
+  {
+    id: 'demo-asset-3',
+    name: 'Petrobras PN',
+    ticker: 'PETR4',
+    assetType: 'STOCK',
+    institution: 'Inter DTVM',
+    quantity: 200,
+    averagePriceCents: 3250, // R$ 32,50
+    currentPriceCents: 3780, // R$ 37,80
+    notes: 'Empresa de energia com elevado histórico de proventos e dividendos',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-asset-4',
+    name: 'BB Seguridade',
+    ticker: 'BBSE3',
+    assetType: 'STOCK',
+    institution: 'BB Investimentos',
+    quantity: 150,
+    averagePriceCents: 3420, // R$ 34,20
+    currentPriceCents: 3310, // R$ 33,10
+    notes: 'Setor perene de seguros, carteira previdenciária da família',
+    ownerId: 'user-2',
+  },
+  {
+    id: 'demo-asset-5',
+    name: 'XP Malls FII',
+    ticker: 'XPML11',
+    assetType: 'FII',
+    institution: 'XP Investimentos',
+    quantity: 90,
+    averagePriceCents: 10450, // R$ 104,50
+    currentPriceCents: 11280, // R$ 112,80
+    notes: 'Fundo Imobiliário de Shopping Centers com rendimento mensal isento',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-asset-6',
+    name: 'Tesouro Selic 2029',
+    ticker: 'TESOURO_SELIC_2029',
+    assetType: 'TREASURY',
+    institution: 'Inter DTVM',
+    quantity: 2.0,
+    averagePriceCents: 1450000, // R$ 14.500,00 / título
+    currentPriceCents: 1520000, // R$ 15.200,00 / título
+    notes: 'Título público pós-fixado garantido pelo Tesouro Nacional',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-asset-7',
+    name: 'Tesouro IPCA+ 2035',
+    ticker: 'TESOURO_IPCA_2035',
+    assetType: 'TREASURY',
+    institution: 'XP Investimentos',
+    quantity: 3.0,
+    averagePriceCents: 320000, // R$ 3.200,00 / título
+    currentPriceCents: 345000, // R$ 3.450,00 / título
+    notes: 'Proteção contra inflação com taxa real para aposentadoria',
+    ownerId: 'user-all',
+  },
+];
+
+// ==============================================================================
 // 3. CARTÕES DE CRÉDITO COM CICLOS E LIMITES
 // ==============================================================================
 export const DEMO_CARDS = [

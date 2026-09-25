@@ -142,7 +142,6 @@ function AppContent() {
     getChartDateRange,
     visibleAccounts,
     visibleCards,
-    savingsGoals,
     visibleSavingsGoals,
     savingsGoalBalances,
     handleSaveSavingsGoal,
@@ -150,6 +149,11 @@ function AppContent() {
     handleSavingsGoalAporte,
     handleSavingsGoalResgate,
     handleSavingsGoalYield,
+    visiblePortfolioAssets,
+    portfolioSummary,
+    handleSavePortfolioAsset,
+    handleDeletePortfolioAsset,
+    handleUpdateAssetPrice,
     toggleArchiveAccount,
     handleDeleteAccount,
     toggleArchiveCard,
@@ -315,6 +319,8 @@ function AppContent() {
             openInvoicePaymentModal={openInvoicePaymentModal}
             visibleSavingsGoals={visibleSavingsGoals}
             savingsGoalBalances={savingsGoalBalances}
+            visiblePortfolioAssets={visiblePortfolioAssets}
+            portfolioSummary={portfolioSummary}
           />
         )}
 
@@ -506,7 +512,17 @@ function AppContent() {
 
         {/* ===================== ABA: CARTEIRA DE ATIVOS ===================== */}
         {activeTab === 'portfolio' && (
-          <PortfolioTab />
+          <PortfolioTab
+            visiblePortfolioAssets={visiblePortfolioAssets}
+            portfolioSummary={portfolioSummary}
+            handleSavePortfolioAsset={handleSavePortfolioAsset}
+            handleDeletePortfolioAsset={handleDeletePortfolioAsset}
+            handleUpdateAssetPrice={handleUpdateAssetPrice}
+            visibleSavingsGoals={visibleSavingsGoals}
+            savingsGoalBalances={savingsGoalBalances}
+            currentMemberId={currentMemberId}
+            setActiveTab={setActiveTab}
+          />
         )}
 
         {/* ===================== SUB-ABAS DO MÓDULO: ENVELOPES & CATEGORIAS ===================== */}

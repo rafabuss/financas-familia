@@ -3,6 +3,7 @@ import { calculateCardDueDate, addMonthsToIso } from '../utils/formatters.js';
 import {
   DEMO_ACCOUNTS,
   DEMO_SAVINGS_GOALS,
+  DEMO_PORTFOLIO_ASSETS,
   DEMO_CARDS,
   DEMO_CATEGORIES,
   DEMO_TRANSACTIONS,
@@ -33,6 +34,7 @@ export const STORAGE_KEYS = {
   scenarios: 'financas_scenarios_v1',
   monthlyEnvelopes: 'financas_monthly_envelopes_v1',
   savingsGoals: 'financas_savings_goals_v1',
+  portfolioAssets: 'financas_portfolio_assets_v1',
 };
 
 export const markCategoryPending = (catId) => {
@@ -416,6 +418,41 @@ export const savingsGoalToDb = (goal) => {
   return obj;
 };
 
+export const portfolioAssetToClient = (row) => ({
+  id: row.id,
+  name: row.name,
+  ticker: row.ticker,
+  assetType: row.asset_type || row.assetType || 'STOCK',
+  institution: row.institution || '',
+  quantity: Number(row.quantity ?? 0),
+  averagePriceCents: Number(row.average_price_cents ?? row.averagePriceCents ?? 0),
+  currentPriceCents: Number(row.current_price_cents ?? row.currentPriceCents ?? 0),
+  notes: row.notes || '',
+  ownerId: row.owner_id || row.ownerId || 'user-all',
+  householdId: row.household_id || row.householdId || null,
+  createdAt: row.created_at || row.createdAt || null,
+  updatedAt: row.updated_at || row.updatedAt || null,
+});
+
+export const portfolioAssetToDb = (asset) => {
+  const obj = {
+    id: asset.id,
+    name: asset.name,
+    ticker: asset.ticker,
+    asset_type: asset.assetType || 'STOCK',
+    institution: asset.institution || '',
+    quantity: Number(asset.quantity || 0),
+    average_price_cents: Math.round(Number(asset.averagePriceCents || 0)),
+    current_price_cents: Math.round(Number(asset.currentPriceCents || 0)),
+    notes: asset.notes || null,
+    owner_id: asset.ownerId || 'user-all',
+  };
+  if (asset.householdId || asset.household_id) {
+    obj.household_id = asset.householdId || asset.household_id;
+  }
+  return obj;
+};
+
 // ==========================================
 // CARREGAMENTO INICIAL UNIFICADO
 // ==========================================
@@ -440,6 +477,7 @@ export const loadInitialAppData = async (defaults = {}) => {
       isDemo: true,
       accounts: getDemoSession(STORAGE_KEYS.accounts, defaults.accounts || DEMO_ACCOUNTS),
       savingsGoals: getDemoSession(STORAGE_KEYS.savingsGoals, defaults.savingsGoals || DEMO_SAVINGS_GOALS).map(savingsGoalToClient),
+      portfolioAssets: getDemoSession(STORAGE_KEYS.portfolioAssets, defaults.portfolioAssets || DEMO_PORTFOLIO_ASSETS).map(portfolioAssetToClient),
       cards: getDemoSession(STORAGE_KEYS.cards, defaults.cards || DEMO_CARDS),
       categories: getDemoSession(STORAGE_KEYS.categories, defaults.categories || DEMO_CATEGORIES),
       transactions: getDemoSession(STORAGE_KEYS.transactions, defaults.transactions || DEMO_TRANSACTIONS).map(transactionToClient),
@@ -463,7 +501,7 @@ export const loadInitialAppData = async (defaults = {}) => {
 
   if (isCloud) {
     try {
-      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes] = await Promise.all([
+      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes] = await Promise.all([
         supabase.from('accounts').select('*').order('created_at', { ascending: true }),
         supabase.from('cards').select('*').order('created_at', { ascending: true }),
         supabase.from('categories').select('*').order('name', { ascending: true }),
@@ -471,6 +509,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         supabase.from('scenarios').select('*').order('created_at', { ascending: true }),
         supabase.from('monthly_envelopes').select('*'),
         supabase.from('savings_goals').select('*').order('created_at', { ascending: true }),
+        supabase.from('portfolio_assets').select('*').order('created_at', { ascending: true }),
       ]);
 
       const localCats = getLocal(STORAGE_KEYS.categories, defaults.categories || []);
@@ -623,6 +662,15 @@ export const loadInitialAppData = async (defaults = {}) => {
         localStorage.setItem(STORAGE_KEYS.savingsGoals, JSON.stringify(savingsGoals));
       }
 
+      const isAssetSuccess = !assetRes?.error && Array.isArray(assetRes?.data);
+      const localAssets = getLocal(STORAGE_KEYS.portfolioAssets, []);
+      const portfolioAssets = isAssetSuccess && (assetRes.data.length > 0 || localAssets.length === 0)
+        ? assetRes.data.map(portfolioAssetToClient)
+        : localAssets.map(portfolioAssetToClient);
+      if (isAssetSuccess && (assetRes.data.length > 0 || localAssets.length === 0)) {
+        localStorage.setItem(STORAGE_KEYS.portfolioAssets, JSON.stringify(portfolioAssets));
+      }
+
       // Retorna exatamente os dados reais do banco (SEM injetar transações ou simulações fictícias)
       return {
         isCloud: true,
@@ -633,6 +681,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         scenarios,
         monthlyEnvelopes: mergedEnvelopes,
         savingsGoals,
+        portfolioAssets,
       };
     } catch (err) {
       console.warn('Falha ao conectar no Supabase. Usando armazenamento local:', err);
@@ -648,6 +697,7 @@ export const loadInitialAppData = async (defaults = {}) => {
     scenarios: getLocal(STORAGE_KEYS.scenarios, []),
     monthlyEnvelopes: getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient),
     savingsGoals: getLocal(STORAGE_KEYS.savingsGoals, []).map(savingsGoalToClient),
+    portfolioAssets: getLocal(STORAGE_KEYS.portfolioAssets, []).map(portfolioAssetToClient),
   };
 };
 
@@ -655,6 +705,7 @@ export const loadDemoPresentationData = async (demo) => {
   if (isDemoMode()) {
     saveToLocalStorage(STORAGE_KEYS.accounts, demo.accounts || []);
     saveToLocalStorage(STORAGE_KEYS.savingsGoals, demo.savingsGoals || DEMO_SAVINGS_GOALS);
+    saveToLocalStorage(STORAGE_KEYS.portfolioAssets, demo.portfolioAssets || DEMO_PORTFOLIO_ASSETS);
     saveToLocalStorage(STORAGE_KEYS.cards, demo.cards || []);
     saveToLocalStorage(STORAGE_KEYS.categories, demo.categories || []);
     saveToLocalStorage(STORAGE_KEYS.transactions, demo.transactions || []);
@@ -665,6 +716,7 @@ export const loadDemoPresentationData = async (demo) => {
     return {
       accounts: demo.accounts || [],
       savingsGoals: demo.savingsGoals || DEMO_SAVINGS_GOALS,
+      portfolioAssets: demo.portfolioAssets || DEMO_PORTFOLIO_ASSETS,
       cards: demo.cards || [],
       categories: demo.categories || [],
       transactions: demo.transactions || [],
@@ -680,6 +732,7 @@ export const loadDemoPresentationData = async (demo) => {
       if (demo.categories?.length) await supabase.from('categories').upsert(demo.categories.map(categoryToDb));
       if (demo.accounts?.length) await supabase.from('accounts').upsert(demo.accounts.map(accountToDb));
       if (demo.savingsGoals?.length) await supabase.from('savings_goals').upsert(demo.savingsGoals.map(savingsGoalToDb));
+      if (demo.portfolioAssets?.length) await supabase.from('portfolio_assets').upsert(demo.portfolioAssets.map(portfolioAssetToDb));
       if (demo.cards?.length) await supabase.from('cards').upsert(demo.cards.map(cardToDb));
       if (demo.transactions?.length) await supabase.from('transactions').upsert(demo.transactions.map(transactionToDb));
       if (demo.scenarios?.length) await supabase.from('scenarios').upsert(demo.scenarios.map(scenarioToDb));
@@ -690,6 +743,7 @@ export const loadDemoPresentationData = async (demo) => {
 
   localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(demo.accounts || []));
   localStorage.setItem(STORAGE_KEYS.savingsGoals, JSON.stringify(demo.savingsGoals || DEMO_SAVINGS_GOALS));
+  localStorage.setItem(STORAGE_KEYS.portfolioAssets, JSON.stringify(demo.portfolioAssets || DEMO_PORTFOLIO_ASSETS));
   localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(demo.cards || []));
   localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(demo.categories || []));
   localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(demo.transactions || []));
@@ -699,6 +753,7 @@ export const loadDemoPresentationData = async (demo) => {
   return {
     accounts: demo.accounts || [],
     savingsGoals: demo.savingsGoals || DEMO_SAVINGS_GOALS,
+    portfolioAssets: demo.portfolioAssets || DEMO_PORTFOLIO_ASSETS,
     cards: demo.cards || [],
     categories: demo.categories || [],
     transactions: demo.transactions || [],
@@ -713,6 +768,7 @@ export const clearDemoDataOnly = async ({
   accounts = [],
   cards = [],
   savingsGoals = [],
+  portfolioAssets = [],
 }) => {
   const isCloud = isSupabaseConfigured() && supabase;
 
@@ -721,12 +777,14 @@ export const clearDemoDataOnly = async ({
   const demoAccIds = accounts.filter((a) => String(a.id || '').startsWith('demo-')).map((a) => a.id);
   const demoCardIds = cards.filter((c) => String(c.id || '').startsWith('demo-')).map((c) => c.id);
   const demoGoalIds = savingsGoals.filter((g) => String(g.id || '').startsWith('demo-')).map((g) => g.id);
+  const demoAssetIds = portfolioAssets.filter((a) => String(a.id || '').startsWith('demo-')).map((a) => a.id);
 
   if (isCloud) {
     try {
       if (demoTxIds.length) await supabase.from('transactions').delete().in('id', demoTxIds);
       if (demoScenIds.length) await supabase.from('scenarios').delete().in('id', demoScenIds);
       if (demoGoalIds.length) await supabase.from('savings_goals').delete().in('id', demoGoalIds);
+      if (demoAssetIds.length) await supabase.from('portfolio_assets').delete().in('id', demoAssetIds);
       if (demoAccIds.length) await supabase.from('accounts').delete().in('id', demoAccIds);
       if (demoCardIds.length) await supabase.from('cards').delete().in('id', demoCardIds);
     } catch (e) {
@@ -740,12 +798,14 @@ export const clearDemoDataOnly = async ({
   const remainingAccounts = accounts.filter((a) => !String(a.id || '').startsWith('demo-'));
   const remainingCards = cards.filter((c) => !String(c.id || '').startsWith('demo-'));
   const remainingSavingsGoals = savingsGoals.filter((g) => !String(g.id || '').startsWith('demo-'));
+  const remainingPortfolioAssets = portfolioAssets.filter((a) => !String(a.id || '').startsWith('demo-'));
 
   localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(remainingTransactions));
   localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify(remainingScenarios));
   localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(remainingAccounts));
   localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(remainingCards));
   localStorage.setItem(STORAGE_KEYS.savingsGoals, JSON.stringify(remainingSavingsGoals));
+  localStorage.setItem(STORAGE_KEYS.portfolioAssets, JSON.stringify(remainingPortfolioAssets));
   localStorage.removeItem('financas_demo_loaded');
   localStorage.setItem('financas_initialized', 'true');
 
@@ -755,6 +815,7 @@ export const clearDemoDataOnly = async ({
     accounts: remainingAccounts,
     cards: remainingCards,
     savingsGoals: remainingSavingsGoals,
+    portfolioAssets: remainingPortfolioAssets,
   };
 };
 
@@ -768,6 +829,7 @@ export const resetEntireSystem = async () => {
         supabase.from('transactions').delete().neq('id', '__none__'),
         supabase.from('scenarios').delete().neq('id', '__none__'),
         supabase.from('savings_goals').delete().neq('id', '__none__'),
+        supabase.from('portfolio_assets').delete().neq('id', '__none__'),
         supabase.from('accounts').delete().neq('id', '__none__'),
         supabase.from('cards').delete().neq('id', '__none__'),
         supabase.from('monthly_envelopes').delete().neq('id', '__none__'),
@@ -781,6 +843,7 @@ export const resetEntireSystem = async () => {
   localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.savingsGoals, JSON.stringify([]));
+  localStorage.setItem(STORAGE_KEYS.portfolioAssets, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.monthlyEnvelopes, JSON.stringify([]));
   localStorage.removeItem('financas_demo_loaded');
@@ -791,6 +854,7 @@ export const resetEntireSystem = async () => {
     scenarios: [],
     accounts: [],
     savingsGoals: [],
+    portfolioAssets: [],
     cards: [],
     monthlyEnvelopes: [],
   };
@@ -813,6 +877,8 @@ export const syncItem = async (entity, item, isDelete = false) => {
       ? 'monthly_envelopes'
       : (entity === 'savingsGoals' || entity === 'savings_goals')
       ? 'savings_goals'
+      : (entity === 'portfolioAssets' || entity === 'portfolio_assets')
+      ? 'portfolio_assets'
       : entity;
 
     if (isDelete) {
@@ -839,6 +905,7 @@ export const syncItem = async (entity, item, isDelete = false) => {
       else if (entity === 'scenarios') dbData = scenarioToDb(item);
       else if (entity === 'monthlyEnvelopes' || entity === 'monthly_envelopes') dbData = monthlyEnvelopeToDb(item);
       else if (entity === 'savingsGoals' || entity === 'savings_goals') dbData = savingsGoalToDb(item);
+      else if (entity === 'portfolioAssets' || entity === 'portfolio_assets') dbData = portfolioAssetToDb(item);
 
       // Pré-sincronização de categoria e dependências para garantir integridade referencial antes do upsert
       if (entity === 'transactions' && dbData?.category_id) {

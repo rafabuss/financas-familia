@@ -724,7 +724,7 @@ function AppContent() {
         cardStats={cardStats}
         monthSummary={monthSummary}
         dashboardEnvelopes={dashboardEnvelopes}
-        isDemo={Boolean(isDemoModeState || isDemoMode())}
+        isDemo={Boolean(isDemoModeState)}
         onCreateTransaction={handleAICreateTransaction}
         onCreateScenario={handleAICreateScenario}
         onNavigateTab={(tab) => setActiveTab(tab)}

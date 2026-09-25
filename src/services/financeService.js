@@ -1023,12 +1023,96 @@ export const healMigratedInvoiceTransactions = (txList = [], cards = []) => {
     }
   });
 
+  const SEPT_2026_RECONCILIATION_MAP = {
+    // 1. Itaú Master Black 8557: 9 itens da fatura de setembro de 2026
+    'tx-imp-1789533531029-0-vsio': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // EDUCA MAIS BRA (R$ 71.61)
+    'tx-imp-1789533531029-1-bl71': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // MP *ORALGLASS (R$ 456.74)
+    'tx-imp-1789533531029-2-tuvn': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // POINT ACADEMIA (R$ 198.00)
+    'tx-imp-1789533531030-3-2iu6': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // Q OCULOS (R$ 33.92)
+    'tx-imp-1789533531030-4-ohlp': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // PG *UNIVERSAL (R$ 9.98)
+    'tx-imp-1789533531030-5-fy0j': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // PG *TORO INVES (R$ 19.99)
+    'tx-imp-1789533531031-6-7mgl': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // HAVAN FLORIPA (R$ 49.99)
+    'tx-imp-1789533531031-7-5smo': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // HAVAN FLORIPA (R$ 55.58)
+    'tx-imp-1789533531031-8-f5h4': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' }, // CONSTANCE (R$ 87.99)
+
+    // Itaú Master Black 8557: parcelas futuras subsequentes alinhadas mês a mês
+    'tx-imp-1789533531030-2-p12-2t4s': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-imp-1789533531030-3-p10-imgb': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-imp-1789533531030-4-p10-dyiz': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-imp-1789533531030-5-p9-k1vx': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-imp-1789533531030-5-p10-r0y1': { dueDate: '2026-11-22', date: '2026-11-22' },
+    'tx-imp-1789533531030-5-p11-ocqv': { dueDate: '2026-12-22', date: '2026-12-22' },
+    'tx-imp-1789533531031-5-p12-3tgp': { dueDate: '2027-01-22', date: '2027-01-22' },
+    'tx-imp-1789533531031-6-p9-92ru': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-imp-1789533531031-6-p10-79oj': { dueDate: '2026-11-22', date: '2026-11-22' },
+    'tx-imp-1789533531031-7-p8-a7nz': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-imp-1789533531031-7-p9-7ows': { dueDate: '2026-11-22', date: '2026-11-22' },
+    'tx-imp-1789533531031-7-p10-q6bf': { dueDate: '2026-12-22', date: '2026-12-22' },
+
+    // 2. Itaú Master Mult Black 3740: GIASSI SUPERME na fatura de setembro de 2026
+    'tx-imp-1789533078949-0-56vo': { dueDate: '2026-09-22', date: '2026-09-22', status: 'REALIZADO' },
+    'tx-imp-1789533078949-0-p10-tp0l': { dueDate: '2026-10-22', date: '2026-10-22' },
+
+    // 3. Nubank 1742: Canva (04/12) na fatura de setembro de 2026 e subsequentes consecutivas
+    'tx-1789610491187-4': { dueDate: '2026-09-23', date: '2026-09-23', status: 'REALIZADO' },
+    'tx-1789610491187-5': { dueDate: '2026-10-23', date: '2026-10-23' },
+    'tx-1789610491187-6': { dueDate: '2026-11-23', date: '2026-11-23' },
+    'tx-1789610491187-7': { dueDate: '2026-12-23', date: '2026-12-23' },
+    'tx-1789610491187-8': { dueDate: '2027-01-23', date: '2027-01-23' },
+    'tx-1789610491187-9': { dueDate: '2027-02-23', date: '2027-02-23' },
+    'tx-1789610491187-10': { dueDate: '2027-03-23', date: '2027-03-23' },
+    'tx-1789610491187-11': { dueDate: '2027-04-23', date: '2027-04-23' },
+    'tx-1789610491187-12': { dueDate: '2027-05-23', date: '2027-05-23' },
+
+    // 4. Mercado Livre 2166: Compras na fatura de setembro de 2026
+    'tx-imp-1789532819072-4-yemm': { dueDate: '2026-09-14', date: '2026-09-14', status: 'REALIZADO' },
+    'tx-imp-1789532819072-5-1ib1': { dueDate: '2026-09-14', date: '2026-09-14', status: 'REALIZADO' },
+    'tx-imp-1789532819073-5-p3-i2ox': { dueDate: '2026-10-14', date: '2026-10-14' },
+    'tx-imp-1789532819073-5-p4-otg0': { dueDate: '2026-11-14', date: '2026-11-14' },
+    'tx-imp-1789532819073-5-p5-mqne': { dueDate: '2026-12-14', date: '2026-12-14' },
+
+    // 5. Itaú Visa Infinite 8476: Quitar OLX da fatura de setembro
+    'tx-imp-1789602105891-0-p10-jjoc': { status: 'REALIZADO' },
+
+    // 6. Inter Dé Mastercard 8682: Parcelas consecutivas mensais Hotel Estância
+    'tx-1790284585790-3': { dueDate: '2026-10-22', date: '2026-10-22' },
+    'tx-1790284585790-4': { dueDate: '2026-11-22', date: '2026-11-22' },
+    'tx-1790284585790-5': { dueDate: '2026-12-22', date: '2026-12-22' },
+    'tx-1790284585790-6': { dueDate: '2027-01-22', date: '2027-01-22' },
+    'tx-1790284585790-7': { dueDate: '2027-02-22', date: '2027-02-22' },
+    'tx-1790284585790-8': { dueDate: '2027-03-22', date: '2027-03-22' },
+    'tx-1790284585790-9': { dueDate: '2027-04-22', date: '2027-04-22' },
+    'tx-1790284585790-10': { dueDate: '2027-05-22', date: '2027-05-22' }
+  };
+
   const healedTransactions = txList.map((t) => {
+    // Aplicação prioritária de reconciliação de integridade contábil
+    if (SEPT_2026_RECONCILIATION_MAP[t.id]) {
+      const overrides = SEPT_2026_RECONCILIATION_MAP[t.id];
+      let needsOverride = false;
+      for (const [prop, val] of Object.entries(overrides)) {
+        if (t[prop] !== val) {
+          needsOverride = true;
+          break;
+        }
+      }
+      if (needsOverride) {
+        hasChanges = true;
+        const reconciled = {
+          ...t,
+          ...overrides,
+          _localUpdatedAt: Date.now(),
+        };
+        changedTxs.push(reconciled);
+        return reconciled;
+      }
+    }
+
     const baseDueDate = t.dueDate || t.date;
     const basePurchaseDate = t.purchaseDate || t.date;
 
-    // Apenas compras normais de cartão de crédito ativas (ignora pagamentos técnicos de fatura e cancelados)
-    if (!t.cardId || t.isInvoicePayment || t.status === 'CANCELADO') {
+    // Apenas compras normais de cartão de crédito ativas (ignora pagamentos técnicos de fatura, cancelados e importados de faturas oficiais)
+    if (!t.cardId || t.isInvoicePayment || t.status === 'CANCELADO' || String(t.id).startsWith('tx-imp-')) {
       if (!t.dueDate || !t.purchaseDate) {
         return { ...t, dueDate: baseDueDate, purchaseDate: basePurchaseDate };
       }
@@ -1088,15 +1172,14 @@ export const healMigratedInvoiceTransactions = (txList = [], cards = []) => {
       }
     }
 
-    // 4. Fallback: calcular via purchaseDate + closing/due day
+    // 4. Fallback: calcular via purchaseDate + closing/due day (Apenas se não possuir baseDueDate válida)
     if (!expectedDueDate && basePurchaseDate) {
       const calcDue = calculateCardDueDate(basePurchaseDate, safeClosing, safeDue);
       if (instNum && instNum > 1) {
-        // Se a data de compra já é posterior ao vencimento atual, a data de compra foi registrada como mês da parcela
-        if (baseDueDate && basePurchaseDate > baseDueDate) {
-          expectedDueDate = calcDue;
+        if (baseDueDate) {
+          expectedDueDate = baseDueDate;
         } else {
-          expectedDueDate = addMonthsToIso(calcDue, instNum - 1);
+          expectedDueDate = calcDue;
         }
       } else {
         expectedDueDate = calcDue;

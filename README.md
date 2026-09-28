@@ -314,13 +314,21 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Métrica de Patrimônio Total da Família no Dashboard:** Totalizador consolidado calculado por `Saldo das Contas Correntes + Cofrinhos/Reservas + Carteira de Ativos/Cripto` com detalhamento dos 3 pilares e atalhos diretos de navegação.
   - [x] Persistência em nuvem multi-tenancy no Supabase (`portfolio_assets`), migração SQL com RLS e dados de demonstração realistas.
 
-- [ ] **Fase 7: Importações Flexíveis & Conciliação Inteligente**
+- [ ] **Fase 7: Gestão da Família & Controle Granular de Permissões e Visibilidade**
+  - [ ] **Painel Administrativo da Família (`FamilyManagementModal` / Configurações):** Gestão de membros do household com visualização de papéis (Administrador vs Membro) e status (Ativo vs Bloqueado/Suspenso).
+  - [ ] **Ações de Moderação:** Possibilidade do administrador suspender/bloquear temporariamente um usuário ou removê-lo definitivamente da família.
+  - [ ] **Controle de Acesso Compartilhado da Família (`canViewFamilyShared`):** Permissão de ligar/desligar o acesso de um membro às contas gerais e aos gastos globais da família (ex: permitir que filhos vejam apenas suas próprias despesas sem ter acesso às contas gerais dos pais).
+  - [ ] **Matriz de Visibilidade Cruzada entre Membros (`allowedMemberIds`):** Configuração granular permitindo que um membro veja apenas o seu próprio extrato, ou tenha acesso liberado aos lançamentos de membros específicos (ex: filha acessando despesas do Rafael ou da mãe conforme autorizado).
+  - [ ] **Controle Granular por Conta Bancária e Cartão:** Permissão para ocultar contas sensíveis de investimentos ou cartões de certos membros da família.
+  - [ ] **Tela de Bloqueio/Suspensão Amigável:** Interface informativa caso o acesso do membro esteja temporariamente suspenso pelo administrador.
+
+- [ ] **Fase 8: Importações Flexíveis & Conciliação Inteligente**
   - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).
   - [ ] **Conciliação Híbrida Inteligente:** Motor que detecta despesas manuais já cadastradas e sugere a unificação com os lançamentos bancários importados, sem duplicações.
   - [ ] Edição, recategorização e divisão (*split*) livre de qualquer lançamento importado.
   - [ ] Preparação da arquitetura para futura conexão direta via Open Finance (Pluggy / Belvo).
 
-- [ ] **Fase 8: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
+- [ ] **Fase 9: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
   - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).
   - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
   - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.

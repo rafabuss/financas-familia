@@ -275,6 +275,22 @@ CREATE TABLE IF NOT EXISTS public.household_members (
   CONSTRAINT uq_household_user UNIQUE (household_id, user_id)
 );
 
+-- Habilitar RLS e políticas para households e household_members
+ALTER TABLE public.households ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.household_members ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir leitura de households para autenticados" ON public.households;
+CREATE POLICY "Permitir leitura de households para autenticados"
+  ON public.households FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Permitir leitura de household_members para autenticados" ON public.household_members;
+CREATE POLICY "Permitir leitura de household_members para autenticados"
+  ON public.household_members FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Permitir escrita de household_members para autenticados" ON public.household_members;
+CREATE POLICY "Permitir escrita de household_members para autenticados"
+  ON public.household_members FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- Trigger para sincronização automática de novo usuário do Supabase Auth para a tabela profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$

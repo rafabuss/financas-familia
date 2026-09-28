@@ -123,8 +123,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
       visibleEntities = ['family-shared', 'user-2'];
       hiddenAccountIds = [];
     } else if (memberKey === 'user-3') {
-      email = 'camila@familia.com';
-      name = 'Camila (Filha)';
+      email = 'alice@familia.com';
+      name = 'Alice (Filha, 13 anos)';
       role = 'member';
       visibleEntities = ['user-3'];
       hiddenAccountIds = ['demo-acc-3'];
@@ -368,7 +368,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
               title="Acesso com permissões restritas (apenas gastos próprios)"
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span className="truncate">Camila (Filha)</span>
+              <span className="truncate">Alice (Filha)</span>
             </button>
           </div>
         </div>

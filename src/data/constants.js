@@ -4,7 +4,32 @@ export const FAMILY_MEMBERS = [
   { id: 'family-shared', name: '🏠 Gastos Compartilhados (Família)', isFamily: true },
   { id: 'user-1', name: '👤 Rafael (Apenas Pessoal / Membro)', isFamily: false },
   { id: 'user-2', name: '👤 Ana Débora (Apenas Pessoal / Membro)', isFamily: false },
-  { id: 'user-3', name: '👤 Camila (Filha / Dependente)', isFamily: false },
+];
+
+// Membros Padrão Registrados da Família (Rafael e Ana Débora)
+export const DEFAULT_HOUSEHOLD_MEMBERS = [
+  {
+    id: 'user-1',
+    memberKey: 'user-1',
+    displayName: 'Rafael',
+    email: 'rafael@familia.com',
+    role: 'admin',
+    status: 'active',
+    color: '#2563eb',
+    visibleEntities: ['family-shared', 'user-all', 'user-1', 'user-2'],
+    hiddenAccountIds: [],
+  },
+  {
+    id: 'user-2',
+    memberKey: 'user-2',
+    displayName: 'Ana Débora',
+    email: 'anadebora@familia.com',
+    role: 'member',
+    status: 'active',
+    color: '#9333ea',
+    visibleEntities: ['family-shared', 'user-2'],
+    hiddenAccountIds: [],
+  },
 ];
 
 // Categoria Técnica Padrão para Transferências entre Contas

@@ -46,3 +46,58 @@ AS $$
   WHERE hm.user_id = auth.uid()
     AND hm.status = 'active';
 $$;
+
+-- 7. Garantir existência de um Household padrão se nenhum existir
+INSERT INTO public.households (id, name, invite_code)
+VALUES ('00000000-0000-0000-0000-000000000001'::uuid, 'Família Ferreira', 'FAMILIA1')
+ON CONFLICT (id) DO NOTHING;
+
+-- 8. Migrar automaticamente todos os perfis já cadastrados em public.profiles (Rafael, Ana Débora) para public.household_members
+INSERT INTO public.household_members (
+  household_id,
+  user_id,
+  role,
+  status,
+  display_name,
+  email,
+  member_key,
+  color,
+  visible_entities,
+  hidden_account_ids
+)
+SELECT 
+  '00000000-0000-0000-0000-000000000001'::uuid,
+  p.id,
+  p.role,
+  'active',
+  p.name,
+  p.email,
+  p.member_key,
+  CASE WHEN p.member_key = 'user-1' THEN '#2563eb' ELSE '#9333ea' END,
+  CASE 
+    WHEN p.role = 'admin' OR p.member_key = 'user-1' 
+      THEN '["family-shared", "user-all", "user-1", "user-2"]'::jsonb
+    ELSE '["family-shared", "user-2"]'::jsonb
+  END,
+  '[]'::jsonb
+FROM public.profiles p
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.household_members hm WHERE hm.user_id = p.id
+)
+ON CONFLICT DO NOTHING;
+
+-- 9. Habilitar RLS e políticas para households e household_members
+ALTER TABLE public.households ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.household_members ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir leitura de households para autenticados" ON public.households;
+CREATE POLICY "Permitir leitura de households para autenticados"
+  ON public.households FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Permitir leitura de household_members para autenticados" ON public.household_members;
+CREATE POLICY "Permitir leitura de household_members para autenticados"
+  ON public.household_members FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Permitir escrita de household_members para autenticados" ON public.household_members;
+CREATE POLICY "Permitir escrita de household_members para autenticados"
+  ON public.household_members FOR ALL TO authenticated USING (true) WITH CHECK (true);

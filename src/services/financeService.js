@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase.js';
 import { calculateCardDueDate, addMonthsToIso } from '../utils/formatters.js';
+import { DEFAULT_HOUSEHOLD_MEMBERS } from '../data/constants.js';
 import {
   DEMO_ACCOUNTS,
   DEMO_HOUSEHOLD_MEMBERS,
@@ -546,7 +547,7 @@ export const loadInitialAppData = async (defaults = {}) => {
 
   if (isCloud) {
     try {
-      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes, hmRes] = await Promise.all([
+      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes, hmRes, profRes] = await Promise.all([
         supabase.from('accounts').select('*').order('created_at', { ascending: true }),
         supabase.from('cards').select('*').order('created_at', { ascending: true }),
         supabase.from('categories').select('*').order('name', { ascending: true }),
@@ -556,6 +557,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         supabase.from('savings_goals').select('*').order('created_at', { ascending: true }),
         supabase.from('portfolio_assets').select('*').order('created_at', { ascending: true }),
         supabase.from('household_members').select('*').order('created_at', { ascending: true }),
+        supabase.from('profiles').select('*').order('created_at', { ascending: true }),
       ]);
 
 
@@ -719,13 +721,58 @@ export const loadInitialAppData = async (defaults = {}) => {
       }
 
       const isHmSuccess = !hmRes?.error && Array.isArray(hmRes?.data);
-      const localHms = getLocal(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEMO_HOUSEHOLD_MEMBERS);
-      const householdMembers = isHmSuccess && hmRes.data.length > 0
-        ? hmRes.data.map(householdMemberToClient)
-        : (localHms || []).map(householdMemberToClient);
-      if (isHmSuccess && hmRes.data.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.householdMembers, JSON.stringify(householdMembers));
+      const isProfSuccess = !profRes?.error && Array.isArray(profRes?.data);
+
+      let mergedHms = isHmSuccess && hmRes.data.length > 0 ? hmRes.data.map(householdMemberToClient) : [];
+
+      // Se houver perfis cadastrados no Supabase (ex: Rafael e Ana Débora), garante que estão na lista de membros da família
+      if (isProfSuccess && profRes.data.length > 0) {
+        const existingKeys = new Set(mergedHms.map((m) => m.memberKey || m.id));
+        const existingEmails = new Set(mergedHms.map((m) => (m.email || '').toLowerCase()).filter(Boolean));
+
+        profRes.data.forEach((p) => {
+          const pKey = p.member_key || (p.role === 'admin' ? 'user-1' : 'user-2');
+          const pEmail = (p.email || '').toLowerCase();
+          const alreadyExists = existingKeys.has(pKey) || (pEmail && existingEmails.has(pEmail));
+
+          if (!alreadyExists) {
+            const isAna = pKey === 'user-2' || pEmail.includes('anadebora') || pEmail.includes('ana');
+            mergedHms.push({
+              id: p.id || pKey,
+              userId: p.id || null,
+              memberKey: pKey,
+              displayName: p.name || (isAna ? 'Ana Débora' : 'Rafael'),
+              email: p.email || (isAna ? 'anadebora@familia.com' : 'rafael@familia.com'),
+              role: p.role || (pKey === 'user-1' ? 'admin' : 'member'),
+              status: 'active',
+              color: isAna ? '#9333ea' : '#2563eb',
+              visibleEntities: (p.role === 'admin' || pKey === 'user-1')
+                ? ['family-shared', 'user-all', 'user-1', 'user-2']
+                : ['family-shared', pKey],
+              hiddenAccountIds: [],
+            });
+          }
+        });
       }
+
+      // Se a nuvem não tiver membros salvos, mescla com o cache local ou com DEFAULT_HOUSEHOLD_MEMBERS
+      if (mergedHms.length === 0) {
+        const localHms = getLocal(STORAGE_KEYS.householdMembers, DEFAULT_HOUSEHOLD_MEMBERS);
+        mergedHms = (localHms && localHms.length > 0)
+          ? localHms.map(householdMemberToClient)
+          : DEFAULT_HOUSEHOLD_MEMBERS;
+      }
+
+      // Garante que Rafael e Ana Débora estão sempre representados na família base
+      if (!mergedHms.some((m) => (m.memberKey || m.id) === 'user-1')) {
+        mergedHms.unshift(DEFAULT_HOUSEHOLD_MEMBERS[0]);
+      }
+      if (!mergedHms.some((m) => (m.memberKey || m.id) === 'user-2')) {
+        mergedHms.push(DEFAULT_HOUSEHOLD_MEMBERS[1]);
+      }
+
+      const householdMembers = mergedHms;
+      localStorage.setItem(STORAGE_KEYS.householdMembers, JSON.stringify(householdMembers));
 
       // Retorna exatamente os dados reais do banco (SEM injetar transações ou simulações fictícias)
       return {
@@ -755,7 +802,7 @@ export const loadInitialAppData = async (defaults = {}) => {
     monthlyEnvelopes: getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient),
     savingsGoals: getLocal(STORAGE_KEYS.savingsGoals, []).map(savingsGoalToClient),
     portfolioAssets: getLocal(STORAGE_KEYS.portfolioAssets, []).map(portfolioAssetToClient),
-    householdMembers: getLocal(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEMO_HOUSEHOLD_MEMBERS).map(householdMemberToClient),
+    householdMembers: getLocal(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEFAULT_HOUSEHOLD_MEMBERS).map(householdMemberToClient),
   };
 };
 

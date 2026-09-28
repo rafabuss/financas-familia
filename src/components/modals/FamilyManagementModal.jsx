@@ -72,25 +72,30 @@ export default function FamilyManagementModal({
     }
     // Se não houver seleção prévia, seleciona o primeiro membro que não seja o próprio admin ou o primeiro da lista
     if (householdMembers.length > 0) {
-      const nonAdmin = householdMembers.find((m) => m.role !== 'admin' || m.id !== currentUser?.id);
-      setSelectedMemberId(nonAdmin?.id || householdMembers[0]?.id);
+      const nonAdmin = householdMembers.find(
+        (m) => m.role !== 'admin' || (m.memberKey !== 'user-1' && m.id !== currentUser?.id)
+      );
+      setSelectedMemberId((prev) => {
+        if (prev && householdMembers.some((m) => m.id === prev)) return prev;
+        return nonAdmin?.id || householdMembers[0]?.id;
+      });
     }
   }, [isOpen, selectedMemberIdForMatrix, householdMembers]);
 
+  // Membro atualmente selecionado no Combobox (com fallback seguro)
+  const currentConfiguringMember =
+    householdMembers.find((m) => m.id === selectedMemberId) || householdMembers[0];
+
   // Carregar as permissões do membro selecionado no combobox
   useEffect(() => {
-    if (!selectedMemberId) return;
-    const member = householdMembers.find((m) => m.id === selectedMemberId);
+    const member = householdMembers.find((m) => m.id === selectedMemberId) || currentConfiguringMember;
     if (member) {
       setStagedVisibleEntities(Array.isArray(member.visibleEntities) ? [...member.visibleEntities] : ['family-shared']);
       setStagedHiddenAccountIds(Array.isArray(member.hiddenAccountIds) ? [...member.hiddenAccountIds] : []);
     }
-  }, [selectedMemberId, householdMembers]);
+  }, [selectedMemberId, householdMembers, currentConfiguringMember]);
 
   if (!isOpen) return null;
-
-  // Membro atualmente selecionado no Combobox
-  const currentConfiguringMember = householdMembers.find((m) => m.id === selectedMemberId);
 
   // Alternar checkbox de visibilidade de entidade/membro
   const handleToggleEntityCheck = (entityKey) => {
@@ -273,7 +278,7 @@ export default function FamilyManagementModal({
                         required
                         value={newMemberName}
                         onChange={(e) => setNewMemberName(e.target.value)}
-                        placeholder="Ex: Camila (Filha)"
+                        placeholder="Ex: Alice (Filha) ou Pedro"
                         className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
                       />
                     </div>
@@ -283,7 +288,7 @@ export default function FamilyManagementModal({
                         type="email"
                         value={newMemberEmail}
                         onChange={(e) => setNewMemberEmail(e.target.value)}
-                        placeholder="camila@familia.com"
+                        placeholder="alice@familia.com"
                         className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
                       />
                     </div>
@@ -541,13 +546,13 @@ export default function FamilyManagementModal({
                     <div className="flex items-center space-x-3">
                       <select
                         id="matrix-member-select"
-                        value={selectedMemberId}
+                        value={selectedMemberId || currentConfiguringMember?.id || ''}
                         onChange={(e) => setSelectedMemberId(e.target.value)}
                         className="bg-white border border-slate-300 text-slate-900 font-bold text-sm sm:text-base rounded-xl px-3.5 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer shadow-xs min-w-[240px]"
                       >
                         {householdMembers.map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.displayName} ({m.role === 'admin' ? 'Admin' : 'Membro'} • {m.email || m.memberKey})
+                            {m.displayName} ({m.role === 'admin' ? 'Admin' : 'Membro'} • {m.email || m.memberKey || 'Sem email'})
                           </option>
                         ))}
                       </select>

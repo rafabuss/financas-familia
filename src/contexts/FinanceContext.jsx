@@ -7,7 +7,7 @@ import {
   addMonthsToIso,
   setGlobalPrivacyActive,
 } from '../utils/formatters';
-import { FAMILY_MEMBERS, DEFAULT_CATEGORIES } from '../data/constants';
+import { FAMILY_MEMBERS, DEFAULT_CATEGORIES, DEFAULT_HOUSEHOLD_MEMBERS } from '../data/constants';
 import {
   loadInitialAppData,
   syncItem,
@@ -247,9 +247,18 @@ export function FinanceProvider({ children }) {
         return DEMO_HOUSEHOLD_MEMBERS;
       }
       const local = localStorage.getItem(STORAGE_KEYS.householdMembers);
-      return local ? JSON.parse(local) : [];
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.filter(
+            (m) => (m.displayName || '').toLowerCase() !== 'camila - filha' && m.id !== 'demo-hm-3' && m.memberKey !== 'user-3'
+          );
+          if (cleaned.length > 0) return cleaned;
+        }
+      }
+      return DEFAULT_HOUSEHOLD_MEMBERS;
     } catch {
-      return isDemoMode() ? DEMO_HOUSEHOLD_MEMBERS : [];
+      return isDemoMode() ? DEMO_HOUSEHOLD_MEMBERS : DEFAULT_HOUSEHOLD_MEMBERS;
     }
   });
 
@@ -447,6 +456,14 @@ export function FinanceProvider({ children }) {
         if (res.monthlyEnvelopes) setMonthlyEnvelopes(res.monthlyEnvelopes);
         if (res.savingsGoals) setSavingsGoals(res.savingsGoals);
         if (res.portfolioAssets) setPortfolioAssets(res.portfolioAssets);
+        if (res.householdMembers && Array.isArray(res.householdMembers)) {
+          const cleanHms = res.householdMembers.filter(
+            (m) => (m.displayName || '').toLowerCase() !== 'camila - filha' && m.id !== 'demo-hm-3' && m.memberKey !== 'user-3'
+          );
+          const finalHms = cleanHms.length > 0 ? cleanHms : DEFAULT_HOUSEHOLD_MEMBERS;
+          setHouseholdMembers(finalHms);
+          saveToLocalStorage(STORAGE_KEYS.householdMembers, finalHms);
+        }
       }
     } catch (err) {
       console.warn('Erro ao recarregar dados da nuvem:', err);
@@ -1028,7 +1045,7 @@ export function FinanceProvider({ children }) {
     const memberObj = householdMembers.find((m) => (m.memberKey || m.id) === tx.ownerId) || FAMILY_MEMBERS.find((m) => m.id === tx.ownerId);
     const ownerName = memberObj 
       ? (memberObj.displayName || memberObj.name || '').replace(/^[^\w]+/, '').split('(')[0].trim() 
-      : (tx.ownerId === 'user-1' ? 'Rafael' : tx.ownerId === 'user-2' ? 'Ana Débora' : tx.ownerId === 'user-3' ? 'Camila' : (tx.ownerName || 'Cônjuge'));
+      : (tx.ownerId === 'user-1' ? 'Rafael' : tx.ownerId === 'user-2' ? 'Ana Débora' : (tx.ownerName || 'Cônjuge'));
 
     return {
       ...tx,
@@ -5392,16 +5409,16 @@ export function FinanceProvider({ children }) {
       });
       setCurrentMemberId('user-2');
     } else if (memberKey === 'user-3') {
-      const camila = householdMembers.find((m) => m.memberKey === 'user-3') || {};
+      const alice = householdMembers.find((m) => m.memberKey === 'user-3') || {};
       setCurrentUser({
         id: 'demo-user-3',
-        name: 'Camila - Filha',
-        email: 'camila@familia.com',
-        role: camila.role || 'member',
+        name: 'Alice - Filha (13 anos)',
+        email: 'alice@familia.com',
+        role: alice.role || 'member',
         memberKey: 'user-3',
-        status: camila.status || 'active',
-        visibleEntities: camila.visibleEntities || ['user-3'],
-        hiddenAccountIds: camila.hiddenAccountIds || ['demo-acc-3'],
+        status: alice.status || 'active',
+        visibleEntities: alice.visibleEntities || ['user-3'],
+        hiddenAccountIds: alice.hiddenAccountIds || ['demo-acc-3'],
       });
       setCurrentMemberId('user-3');
     }

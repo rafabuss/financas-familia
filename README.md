@@ -340,11 +340,21 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Controle Granular por Conta Bancária e Cartão:** Permissão para ocultar contas sensíveis de investimentos ou cartões de certos membros da família.
   - [x] **Tela de Bloqueio/Suspensão Amigável:** Interface informativa caso o acesso do membro esteja temporariamente suspenso pelo administrador.
 
-- [ ] **Fase 8: Importações Flexíveis & Conciliação Inteligente**
-  - [ ] Ampliação de leitura de extratos em formato OFX e múltiplos bancos (Nubank, Inter, BB, C6, etc.).
-  - [ ] **Conciliação Híbrida Inteligente:** Motor que detecta despesas manuais já cadastradas e sugere a unificação com os lançamentos bancários importados, sem duplicações.
-  - [ ] Edição, recategorização e divisão (*split*) livre de qualquer lançamento importado.
-  - [ ] Preparação da arquitetura para futura conexão direta via Open Finance (Pluggy / Belvo).
+- [x] **Fase 8: Importações Flexíveis & Conciliação Inteligente**
+  - [x] **Parser Universal Client-Side de Arquivos OFX (`src/services/ofxParser.js`):** Leitura e decodificação 100% no navegador (privacidade total) com suporte a OFX 1.02/1.6 (SGML) e OFX 2.0 (XML), detecção automática de charset (UTF-8 e ISO-8859-1) e compatibilidade com bancos brasileiros (Nubank, Inter, Itaú, Banco do Brasil, Bradesco, Santander, C6, Caixa, XP, etc.).
+  - [x] **Motor de Conciliação Híbrida Inteligente (`src/services/reconciliationService.js`):** Detecção dos 3 estados de conciliação com margem configurável de +/- 3 dias:
+    - 🟢 **NOVO:** Lançamento inexistente no sistema, aprovado automaticamente para importação.
+    - 🟡 **SUGERIR CONCILIAÇÃO (Match Inteligente):** Detecta lançamentos manuais com mesmo valor e data próxima, permitindo conciliar com a transação existente sem duplicar ou importar como novo.
+    - 🔴 **JÁ IMPORTADO (Anti-Duplicação Exata):** Identificação de FITID bancário único ou dados idênticos já registrados, desmarcando o item automaticamente para proteção do extrato.
+  - [x] **Mesa de Revisão & Edição Prévia Flexível (`src/components/import/ImportTab.jsx`):**
+    - **Edição Inline de Descrição:** Renomeie livremente descrições truncadas do banco mantendo o texto original para auditoria.
+    - **Auto-Categorização Inteligente:** Regras especializadas para despesas e receitas por palavras-chave nacionais (Supermercados, iFood, Postos, Enel, Farmácias, Netflix, Salários, etc.).
+    - **Definição de Titular e Escopo:** Escolha de membro responsável e alternância entre Familiar e Pessoal Privado (`PERSONAL_PRIVATE`).
+    - **Divisão de Lançamento (Split):** Desmembramento de um lançamento único em duas ou mais categorias com validação contábil em tempo real.
+    - **Destino Flexível:** Alternância entre Conta Bancária (extrato) e Cartão de Crédito (fatura) com re-conciliação automática sob demanda.
+  - [x] **Gravação Segura & Suporte ao Modo Demonstração:**
+    - Botões rápidos *"Carregar Extrato OFX de Exemplo (BB)"* e *"Carregar Fatura OFX de Exemplo (Nubank)"* para testes instantâneos em 1 clique com os 3 estados de conciliação.
+    - Persistência sem duplicações: itens conciliados atualizam a transação manual e itens novos são criados e sincronizados no Supabase e no cache local.
 
 - [ ] **Fase 9: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
   - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).

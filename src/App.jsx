@@ -207,6 +207,13 @@ function AppContent() {
     handleSelectAllImport,
     handleDeselectDuplicates,
     handleUpdateImportItem,
+    importDestinationType,
+    setImportDestinationType,
+    importSelectedAccountId,
+    setImportSelectedAccountId,
+    handleLoadSampleOfx,
+    handleReconcileWithTarget,
+    handleSplitImportItem,
     handleConfirmImport,
     exportData,
     handleResetEntireSystem,
@@ -716,7 +723,12 @@ function AppContent() {
         {activeTab === 'import' && (
           <ImportTab
             cards={cards}
+            accounts={accounts}
             categories={categories}
+            importDestinationType={importDestinationType}
+            setImportDestinationType={setImportDestinationType}
+            importSelectedAccountId={importSelectedAccountId}
+            setImportSelectedAccountId={setImportSelectedAccountId}
             importSelectedCard={importSelectedCard}
             setImportSelectedCard={setImportSelectedCard}
             importPreviewData={importPreviewData}
@@ -734,6 +746,9 @@ function AppContent() {
             handleDeselectDuplicates={handleDeselectDuplicates}
             handleUpdateImportItem={handleUpdateImportItem}
             handleConfirmImport={handleConfirmImport}
+            handleLoadSampleOfx={handleLoadSampleOfx}
+            handleReconcileWithTarget={handleReconcileWithTarget}
+            handleSplitImportItem={handleSplitImportItem}
           />
         )}
 

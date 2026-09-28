@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { parseInvoicePdf } from '../services/pdfParser';
+import { parseOfx } from '../services/ofxParser';
+import {
+  reconcileTransactions,
+  splitTransactionItem,
+  generateSampleOfxData,
+  suggestCategory,
+} from '../services/reconciliationService';
 import {
   formatMoney,
   formatDateBR,
@@ -862,13 +869,15 @@ export function FinanceProvider({ children }) {
   const [chartCategoryViewMode, setChartCategoryViewMode] = useState('hierarchical'); // 'hierarchical' | 'flat'
   const [dashboardCategoryMode, setDashboardCategoryMode] = useState('parent'); // 'parent' | 'sub'
 
-  // Controles da Importação de Faturas
+  // Controles da Importação de Extratos & Faturas
+  const [importDestinationType, setImportDestinationType] = useState('ACCOUNT'); // 'ACCOUNT' | 'CARD'
+  const [importSelectedAccountId, setImportSelectedAccountId] = useState('');
   const [importSelectedCard, setImportSelectedCard] = useState('card-1');
   const [importPreviewData, setImportPreviewData] = useState(null);
   const [importMetadata, setImportMetadata] = useState(null);
   const [isImportLoading, setIsImportLoading] = useState(false);
-  const [importFilterTab, setImportFilterTab] = useState('ALL'); // 'ALL' | 'SELECTED' | 'DUPLICATES'
-  const [importDefaultStatus, setImportDefaultStatus] = useState('COMPROMETIDO'); // 'COMPROMETIDO' | 'REALIZADO'
+  const [importFilterTab, setImportFilterTab] = useState('ALL'); // 'ALL' | 'SELECTED' | 'DUPLICATES' | 'MATCHES' | 'NEW'
+  const [importDefaultStatus, setImportDefaultStatus] = useState('REALIZADO'); // 'COMPROMETIDO' | 'REALIZADO'
 
   // Controle de Campos Condicionais do Modal (Conta vs Cartão)
   const [modalSourceType, setModalSourceType] = useState('ACCOUNT');
@@ -2405,14 +2414,18 @@ export function FinanceProvider({ children }) {
 
   // Resumo de dados da importação de fatura em conferência
   const importSummary = useMemo(() => {
-    if (!importPreviewData) return { selectedCount: 0, selectedTotalCents: 0, duplicateCount: 0, unselectedCount: 0 };
+    if (!importPreviewData) return { selectedCount: 0, selectedTotalCents: 0, duplicateCount: 0, matchedCount: 0, newCount: 0, unselectedCount: 0 };
     const selected = importPreviewData.filter((i) => i.selected);
-    const duplicates = importPreviewData.filter((i) => i.isDuplicate);
-    const selectedTotalCents = selected.reduce((acc, i) => acc + i.amountCents, 0);
+    const duplicates = importPreviewData.filter((i) => i.isDuplicate || i.reconciliationStatus === 'DUPLICATE');
+    const matches = importPreviewData.filter((i) => i.reconciliationStatus === 'SUGGEST_MATCH');
+    const news = importPreviewData.filter((i) => i.reconciliationStatus === 'NEW');
+    const selectedTotalCents = selected.reduce((acc, i) => acc + (i.amountCents || 0), 0);
     return {
       selectedCount: selected.length,
       selectedTotalCents,
       duplicateCount: duplicates.length,
+      matchedCount: matches.length,
+      newCount: news.length,
       unselectedCount: importPreviewData.length - selected.length,
     };
   }, [importPreviewData]);
@@ -4584,7 +4597,7 @@ export function FinanceProvider({ children }) {
     URL.revokeObjectURL(url);
   };
 
-  // Handlers para Importação Real de Faturas e Extratos (PDF, CSV, TXT)
+  // Handlers para Importação Flexível e Conciliação Inteligente (OFX, PDF, CSV, TXT)
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -4592,9 +4605,78 @@ export function FinanceProvider({ children }) {
     setIsImportLoading(true);
 
     try {
-      const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
+      const fileNameLower = file.name.toLowerCase();
+      const isOfx = fileNameLower.endsWith('.ofx');
+      const isPdf = fileNameLower.endsWith('.pdf') || file.type === 'application/pdf';
 
-      if (isPdf) {
+      if (isOfx) {
+        // ==================== 1. PARSER UNIVERSAL OFX ====================
+        const parsed = await parseOfx(file);
+
+        if (!parsed.transactions || parsed.transactions.length === 0) {
+          alert('Nenhum lançamento identificado neste arquivo OFX. Verifique se o arquivo contém transações bancárias.');
+          setIsImportLoading(false);
+          return;
+        }
+
+        const isCard = parsed.sourceType === 'CARD';
+        setImportDestinationType(isCard ? 'CARD' : 'ACCOUNT');
+
+        // Tentativa de associação automática inteligente da Conta ou Cartão de destino
+        let targetId = null;
+        if (isCard) {
+          const matchedCard = cards.find(
+            (c) =>
+              (parsed.acctId && c.name && c.name.includes(parsed.acctId.slice(-4))) ||
+              (parsed.institution && c.name && c.name.toLowerCase().includes(parsed.institution.toLowerCase())) ||
+              (parsed.institution && c.bank && c.bank.toLowerCase().includes(parsed.institution.toLowerCase()))
+          );
+          targetId = matchedCard ? matchedCard.id : (cards[0]?.id || 'card-1');
+          setImportSelectedCard(targetId);
+        } else {
+          const matchedAcc = accounts.find(
+            (a) =>
+              (parsed.acctId && a.name && a.name.includes(parsed.acctId)) ||
+              (parsed.institution && a.name && a.name.toLowerCase().includes(parsed.institution.toLowerCase())) ||
+              (parsed.institution && a.bank && a.bank.toLowerCase().includes(parsed.institution.toLowerCase())) ||
+              (parsed.bankId && a.bank && a.bank.includes(parsed.bankId))
+          );
+          targetId = matchedAcc ? matchedAcc.id : (accounts[0]?.id || 'acc-1');
+          setImportSelectedAccountId(targetId);
+        }
+
+        // Executa o motor de conciliação híbrida inteligente contra transações existentes
+        const reconciled = reconcileTransactions(parsed.transactions, transactions, {
+          targetId,
+          targetType: isCard ? 'CARD' : 'ACCOUNT',
+          dateMarginDays: 3,
+          categories,
+          defaultOwnerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
+        });
+
+        setImportMetadata({
+          fileName: file.name,
+          fileType: 'OFX',
+          sourceType: parsed.sourceType,
+          institution: parsed.institution,
+          bankId: parsed.bankId,
+          branchId: parsed.branchId,
+          acctId: parsed.acctId,
+          currency: parsed.currency,
+          startDate: parsed.startDate,
+          endDate: parsed.endDate,
+          ledgerBalanceCents: parsed.ledgerBalanceCents,
+          balanceDate: parsed.balanceDate,
+          totalInvoiceCents: parsed.transactions.reduce((acc, t) => acc + (t.amountCents || 0), 0),
+          totalExpensesCents: parsed.totalExpensesCents,
+          totalIncomesCents: parsed.totalIncomesCents,
+          totalTransactionsCount: parsed.transactions.length,
+          isReconciled: true,
+        });
+
+        setImportPreviewData(reconciled);
+      } else if (isPdf) {
+        // ==================== 2. PARSER DE FATURAS PDF ====================
         const arrayBuffer = await file.arrayBuffer();
         const parsed = await parseInvoicePdf(new Uint8Array(arrayBuffer), categories, FAMILY_MEMBERS);
 
@@ -4604,8 +4686,10 @@ export function FinanceProvider({ children }) {
           return;
         }
 
-        // Tenta associar automaticamente o cartão correto pelo final (ex: 8557) ou nome
-        let targetCardId = importSelectedCard;
+        setImportDestinationType('CARD');
+
+        // Tenta associar automaticamente o cartão correto pelo final (ex: 8557) ou banco
+        let targetCardId = importSelectedCard || cards[0]?.id;
         if (parsed.cardLast4) {
           const matchedCard = cards.find(
             (c) =>
@@ -4623,26 +4707,25 @@ export function FinanceProvider({ children }) {
         const suggestedStatus = (parsed.dueDateIso && parsed.dueDateIso >= todayStr) ? 'COMPROMETIDO' : 'REALIZADO';
         setImportDefaultStatus(suggestedStatus);
 
-        // Verificação inteligente de duplicidade contra os lançamentos já existentes
-        const analyzed = parsed.items.map((item) => {
-          const isDuplicate = transactions.some(
-            (t) =>
-              t.cardId === targetCardId &&
-              t.amountCents === item.amountCents &&
-              (t.purchaseDate === item.purchaseDate ||
-                t.date === item.date ||
-                t.description.toLowerCase().trim() === item.description.toLowerCase().trim())
-          );
-          return {
-            ...item,
-            status: suggestedStatus,
-            isDuplicate,
-            selected: !isDuplicate,
-          };
+        // Aplica o motor de conciliação inteligente
+        const itemsWithStatus = parsed.items.map((i) => ({
+          ...i,
+          status: suggestedStatus,
+          type: 'EXPENSE',
+        }));
+
+        const reconciled = reconcileTransactions(itemsWithStatus, transactions, {
+          targetId: targetCardId,
+          targetType: 'CARD',
+          dateMarginDays: 3,
+          categories,
+          defaultOwnerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
         });
 
         setImportMetadata({
           fileName: file.name,
+          fileType: 'PDF',
+          sourceType: 'CARD',
           cardholder: parsed.cardholder,
           cardLast4: parsed.cardLast4,
           dueDate: parsed.dueDate,
@@ -4651,9 +4734,9 @@ export function FinanceProvider({ children }) {
           totalInvoiceCents: parsed.totalInvoiceCents,
           isReconciled: parsed.isReconciled,
         });
-        setImportPreviewData(analyzed);
+        setImportPreviewData(reconciled);
       } else {
-        // Leitura de CSV / TXT
+        // ==================== 3. PARSER CSV / TXT ====================
         const text = await file.text();
         const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
         const parsedItems = [];
@@ -4668,6 +4751,7 @@ export function FinanceProvider({ children }) {
             const descPart = parts[1]?.trim() || `Item ${idx}`;
             let valRaw = parts[2]?.trim() || '0';
             valRaw = valRaw.replace('R$', '').replace(/\s/g, '');
+            let isNegative = valRaw.includes('-');
             if (valRaw.includes(',') && valRaw.includes('.')) {
               valRaw = valRaw.replace(/\./g, '').replace(',', '.');
             } else if (valRaw.includes(',')) {
@@ -4678,56 +4762,152 @@ export function FinanceProvider({ children }) {
 
             if (amountCents > 0) {
               const isoDate = datePart.includes('/') ? datePart.split('/').reverse().join('-') : datePart;
+              const type = isNegative ? 'EXPENSE' : (importDestinationType === 'CARD' ? 'EXPENSE' : 'INCOME');
               parsedItems.push({
                 id: `imp-file-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
                 description: descPart,
                 amountCents,
                 date: isoDate,
                 dateDisplay: formatDateBR(isoDate),
-                categoryId: categories[0]?.id || 'cat-1',
+                purchaseDate: isoDate,
+                type,
+                categoryId: suggestCategory(descPart, type, categories),
                 scope: 'FAMILY',
                 ownerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
                 installmentNumber: null,
                 installmentCount: null,
-                selected: true,
               });
             }
           }
         });
 
         if (parsedItems.length === 0) {
-          alert('Não foi possível identificar lançamentos no arquivo. Use o formato Data; Descrição; Valor (CSV) ou envie uma fatura PDF.');
+          alert('Não foi possível identificar lançamentos no arquivo. Use o formato Data; Descrição; Valor (CSV) ou envie um arquivo OFX ou PDF.');
           setIsImportLoading(false);
           return;
         }
 
-        const analyzed = parsedItems.map((item) => {
-          const isDuplicate = transactions.some(
-            (t) =>
-              t.cardId === importSelectedCard &&
-              t.amountCents === item.amountCents &&
-              t.description.toLowerCase().trim() === item.description.toLowerCase().trim()
-          );
-          return { ...item, isDuplicate, selected: !isDuplicate };
+        const targetId = importDestinationType === 'CARD'
+          ? (importSelectedCard || cards[0]?.id)
+          : (importSelectedAccountId || accounts[0]?.id);
+
+        const reconciled = reconcileTransactions(parsedItems, transactions, {
+          targetId,
+          targetType: importDestinationType,
+          dateMarginDays: 3,
+          categories,
+          defaultOwnerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
         });
 
         setImportMetadata({
           fileName: file.name,
-          cardholder: '',
-          cardLast4: '',
-          dueDate: '',
-          closingDate: '',
-          totalInvoiceCents: analyzed.reduce((a, b) => a + b.amountCents, 0),
+          fileType: 'CSV',
+          sourceType: importDestinationType,
+          totalInvoiceCents: reconciled.reduce((a, b) => a + (b.amountCents || 0), 0),
           isReconciled: true,
         });
-        setImportPreviewData(analyzed);
+        setImportPreviewData(reconciled);
       }
     } catch (err) {
-      console.error('Erro na leitura da fatura:', err);
-      alert('Ocorreu um erro ao ler o arquivo. Certifique-se de que é uma fatura PDF ou arquivo CSV válido.');
+      console.error('Erro na leitura da fatura/extrato:', err);
+      alert('Ocorreu um erro ao ler o arquivo. Certifique-se de que é um extrato OFX, fatura PDF ou arquivo CSV válido.');
     } finally {
       setIsImportLoading(false);
       if (e.target) e.target.value = '';
+    }
+  };
+
+  // Carrega Arquivo OFX de Exemplo dinâmico para demonstração instantânea
+  const handleLoadSampleOfx = async (sampleType = 'ACCOUNT') => {
+    setIsImportLoading(true);
+    try {
+      const sampleContent = generateSampleOfxData(sampleType, transactions);
+      const parsed = await parseOfx(sampleContent);
+
+      const isCard = sampleType === 'CARD';
+      setImportDestinationType(isCard ? 'CARD' : 'ACCOUNT');
+
+      let targetId = null;
+      if (isCard) {
+        targetId = importSelectedCard || cards[0]?.id || 'card-1';
+        setImportSelectedCard(targetId);
+      } else {
+        targetId = importSelectedAccountId || accounts[0]?.id || 'acc-1';
+        setImportSelectedAccountId(targetId);
+      }
+
+      const reconciled = reconcileTransactions(parsed.transactions, transactions, {
+        targetId,
+        targetType: isCard ? 'CARD' : 'ACCOUNT',
+        dateMarginDays: 3,
+        categories,
+        defaultOwnerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
+      });
+
+      setImportMetadata({
+        fileName: isCard ? 'fatura-cartao-nubank-exemplo.ofx' : 'extrato-banco-do-brasil-exemplo.ofx',
+        fileType: 'OFX',
+        isSample: true,
+        sourceType: parsed.sourceType,
+        institution: parsed.institution,
+        bankId: parsed.bankId,
+        branchId: parsed.branchId,
+        acctId: parsed.acctId,
+        currency: parsed.currency,
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        ledgerBalanceCents: parsed.ledgerBalanceCents,
+        balanceDate: parsed.balanceDate,
+        totalInvoiceCents: parsed.transactions.reduce((acc, t) => acc + (t.amountCents || 0), 0),
+        totalExpensesCents: parsed.totalExpensesCents,
+        totalIncomesCents: parsed.totalIncomesCents,
+        totalTransactionsCount: parsed.transactions.length,
+        isReconciled: true,
+      });
+
+      setImportPreviewData(reconciled);
+    } catch (err) {
+      console.error('Erro ao gerar OFX de exemplo:', err);
+      alert('Não foi possível gerar os dados de exemplo OFX.');
+    } finally {
+      setIsImportLoading(false);
+    }
+  };
+
+  // Re-concilia itens da mesa de revisão quando o usuário troca o destino (Conta ou Cartão)
+  const handleReconcileWithTarget = (newTargetId, newTargetType) => {
+    if (!importPreviewData || importPreviewData.length === 0) return;
+
+    // Preserva edições manuais feitas pelo usuário nos itens
+    const reconciled = reconcileTransactions(importPreviewData, transactions, {
+      targetId: newTargetId,
+      targetType: newTargetType,
+      dateMarginDays: 3,
+      categories,
+      defaultOwnerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
+    });
+
+    setImportPreviewData(reconciled);
+  };
+
+  // Desmembra (Split) uma transação em duas ou mais categorias
+  const handleSplitImportItem = (itemId, splits) => {
+    if (!importPreviewData) return;
+    const targetItem = importPreviewData.find((i) => i.id === itemId);
+    if (!targetItem) return;
+
+    try {
+      const splitItems = splitTransactionItem(targetItem, splits);
+      setImportPreviewData((prev) => {
+        if (!prev) return prev;
+        const idx = prev.findIndex((i) => i.id === itemId);
+        if (idx === -1) return prev;
+        const copy = [...prev];
+        copy.splice(idx, 1, ...splitItems);
+        return copy;
+      });
+    } catch (err) {
+      alert(err.message || 'Erro ao dividir o lançamento.');
     }
   };
 
@@ -4745,10 +4925,16 @@ export function FinanceProvider({ children }) {
 
   const handleDeselectDuplicates = () => {
     setImportPreviewData((prev) =>
-      prev ? prev.map((i) => ({ ...i, selected: i.isDuplicate ? false : i.selected })) : prev
+      prev
+        ? prev.map((i) => ({
+            ...i,
+            selected: i.isDuplicate || i.reconciliationStatus === 'DUPLICATE' ? false : i.selected,
+          }))
+        : prev
     );
   };
 
+  // Gravação Segura de Importação & Conciliação
   const handleConfirmImport = () => {
     if (!importPreviewData || importPreviewData.length === 0) return;
     const toImport = importPreviewData.filter((i) => i.selected);
@@ -4758,55 +4944,93 @@ export function FinanceProvider({ children }) {
     }
 
     const todayStr = new Date().toISOString().slice(0, 10);
-    const targetCard = cards.find((c) => c.id === importSelectedCard);
+    const isCard = importDestinationType === 'CARD';
+    const targetId = isCard
+      ? (importSelectedCard || cards[0]?.id)
+      : (importSelectedAccountId || accounts[0]?.id);
+
+    const targetCard = isCard ? cards.find((c) => c.id === targetId) : null;
+
     const newTxs = [];
+    const updatedExistingMap = {};
+    let reconciledCount = 0;
+    let newCount = 0;
     let futureInstallmentsCount = 0;
 
     toImport.forEach((item, idx) => {
+      // 1. CASO DE CONCILIAÇÃO COM LANÇAMENTO EXISTENTE (Match Inteligente)
+      if (item.action === 'RECONCILE' && item.matchedTransactionId) {
+        const existing = transactions.find((t) => t.id === item.matchedTransactionId);
+        if (existing) {
+          const updated = {
+            ...existing,
+            fitId: item.fitId || existing.fitId,
+            status: 'REALIZADO',
+            description: item.description || existing.description,
+            categoryId: item.categoryId || existing.categoryId,
+            ownerId: item.ownerId || existing.ownerId,
+            scope: item.scope || existing.scope,
+            visibility: item.visibility || existing.visibility,
+            bankDescription: item.originalDescription || existing.bankDescription,
+            reconciledAt: new Date().toISOString(),
+          };
+          updatedExistingMap[existing.id] = updated;
+          reconciledCount++;
+          return;
+        }
+      }
+
+      // 2. CASO DE NOVO LANÇAMENTO
+      newCount++;
       const purchaseIso = item.purchaseDate || item.date;
       let dueIso = item.dueDate || importMetadata?.dueDateIso;
-      if (!dueIso && targetCard && targetCard.closingDay && targetCard.dueDay) {
-        dueIso = calculateCardDueDate(purchaseIso, targetCard.closingDay, targetCard.dueDay);
+      if (isCard) {
+        if (!dueIso && targetCard && targetCard.closingDay && targetCard.dueDay) {
+          dueIso = calculateCardDueDate(purchaseIso, targetCard.closingDay, targetCard.dueDay);
+        }
+        if (!dueIso) dueIso = purchaseIso;
+      } else {
+        dueIso = purchaseIso;
       }
-      if (!dueIso) dueIso = purchaseIso;
 
       const isFuture = dueIso >= todayStr;
       const defaultStatus = isFuture ? 'COMPROMETIDO' : 'REALIZADO';
-      const status = item.status || importDefaultStatus || defaultStatus;
+      const status = item.status || (isCard ? importDefaultStatus : 'REALIZADO') || defaultStatus;
       const installmentGroupId =
         item.installmentCount && item.installmentCount > 1
           ? `group-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`
           : null;
 
-      // 1. Parcela referente a esta fatura
       const currentTx = {
         id: `tx-imp-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
         description: item.description,
         amountCents: item.amountCents,
-        type: 'EXPENSE',
+        type: item.type || (isCard ? 'EXPENSE' : (item.amountCents < 0 ? 'EXPENSE' : 'INCOME')),
         status,
-        date: dueIso, // Vencimento contábil da fatura para conciliação e caixa
-        dueDate: dueIso, // Vencimento explícito do cartão
-        purchaseDate: purchaseIso, // Data em que a compra ocorreu fisicamente
-        cardId: importSelectedCard,
+        date: isCard ? dueIso : purchaseIso,
+        dueDate: dueIso,
+        purchaseDate: purchaseIso,
+        cardId: isCard ? targetId : null,
+        accountId: isCard ? null : targetId,
         categoryId: item.categoryId || categories[0]?.id,
         scope: item.scope || 'FAMILY',
+        visibility: item.visibility || (item.scope === 'PERSONAL' ? 'PERSONAL_PRIVATE' : 'FAMILY'),
         ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
+        fitId: item.fitId || null,
         installmentNumber: item.installmentNumber || null,
         installmentCount: item.installmentCount || null,
         installmentGroupId,
       };
       newTxs.push(currentTx);
 
-      // 2. Geração automática das parcelas futuras restantes
+      // Geração automática das parcelas futuras restantes no cartão de crédito
       const instNum = item.installmentNumber ? parseInt(item.installmentNumber, 10) : null;
       const instTotal = item.installmentCount ? parseInt(item.installmentCount, 10) : null;
-      if (instNum && instTotal && instNum < instTotal) {
+      if (isCard && instNum && instTotal && instNum < instTotal) {
         for (let nextK = instNum + 1; nextK <= instTotal; nextK++) {
           const monthOffset = nextK - instNum;
           const nextDueIso = addMonthsToIso(dueIso, monthOffset);
 
-          // Ajustar descrição da parcela futura de forma legível
           let futureDesc = item.description;
           if (/parcela\s+\d+\s+de\s+\d+/i.test(futureDesc)) {
             futureDesc = futureDesc.replace(/parcela\s+\d+\s+de\s+\d+/i, `Parcela ${nextK} de ${instTotal}`);
@@ -4825,9 +5049,11 @@ export function FinanceProvider({ children }) {
             date: nextDueIso,
             dueDate: nextDueIso,
             purchaseDate: purchaseIso,
-            cardId: importSelectedCard,
+            cardId: targetId,
+            accountId: null,
             categoryId: item.categoryId || categories[0]?.id,
             scope: item.scope || 'FAMILY',
+            visibility: item.visibility || (item.scope === 'PERSONAL' ? 'PERSONAL_PRIVATE' : 'FAMILY'),
             ownerId: item.ownerId || (currentMemberId === 'user-all' ? 'user-1' : currentMemberId),
             installmentNumber: nextK,
             installmentCount: instTotal,
@@ -4839,18 +5065,34 @@ export function FinanceProvider({ children }) {
       }
     });
 
+    // Atualiza estado de transações (conciliadas atualizadas + novas inseridas)
+    const updatedExistingList = Object.values(updatedExistingMap);
     setTransactions((prev) => {
-      const updated = [...prev, ...newTxs];
-      saveToLocalStorage('financas_transactions_v1', updated);
-      return updated;
+      const merged = prev.map((t) => updatedExistingMap[t.id] || t);
+      const allUpdated = [...merged, ...newTxs];
+      saveToLocalStorage(STORAGE_KEYS.transactions, allUpdated);
+      return allUpdated;
     });
-    syncBatchTransactions(newTxs);
 
-    const futureMsg = futureInstallmentsCount > 0 ? ` e ${futureInstallmentsCount} parcela(s) futura(s) agendada(s) automaticamente` : '';
-    alert(`${toImport.length} lançamento(s) importado(s)${futureMsg} com sucesso!`);
+    // Sincronização em nuvem / backend
+    if (newTxs.length > 0 || updatedExistingList.length > 0) {
+      syncBatchTransactions([...newTxs, ...updatedExistingList]).catch(console.warn);
+    }
+
+    const summaryParts = [];
+    if (newCount > 0) summaryParts.push(`${newCount} novo(s) lançamento(s)`);
+    if (reconciledCount > 0) summaryParts.push(`${reconciledCount} lançamento(s) conciliado(s) sem duplicação`);
+    if (futureInstallmentsCount > 0) summaryParts.push(`${futureInstallmentsCount} parcela(s) futura(s) agendada(s)`);
+
+    alert(`Sucesso na Importação!\n• ${summaryParts.join('\n• ')}`);
     setImportPreviewData(null);
     setImportMetadata(null);
-    setActiveTab('faturas');
+
+    if (isCard) {
+      setActiveTab('faturas');
+    } else {
+      setActiveTab('transactions');
+    }
   };
 
   // Manipulador de preset de intervalo de datas dos lançamentos
@@ -5565,6 +5807,10 @@ export function FinanceProvider({ children }) {
     setShowWhatIfDrawer,
     projectionSort,
     setProjectionSort,
+    importDestinationType,
+    setImportDestinationType,
+    importSelectedAccountId,
+    setImportSelectedAccountId,
     importSelectedCard,
     setImportSelectedCard,
     importPreviewData,
@@ -5692,6 +5938,9 @@ export function FinanceProvider({ children }) {
     handleDeselectDuplicates,
     handleUpdateImportItem,
     handleConfirmImport,
+    handleLoadSampleOfx,
+    handleReconcileWithTarget,
+    handleSplitImportItem,
     handleResetEntireSystem,
     handleSaveScenario,
     handleSaveAccount,

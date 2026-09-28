@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase.js';
 import { calculateCardDueDate, addMonthsToIso } from '../utils/formatters.js';
-import { DEFAULT_HOUSEHOLD_MEMBERS } from '../data/constants.js';
+import { DEFAULT_HOUSEHOLD_MEMBERS, DEFAULT_FAMILY_NAME } from '../data/constants.js';
 import {
   DEMO_ACCOUNTS,
   DEMO_HOUSEHOLD_MEMBERS,
@@ -38,6 +38,7 @@ export const STORAGE_KEYS = {
   savingsGoals: 'financas_savings_goals_v1',
   portfolioAssets: 'financas_portfolio_assets_v1',
   householdMembers: 'financas_household_members_v1',
+  familyName: 'financas_family_name_v1',
 };
 
 export const markCategoryPending = (catId) => {
@@ -547,7 +548,7 @@ export const loadInitialAppData = async (defaults = {}) => {
 
   if (isCloud) {
     try {
-      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes, hmRes, profRes] = await Promise.all([
+      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes, hmRes, profRes, houseRes] = await Promise.all([
         supabase.from('accounts').select('*').order('created_at', { ascending: true }),
         supabase.from('cards').select('*').order('created_at', { ascending: true }),
         supabase.from('categories').select('*').order('name', { ascending: true }),
@@ -558,6 +559,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         supabase.from('portfolio_assets').select('*').order('created_at', { ascending: true }),
         supabase.from('household_members').select('*').order('created_at', { ascending: true }),
         supabase.from('profiles').select('*').order('created_at', { ascending: true }),
+        supabase.from('households').select('*').limit(1),
       ]);
 
 
@@ -774,6 +776,12 @@ export const loadInitialAppData = async (defaults = {}) => {
       const householdMembers = mergedHms;
       localStorage.setItem(STORAGE_KEYS.householdMembers, JSON.stringify(householdMembers));
 
+      let familyName = getLocal(STORAGE_KEYS.familyName, DEFAULT_FAMILY_NAME);
+      if (!houseRes?.error && Array.isArray(houseRes?.data) && houseRes.data.length > 0 && houseRes.data[0]?.name) {
+        familyName = houseRes.data[0].name;
+        localStorage.setItem(STORAGE_KEYS.familyName, familyName);
+      }
+
       // Retorna exatamente os dados reais do banco (SEM injetar transações ou simulações fictícias)
       return {
         isCloud: true,
@@ -786,6 +794,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         savingsGoals,
         portfolioAssets,
         householdMembers,
+        familyName,
       };
     } catch (err) {
       console.warn('Falha ao conectar no Supabase. Usando armazenamento local:', err);
@@ -803,6 +812,7 @@ export const loadInitialAppData = async (defaults = {}) => {
     savingsGoals: getLocal(STORAGE_KEYS.savingsGoals, []).map(savingsGoalToClient),
     portfolioAssets: getLocal(STORAGE_KEYS.portfolioAssets, []).map(portfolioAssetToClient),
     householdMembers: getLocal(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEFAULT_HOUSEHOLD_MEMBERS).map(householdMemberToClient),
+    familyName: getLocal(STORAGE_KEYS.familyName, DEFAULT_FAMILY_NAME),
   };
 };
 
@@ -903,6 +913,32 @@ export const deleteHouseholdMemberCloud = async (memberId) => {
     return { error: null };
   } catch (err) {
     console.warn('Erro ao remover membro no Supabase:', err);
+    return { error: err };
+  }
+};
+
+export const saveFamilyNameCloud = async (newName) => {
+  if (!newName || isDemoMode()) return { error: null };
+  if (!isSupabaseConfigured() || !supabase) return { error: null };
+  try {
+    const { data: households } = await supabase.from('households').select('id').limit(1);
+    if (households && households.length > 0) {
+      const { error } = await supabase
+        .from('households')
+        .update({ name: newName, updated_at: new Date().toISOString() })
+        .eq('id', households[0].id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('households').insert([{
+        id: '00000000-0000-0000-0000-000000000001',
+        name: newName,
+        invite_code: 'FAMILIA1',
+      }]);
+      if (error) throw error;
+    }
+    return { error: null };
+  } catch (err) {
+    console.warn('Erro ao atualizar nome da família no Supabase:', err);
     return { error: err };
   }
 };

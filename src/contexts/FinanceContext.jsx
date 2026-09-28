@@ -7,7 +7,7 @@ import {
   addMonthsToIso,
   setGlobalPrivacyActive,
 } from '../utils/formatters';
-import { FAMILY_MEMBERS, DEFAULT_CATEGORIES, DEFAULT_HOUSEHOLD_MEMBERS } from '../data/constants';
+import { FAMILY_MEMBERS, DEFAULT_CATEGORIES, DEFAULT_HOUSEHOLD_MEMBERS, DEFAULT_FAMILY_NAME } from '../data/constants';
 import {
   loadInitialAppData,
   syncItem,
@@ -26,6 +26,7 @@ import {
   STORAGE_KEYS,
   saveHouseholdMemberCloud,
   deleteHouseholdMemberCloud,
+  saveFamilyNameCloud,
 } from '../services/financeService';
 import {
   DEMO_ACCOUNTS,
@@ -262,6 +263,18 @@ export function FinanceProvider({ children }) {
     }
   });
 
+  const [familyName, setFamilyName] = useState(() => {
+    try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.familyName);
+        return stored || DEFAULT_FAMILY_NAME;
+      }
+      return localStorage.getItem(STORAGE_KEYS.familyName) || DEFAULT_FAMILY_NAME;
+    } catch {
+      return DEFAULT_FAMILY_NAME;
+    }
+  });
+
   const [isFamilyManagementOpen, setIsFamilyManagementOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
@@ -464,6 +477,10 @@ export function FinanceProvider({ children }) {
           setHouseholdMembers(finalHms);
           saveToLocalStorage(STORAGE_KEYS.householdMembers, finalHms);
         }
+        if (res.familyName) {
+          setFamilyName(res.familyName);
+          saveToLocalStorage(STORAGE_KEYS.familyName, res.familyName);
+        }
       }
     } catch (err) {
       console.warn('Erro ao recarregar dados da nuvem:', err);
@@ -543,6 +560,10 @@ export function FinanceProvider({ children }) {
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
+    if (user?.familyName) {
+      setFamilyName(user.familyName);
+      saveToLocalStorage(STORAGE_KEYS.familyName, user.familyName);
+    }
     try {
       localStorage.setItem('financas_session', JSON.stringify(user));
     } catch (e) {
@@ -551,6 +572,7 @@ export function FinanceProvider({ children }) {
     if (user.role === 'member') {
       setCurrentMemberId(user.memberKey || 'user-2');
     }
+    reloadDataFromCloud();
   };
 
   const handleLogout = async () => {
@@ -597,6 +619,10 @@ export function FinanceProvider({ children }) {
       setScenarios(DEMO_SCENARIOS);
       setMonthlyEnvelopes(DEMO_MONTHLY_ENVELOPES);
       setHouseholdMembers(DEMO_HOUSEHOLD_MEMBERS);
+      setFamilyName(DEFAULT_FAMILY_NAME);
+      try {
+        sessionStorage.setItem('demo_' + STORAGE_KEYS.familyName, DEFAULT_FAMILY_NAME);
+      } catch {}
       alert('Dados de demonstração restaurados para o padrão com sucesso!');
     }
   };
@@ -626,6 +652,10 @@ export function FinanceProvider({ children }) {
     setScenarios(DEMO_SCENARIOS);
     setMonthlyEnvelopes(DEMO_MONTHLY_ENVELOPES);
     setHouseholdMembers(DEMO_HOUSEHOLD_MEMBERS);
+    setFamilyName('Família Silva (Demo)');
+    try {
+      sessionStorage.setItem('demo_' + STORAGE_KEYS.familyName, 'Família Silva (Demo)');
+    } catch {}
     setCurrentUser({
       id: 'demo-user-1',
       name: 'Família Silva (Demo)',
@@ -5424,7 +5454,22 @@ export function FinanceProvider({ children }) {
     }
   };
 
+  const handleUpdateFamilyName = async (newName) => {
+    const trimmed = (newName || '').trim();
+    if (!trimmed) return;
+    setFamilyName(trimmed);
+    if (isDemoModeState || isDemoMode()) {
+      sessionStorage.setItem('demo_' + STORAGE_KEYS.familyName, trimmed);
+    } else {
+      saveToLocalStorage(STORAGE_KEYS.familyName, trimmed);
+      await saveFamilyNameCloud(trimmed);
+    }
+  };
+
   const value = {
+    familyName,
+    setFamilyName,
+    handleUpdateFamilyName,
     householdMembers,
     setHouseholdMembers,
     isFamilyManagementOpen,

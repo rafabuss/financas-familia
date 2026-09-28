@@ -3,6 +3,7 @@ import {
   Lock,
   Mail,
   User,
+  Users,
   Shield,
   X,
   AlertCircle,
@@ -10,6 +11,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { signInWithPassword, signUpUser, isSupabaseConfigured, getRegisteredMembers } from '../services/supabase';
+import { DEFAULT_FAMILY_NAME } from '../data/constants';
 
 export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory = false }) {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -17,6 +19,13 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [selectedMember, setSelectedMember] = useState('user-1'); // 'user-1' (Rafael) | 'user-2' (Ana Débora)
+  const [familyNameInput, setFamilyNameInput] = useState(() => {
+    try {
+      return localStorage.getItem('financas_family_name_v1') || DEFAULT_FAMILY_NAME;
+    } catch {
+      return DEFAULT_FAMILY_NAME;
+    }
+  });
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -63,7 +72,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
 
         const role = selectedMember === 'user-1' ? 'admin' : 'member';
         const defaultName = name || (selectedMember === 'user-1' ? 'Rafael' : 'Ana Débora');
-        const { data, error } = await signUpUser(email, password, defaultName, role, selectedMember);
+        const finalFamilyName = (familyNameInput || DEFAULT_FAMILY_NAME).trim();
+        const { data, error } = await signUpUser(email, password, defaultName, role, selectedMember, finalFamilyName);
 
         if (error) {
           setErrorMsg(error.message || 'Erro ao realizar cadastro.');
@@ -76,6 +86,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
               name: defaultName,
               role,
               memberKey: selectedMember,
+              familyName: finalFamilyName,
             });
             if (onClose) onClose();
           }
@@ -90,6 +101,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
           const role = profile.role || data.user.user_metadata?.role || (email.includes('anadebora') ? 'member' : 'admin');
           const memberKey = profile.member_key || data.user.user_metadata?.memberKey || (role === 'admin' ? 'user-1' : 'user-2');
           const userName = profile.name || data.user.user_metadata?.name || (memberKey === 'user-1' ? 'Rafael' : 'Ana Débora');
+          const savedFamilyName = profile.family_name || data.user.user_metadata?.familyName;
 
           onLoginSuccess({
             id: data.user.id,
@@ -97,6 +109,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
             name: userName,
             role,
             memberKey,
+            ...(savedFamilyName ? { familyName: savedFamilyName } : {}),
           });
           if (onClose) onClose();
         }
@@ -139,6 +152,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
       status,
       visibleEntities,
       hiddenAccountIds,
+      familyName: 'Nicácio Ferreira',
     });
     if (onClose) onClose();
   };
@@ -299,6 +313,47 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
                       {registeredStatus.isAnaRegistered ? 'Faça login' : 'Membro Família'}
                     </span>
                   </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isSignUp && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Nome da Família <span className="text-[10px] text-blue-600 font-normal">{selectedMember === 'user-1' ? '(Administrador define a Família)' : '(Núcleo Familiar)'}</span>
+              </label>
+              {selectedMember === 'user-1' || (!registeredStatus.isRafaelRegistered && !registeredStatus.isAnaRegistered) ? (
+                <div className="space-y-1">
+                  <div className="relative">
+                    <Users className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      value={familyNameInput}
+                      onChange={(e) => setFamilyNameInput(e.target.value)}
+                      placeholder="Ex: Nicácio Ferreira"
+                      className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Como Administrador, você dá nome à sua família para identificação em todo o sistema.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-purple-700 shrink-0">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] text-purple-900 font-semibold block">Vinculando-se à Família:</span>
+                      <span className="text-purple-950 font-bold text-sm">'{familyNameInput || DEFAULT_FAMILY_NAME}'</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-purple-200/80 text-purple-800 font-bold px-2 py-0.5 rounded-full">
+                    Membro
+                  </span>
                 </div>
               )}
             </div>

@@ -28,7 +28,7 @@ export default function AccountsTab({
   onNavigateToCardStatement,
   setActiveTab: propSetActiveTab,
 }) {
-  const finance = useFinance ? useFinance() : {};
+  const finance = useFinance();
 
   const visibleAccounts = propVisibleAccounts || finance.visibleAccounts || [];
   const accountBalances = propAccountBalances || finance.accountBalances || {};

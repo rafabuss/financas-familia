@@ -18,6 +18,7 @@ import {
   Sparkles,
   ArrowRight,
   Info,
+  Pencil,
 } from 'lucide-react';
 import { useFinance } from '../../contexts/FinanceContext';
 import { formatMoney } from '../../utils/formatters';
@@ -31,6 +32,8 @@ export default function FamilyManagementModal({
   const finance = useFinance();
   const {
     currentUser,
+    familyName,
+    handleUpdateFamilyName,
     householdMembers = [],
     accounts = [],
     handleSaveMemberPermissions,
@@ -41,6 +44,20 @@ export default function FamilyManagementModal({
     isDemoModeState,
     isDemoMode,
   } = finance;
+
+  const [isEditingFamilyName, setIsEditingFamilyName] = useState(false);
+  const [tempFamilyName, setTempFamilyName] = useState(familyName || 'Nicácio Ferreira');
+
+  useEffect(() => {
+    if (familyName) setTempFamilyName(familyName);
+  }, [familyName]);
+
+  const handleSaveFamilyName = async () => {
+    const trimmed = tempFamilyName.trim();
+    if (!trimmed) return;
+    await handleUpdateFamilyName(trimmed);
+    setIsEditingFamilyName(false);
+  };
 
   const [activeTab, setActiveTab] = useState(initialTab); // 'members' | 'matrix'
   const [selectedMemberId, setSelectedMemberId] = useState('');
@@ -185,8 +202,11 @@ export default function FamilyManagementModal({
             </span>
           </div>
 
-          <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2 flex-wrap">
             <span>Gestão da Família & Controle de Acesso</span>
+            <span className="text-xs sm:text-sm font-medium text-blue-300 bg-blue-950/60 px-2.5 py-0.5 rounded-lg border border-blue-800/40">
+              {familyName || 'Nicácio Ferreira'}
+            </span>
           </h3>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
             Gerencie participantes, realize suspensões temporárias e configure a matriz granular de visibilidade para cada membro.
@@ -235,8 +255,60 @@ export default function FamilyManagementModal({
               {/* Barra de Ação Superior */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 border border-slate-200 p-4 rounded-2xl">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">Participantes do Household</h4>
-                  <p className="text-xs text-slate-500">
+                  {isEditingFamilyName ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-slate-900">Família:</span>
+                      <input
+                        type="text"
+                        value={tempFamilyName}
+                        onChange={(e) => setTempFamilyName(e.target.value)}
+                        placeholder="Nome da família"
+                        className="px-2.5 py-1 text-sm font-bold border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 shadow-xs"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveFamilyName();
+                          if (e.key === 'Escape') setIsEditingFamilyName(false);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveFamilyName}
+                        className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                        title="Salvar nome da família"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTempFamilyName(familyName || 'Nicácio Ferreira');
+                          setIsEditingFamilyName(false);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition cursor-pointer"
+                        title="Cancelar"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Participantes da família '{familyName || 'Nicácio Ferreira'}'
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTempFamilyName(familyName || 'Nicácio Ferreira');
+                          setIsEditingFamilyName(true);
+                        }}
+                        className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                        title="Editar nome da família"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500 mt-0.5">
                     Administre o status de acesso e papéis de cada participante da família.
                   </p>
                 </div>

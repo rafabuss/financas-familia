@@ -6,6 +6,9 @@ export const FAMILY_MEMBERS = [
   { id: 'user-2', name: '👤 Ana Débora (Apenas Pessoal / Membro)', isFamily: false },
 ];
 
+// Nome Padrão da Família
+export const DEFAULT_FAMILY_NAME = 'Nicácio Ferreira';
+
 // Membros Padrão Registrados da Família (Rafael e Ana Débora)
 export const DEFAULT_HOUSEHOLD_MEMBERS = [
   {

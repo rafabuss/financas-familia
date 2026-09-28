@@ -39,7 +39,7 @@ export default function SavingsGoalsTab({
   transactions: propTransactions,
   currentMemberId: propCurrentMemberId,
 }) {
-  const finance = useFinance ? useFinance() : {};
+  const finance = useFinance();
 
   const visibleSavingsGoals = propVisibleSavingsGoals || finance.visibleSavingsGoals || [];
   const savingsGoalBalances = propSavingsGoalBalances || finance.savingsGoalBalances || {};

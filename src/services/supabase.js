@@ -159,11 +159,15 @@ export const signInWithPassword = async (email, password) => {
   };
 };
 
-export const signUpUser = async (email, password, name, role = 'member', memberKey = 'user-1') => {
+export const signUpUser = async (email, password, name, role = 'member', memberKey = 'user-1', familyName = null) => {
   const normEmail = (email || '').trim().toLowerCase();
+  const trimmedFamilyName = (familyName || '').trim();
 
   // Salvar no armazenamento local como fallback
   try {
+    if (trimmedFamilyName) {
+      localStorage.setItem('financas_family_name_v1', trimmedFamilyName);
+    }
     const localProfiles = JSON.parse(localStorage.getItem('financas_local_profiles') || '[]');
     if (!localProfiles.some((p) => p.email?.toLowerCase() === normEmail)) {
       localProfiles.push({
@@ -173,6 +177,7 @@ export const signUpUser = async (email, password, name, role = 'member', memberK
         name,
         role,
         memberKey,
+        familyName: trimmedFamilyName || undefined,
       });
       localStorage.setItem('financas_local_profiles', JSON.stringify(localProfiles));
     }
@@ -186,7 +191,7 @@ export const signUpUser = async (email, password, name, role = 'member', memberK
         user: {
           id: memberKey,
           email: normEmail,
-          user_metadata: { name, role, memberKey },
+          user_metadata: { name, role, memberKey, familyName: trimmedFamilyName || undefined },
         },
         session: { access_token: 'local-session' },
       },
@@ -202,6 +207,7 @@ export const signUpUser = async (email, password, name, role = 'member', memberK
         name,
         role,
         memberKey,
+        familyName: trimmedFamilyName || undefined,
       },
     },
   });
@@ -223,8 +229,21 @@ export const signUpUser = async (email, password, name, role = 'member', memberK
         role,
         member_key: memberKey,
       });
+
+      if (trimmedFamilyName && (role === 'admin' || memberKey === 'user-1')) {
+        const { data: hhList } = await supabase.from('households').select('id').limit(1);
+        if (hhList && hhList.length > 0) {
+          await supabase.from('households').update({ name: trimmedFamilyName, updated_at: new Date().toISOString() }).eq('id', hhList[0].id);
+        } else {
+          await supabase.from('households').insert([{
+            id: '00000000-0000-0000-0000-000000000001',
+            name: trimmedFamilyName,
+            invite_code: 'FAMILIA1',
+          }]);
+        }
+      }
     } catch (e) {
-      console.warn('Erro ao salvar profile:', e);
+      console.warn('Erro ao salvar profile ou família:', e);
     }
   }
 

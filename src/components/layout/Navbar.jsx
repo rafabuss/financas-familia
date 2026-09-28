@@ -81,7 +81,7 @@ export default function Navbar({
     ? 'Administrador'
     : 'Membro';
 
-  const finance = useFinance ? useFinance() : {};
+  const finance = useFinance();
   const allowedViewMembers = finance.allowedViewMembers || FAMILY_MEMBERS;
   const setIsFamilyManagementOpen = finance.setIsFamilyManagementOpen;
   const handleSwitchDemoUser = finance.handleSwitchDemoUser;

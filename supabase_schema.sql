@@ -249,6 +249,32 @@ CREATE POLICY "Permitir acesso completo aos cofrinhos para autenticados"
 CREATE POLICY "Permitir acesso completo aos ativos de carteira para autenticados"
   ON public.portfolio_assets FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- 9. Tabelas de Multi-Tenancy & Gestão da Família (Fase 4 & Fase 7)
+CREATE TABLE IF NOT EXISTS public.households (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  invite_code TEXT UNIQUE DEFAULT substring(md5(random()::text) from 1 for 8),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.household_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES public.households(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending', 'rejected')),
+  display_name TEXT NOT NULL,
+  email TEXT,
+  color TEXT DEFAULT '#2563eb',
+  member_key TEXT DEFAULT 'user-1',
+  visible_entities JSONB DEFAULT '["family-shared", "user-all"]'::jsonb,
+  hidden_account_ids JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_household_user UNIQUE (household_id, user_id)
+);
+
 -- Trigger para sincronização automática de novo usuário do Supabase Auth para a tabela profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
@@ -273,4 +299,5 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
 

@@ -71,10 +71,20 @@ export default function DashboardTab({
     profitLossCents: 0,
     profitLossPercent: 0,
   };
+  const hasFamilySharedAccess = finance.hasFamilySharedAccess ?? true;
   return (
     <div className="space-y-6">
       {/* Aviso de Visão Ativa */}
-      {currentMemberId !== 'user-all' && (
+      {!hasFamilySharedAccess ? (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 flex items-center justify-between">
+          <span>
+            Você está visualizando a <strong>Visão Pessoal Restrita</strong>. Suas permissões foram delimitadas pelo administrador da família.
+          </span>
+          <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md">
+            Acesso Individual
+          </span>
+        </div>
+      ) : currentMemberId !== 'user-all' ? (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center justify-between">
           <span>
             Você está visualizando a <strong>Visão Pessoal</strong>. Estão inclusos os lançamentos compartilhados da família e os seus exclusivos.
@@ -86,7 +96,7 @@ export default function DashboardTab({
             Voltar para Visão Geral da Família
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Card de Boas-vindas para Sistema Limpo (0 Contas e 0 Lançamentos) */}
       {accounts.length === 0 && transactions.length === 0 && (
@@ -334,7 +344,7 @@ export default function DashboardTab({
               </div>
             )}
             <div className="flex justify-between pt-1 border-t border-slate-100 text-indigo-900 font-extrabold text-[10px]">
-              <span>💎 Patrimônio Total:</span>
+              <span>{hasFamilySharedAccess ? '💎 Patrimônio Total:' : '💎 Patrimônio Pessoal:'}</span>
               <span>{formatMoney(monthSummary.totalFamilyNetWorth || ((monthSummary.totalOperationalBalance ?? monthSummary.totalBankBalance ?? 0) + (monthSummary.totalSavingsBalance || 0) + (monthSummary.totalPortfolioBalance || portfolioSummary.currentValueCents || 0)))}</span>
             </div>
           </div>
@@ -425,7 +435,7 @@ export default function DashboardTab({
       </div>
 
       {/* Seção de Patrimônio Consolidado da Família (Contas Correntes + Cofrinhos CDI + Carteira de Ativos) */}
-      {(visibleSavingsGoals.length > 0 || visiblePortfolioAssets.length > 0) && (
+      {hasFamilySharedAccess && (visibleSavingsGoals.length > 0 || visiblePortfolioAssets.length > 0) && (
         <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 sm:p-7 shadow-md border border-slate-800">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
             <div>

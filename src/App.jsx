@@ -8,6 +8,9 @@ import {
   Mail,
   PiggyBank,
   TrendingUp,
+  ShieldAlert,
+  LogOut,
+  Sparkles,
 } from 'lucide-react';
 import AuthModal from './components/AuthModal';
 import AIChatDrawer from './components/AIChatDrawer';
@@ -27,6 +30,7 @@ import ImportTab from './components/import/ImportTab';
 import ExportsTab from './components/exports/ExportsTab';
 import EntityModal from './components/modals/EntityModal';
 import TransactionModal from './components/modals/TransactionModal';
+import FamilyManagementModal from './components/modals/FamilyManagementModal';
 import { DeleteTransactionModal, DeleteInvoiceModal } from './components/modals/DeleteModals';
 import { InvoicePaymentModal, CardPaymentPromptModal } from './components/modals/InvoicePaymentModal';
 import { EnvelopeScheduleModal, DeleteEnvelopeModal, CategoryConflictModal } from './components/modals/EnvelopeModals';
@@ -250,6 +254,10 @@ function AppContent() {
     setIsAuthModalOpen,
     handleAICreateTransaction,
     handleAICreateScenario,
+    isFamilyManagementOpen,
+    setIsFamilyManagementOpen,
+    isUserSuspended,
+    handleSwitchDemoUser,
   } = finance;
   if (!currentUser) {
     return (
@@ -258,6 +266,69 @@ function AppContent() {
         isMandatory={true}
         onLoginSuccess={handleLoginSuccess}
       />
+    );
+  }
+
+  if (isUserSuspended || currentUser?.status === 'suspended') {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-3xl p-8 shadow-2xl text-center flex flex-col items-center space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+            <ShieldAlert className="w-9 h-9" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-rose-400 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20">
+              Acesso Bloqueado
+            </span>
+            <h1 className="text-xl sm:text-2xl font-black text-white">
+              Acesso Temporariamente Suspenso
+            </h1>
+            <p className="text-sm text-slate-300 leading-relaxed pt-2">
+              Acesso Temporariamente Suspenso pelo Administrador da Família. Entre em contato com o responsável.
+            </p>
+          </div>
+
+          <div className="w-full p-4 bg-slate-950/60 rounded-2xl border border-slate-700/60 text-left space-y-1.5 text-xs">
+            <div className="flex justify-between items-center text-slate-400">
+              <span>Usuário:</span>
+              <span className="font-semibold text-white">{currentUser.name || 'Membro da Família'}</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-400">
+              <span>E-mail:</span>
+              <span className="font-medium text-slate-300">{currentUser.email || '—'}</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-400">
+              <span>Status Atual:</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                Suspenso
+              </span>
+            </div>
+          </div>
+
+          <div className="w-full space-y-2.5 pt-2">
+            {Boolean(isDemoModeState) && (
+              <button
+                type="button"
+                onClick={() => handleSwitchDemoUser('user-1')}
+                className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 shadow-sm cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span>Voltar para Administrador (Rafael Demo)</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full py-2.5 px-4 bg-slate-700/80 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Sair da Conta</span>
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
   return (
@@ -780,6 +851,12 @@ function AppContent() {
         categoryConflictModal={categoryConflictModal}
         setCategoryConflictModal={setCategoryConflictModal}
         handleResolveCategoryConflict={handleResolveCategoryConflict}
+      />
+
+      {/* Modal de Gestão da Família & Controle de Permissões */}
+      <FamilyManagementModal
+        isOpen={isFamilyManagementOpen}
+        onClose={() => setIsFamilyManagementOpen(false)}
       />
 
       {/* Modal de Autenticação e Gestão de Perfis */}

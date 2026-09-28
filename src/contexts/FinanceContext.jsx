@@ -24,9 +24,12 @@ import {
   isDemoMode,
   clearDemoSandbox,
   STORAGE_KEYS,
+  saveHouseholdMemberCloud,
+  deleteHouseholdMemberCloud,
 } from '../services/financeService';
 import {
   DEMO_ACCOUNTS,
+  DEMO_HOUSEHOLD_MEMBERS,
   DEMO_SAVINGS_GOALS,
   DEMO_PORTFOLIO_ASSETS,
   DEMO_CARDS,
@@ -233,6 +236,24 @@ export function FinanceProvider({ children }) {
     }
   });
 
+  const [householdMembers, setHouseholdMembers] = useState(() => {
+    try {
+      if (isDemoMode()) {
+        const stored = sessionStorage.getItem('demo_' + STORAGE_KEYS.householdMembers);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+        return DEMO_HOUSEHOLD_MEMBERS;
+      }
+      const local = localStorage.getItem(STORAGE_KEYS.householdMembers);
+      return local ? JSON.parse(local) : [];
+    } catch {
+      return isDemoMode() ? DEMO_HOUSEHOLD_MEMBERS : [];
+    }
+  });
+
+  const [isFamilyManagementOpen, setIsFamilyManagementOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   const [envelopeModalState, setEnvelopeModalState] = useState({
@@ -281,6 +302,9 @@ export function FinanceProvider({ children }) {
         email: 'demo@financasdafamilia.app',
         role: 'admin',
         memberKey: 'user-all',
+        status: 'active',
+        visibleEntities: ['family-shared', 'user-all', 'user-1', 'user-2', 'user-3'],
+        hiddenAccountIds: [],
       };
     }
     try {
@@ -290,6 +314,7 @@ export function FinanceProvider({ children }) {
       return null;
     }
   });
+
 
   // Restaurar sessão do Supabase Auth caso exista (ignorado em modo demonstração)
   useEffect(() => {
@@ -545,6 +570,7 @@ export function FinanceProvider({ children }) {
       saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
       saveToLocalStorage(STORAGE_KEYS.scenarios, DEMO_SCENARIOS);
       saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, DEMO_MONTHLY_ENVELOPES);
+      saveToLocalStorage(STORAGE_KEYS.householdMembers, DEMO_HOUSEHOLD_MEMBERS);
       setAccounts(DEMO_ACCOUNTS);
       setSavingsGoals(DEMO_SAVINGS_GOALS);
       setPortfolioAssets(DEMO_PORTFOLIO_ASSETS);
@@ -553,6 +579,7 @@ export function FinanceProvider({ children }) {
       setTransactions(DEMO_TRANSACTIONS);
       setScenarios(DEMO_SCENARIOS);
       setMonthlyEnvelopes(DEMO_MONTHLY_ENVELOPES);
+      setHouseholdMembers(DEMO_HOUSEHOLD_MEMBERS);
       alert('Dados de demonstração restaurados para o padrão com sucesso!');
     }
   };
@@ -570,6 +597,7 @@ export function FinanceProvider({ children }) {
     saveToLocalStorage(STORAGE_KEYS.transactions, DEMO_TRANSACTIONS);
     saveToLocalStorage(STORAGE_KEYS.scenarios, DEMO_SCENARIOS);
     saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, DEMO_MONTHLY_ENVELOPES);
+    saveToLocalStorage(STORAGE_KEYS.householdMembers, DEMO_HOUSEHOLD_MEMBERS);
 
     setIsDemoModeState(true);
     setAccounts(DEMO_ACCOUNTS);
@@ -580,15 +608,20 @@ export function FinanceProvider({ children }) {
     setTransactions(DEMO_TRANSACTIONS);
     setScenarios(DEMO_SCENARIOS);
     setMonthlyEnvelopes(DEMO_MONTHLY_ENVELOPES);
+    setHouseholdMembers(DEMO_HOUSEHOLD_MEMBERS);
     setCurrentUser({
       id: 'demo-user-1',
       name: 'Família Silva (Demo)',
       email: 'demo@financasdafamilia.app',
       role: 'admin',
       memberKey: 'user-all',
+      status: 'active',
+      visibleEntities: ['family-shared', 'user-all', 'user-1', 'user-2', 'user-3'],
+      hiddenAccountIds: [],
     });
     setCurrentMemberId('user-all');
     setActiveTab('dashboard');
+
 
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -857,6 +890,118 @@ export function FinanceProvider({ children }) {
   // Transações com visibilidade 'PERSONAL_PRIVATE' exibem descrição e categoria mascaradas
   // para outros membros da família que não sejam o titular do lançamento.
   // O valor monetário permanece 100% íntegro para somas de saldos, extratos, faturas e envelopes.
+  // Controle de Permissões Granulares & Membro Conectado (Fase 7)
+  const currentMemberConfig = useMemo(() => {
+    if (!currentUser) return null;
+    return householdMembers.find(
+      (m) =>
+        (currentUser.id && (m.userId === currentUser.id || m.id === currentUser.id)) ||
+        (currentUser.memberKey && m.memberKey === currentUser.memberKey) ||
+        (currentUser.email && m.email?.toLowerCase() === currentUser.email?.toLowerCase())
+    ) || null;
+  }, [householdMembers, currentUser]);
+
+  const isUserSuspended = Boolean(
+    (currentMemberConfig && currentMemberConfig.status === 'suspended') ||
+    (currentUser && currentUser.status === 'suspended')
+  );
+
+  const userVisibleEntities = useMemo(() => {
+    if (!currentUser) return ['family-shared'];
+    if (currentUser.role === 'admin') {
+      const allKeys = ['user-all', 'family-shared'];
+      householdMembers.forEach((m) => {
+        const key = m.memberKey || m.id;
+        if (!allKeys.includes(key)) allKeys.push(key);
+      });
+      FAMILY_MEMBERS.forEach((m) => {
+        if (!allKeys.includes(m.id)) allKeys.push(m.id);
+      });
+      return allKeys;
+    }
+    if (currentMemberConfig?.visibleEntities && Array.isArray(currentMemberConfig.visibleEntities)) {
+      return currentMemberConfig.visibleEntities;
+    }
+    if (currentUser.visibleEntities && Array.isArray(currentUser.visibleEntities)) {
+      return currentUser.visibleEntities;
+    }
+    return [currentUser.memberKey || 'user-2', 'family-shared'];
+  }, [currentUser, currentMemberConfig, householdMembers]);
+
+  const hasFamilySharedAccess = currentUser?.role === 'admin' || userVisibleEntities.includes('family-shared');
+
+  const userHiddenAccountIds = useMemo(() => {
+    if (!currentUser || currentUser.role === 'admin') return [];
+    if (currentMemberConfig?.hiddenAccountIds && Array.isArray(currentMemberConfig.hiddenAccountIds)) {
+      return currentMemberConfig.hiddenAccountIds;
+    }
+    if (currentUser.hiddenAccountIds && Array.isArray(currentUser.hiddenAccountIds)) {
+      return currentUser.hiddenAccountIds;
+    }
+    return [];
+  }, [currentUser, currentMemberConfig]);
+
+  const familyMembersList = useMemo(() => {
+    const list = [
+      { id: 'user-all', name: '👑 Visão Admin (Toda a Família)', isFamily: true, role: 'admin' },
+      { id: 'family-shared', name: '🏠 Gastos Compartilhados (Família)', isFamily: true },
+    ];
+    if (householdMembers && householdMembers.length > 0) {
+      householdMembers.forEach((m) => {
+        const key = m.memberKey || m.id;
+        if (!list.some((item) => item.id === key)) {
+          list.push({
+            id: key,
+            name: `👤 ${m.displayName}${m.role === 'admin' ? ' (Admin)' : ''}`,
+            isFamily: false,
+            memberKey: key,
+            role: m.role,
+            status: m.status,
+            color: m.color,
+          });
+        }
+      });
+    } else {
+      FAMILY_MEMBERS.forEach((fm) => {
+        if (!list.some((item) => item.id === fm.id)) {
+          list.push(fm);
+        }
+      });
+    }
+    return list;
+  }, [householdMembers]);
+
+  const allowedViewMembers = useMemo(() => {
+    return familyMembersList.filter((m) => {
+      if (m.id === 'user-all') {
+        return currentUser?.role === 'admin';
+      }
+      if (m.id === 'family-shared') {
+        return hasFamilySharedAccess;
+      }
+      return currentUser?.role === 'admin' || userVisibleEntities.includes(m.id);
+    });
+  }, [familyMembersList, currentUser, hasFamilySharedAccess, userVisibleEntities]);
+
+  useEffect(() => {
+    if (allowedViewMembers.length > 0) {
+      const isAllowed = allowedViewMembers.some((m) => m.id === currentMemberId);
+      if (!isAllowed) {
+        const ownKey = currentUser?.memberKey;
+        const own = allowedViewMembers.find((m) => m.id === ownKey);
+        if (own) {
+          setCurrentMemberId(own.id);
+        } else {
+          setCurrentMemberId(allowedViewMembers[0].id);
+        }
+      }
+    }
+  }, [allowedViewMembers, currentMemberId, currentUser]);
+
+  // Lógica de Mascaramento ("Olho Amigo / Privacidade do Cônjuge")
+  // Transações com visibilidade 'PERSONAL_PRIVATE' exibem descrição e categoria mascaradas
+  // para outros membros da família que não sejam o titular do lançamento.
+  // O valor monetário permanece 100% íntegro para somas de saldos, extratos, faturas e envelopes.
   const maskTransactionForViewer = useCallback((tx) => {
     if (!tx) return tx;
     const isPersonalPrivate = tx.visibility === 'PERSONAL_PRIVATE' || (tx.scope === 'PERSONAL' && tx.visibility !== 'FAMILY_SHARED');
@@ -866,7 +1011,7 @@ export function FinanceProvider({ children }) {
 
     const isDemo = isDemoModeState || isDemoMode();
     const activeMemberKey = isDemo
-      ? (currentMemberId === 'user-2' ? 'user-2' : 'user-1')
+      ? (currentUser?.memberKey || (currentMemberId === 'user-2' ? 'user-2' : currentMemberId === 'user-3' ? 'user-3' : 'user-1'))
       : (currentUser?.memberKey || (currentUser?.role === 'admin' ? 'user-1' : 'user-2') || currentUser?.id);
 
     const isOwner = (tx.ownerId && tx.ownerId === activeMemberKey) || 
@@ -880,10 +1025,10 @@ export function FinanceProvider({ children }) {
       };
     }
 
-    const memberObj = FAMILY_MEMBERS.find((m) => m.id === tx.ownerId);
+    const memberObj = householdMembers.find((m) => (m.memberKey || m.id) === tx.ownerId) || FAMILY_MEMBERS.find((m) => m.id === tx.ownerId);
     const ownerName = memberObj 
-      ? memberObj.name.replace(/^[^\w]+/, '').split('(')[0].trim() 
-      : (tx.ownerId === 'user-1' ? 'Rafael' : tx.ownerId === 'user-2' ? 'Ana Débora' : (tx.ownerName || 'Cônjuge'));
+      ? (memberObj.displayName || memberObj.name || '').replace(/^[^\w]+/, '').split('(')[0].trim() 
+      : (tx.ownerId === 'user-1' ? 'Rafael' : tx.ownerId === 'user-2' ? 'Ana Débora' : tx.ownerId === 'user-3' ? 'Camila' : (tx.ownerName || 'Cônjuge'));
 
     return {
       ...tx,
@@ -894,26 +1039,44 @@ export function FinanceProvider({ children }) {
       description: `Gasto Pessoal de ${ownerName}`,
       maskedCategoryName: 'Gasto Pessoal',
     };
-  }, [currentUser, isDemoModeState, currentMemberId]);
+  }, [currentUser, isDemoModeState, currentMemberId, householdMembers]);
 
-  // Lançamentos Visíveis de acordo com a Visão selecionada (Admin x Família x Membro)
+  // Lançamentos Visíveis com Filtro em Cascata Rigoroso (Fase 7)
   const visibleTransactions = useMemo(() => {
     const filtered = transactions.filter((t) => {
+      // 1. Ocultar transações ligadas a contas bancárias ocultas para este membro
+      if (t.accountId && userHiddenAccountIds.includes(t.accountId)) return false;
+      if (t.destinationAccountId && userHiddenAccountIds.includes(t.destinationAccountId)) return false;
+
+      // 2. Se a transação tem escopo familiar (scope === 'FAMILY'), exige que 'family-shared' esteja em visible_entities
+      if (t.scope === 'FAMILY' && !hasFamilySharedAccess) {
+        return false;
+      }
+
+      // 3. Se for despesa pessoal de outro membro, verificar se o membro está em userVisibleEntities
+      if (currentUser?.role !== 'admin' && t.ownerId && t.ownerId !== 'user-all') {
+        if (!userVisibleEntities.includes(t.ownerId)) {
+          return false;
+        }
+      }
+
+      // 4. Filtrar pela visão selecionada no Navbar (currentMemberId)
       if (currentMemberId === 'user-all') {
-        // Na Visão Admin (Toda a Família): exibe absolutamente TUDO (familiar + pessoal de todos)
         return true;
       }
       if (currentMemberId === 'family-shared') {
-        // Apenas lançamentos de escopo familiar compartilhado
         return t.scope === 'FAMILY' && t.visibility !== 'PERSONAL_PRIVATE';
       }
-      // Para um membro específico (ex: user-1 Rafael ou user-2 Ana Débora):
-      // Exibe os lançamentos familiares compartilhados + os lançamentos próprios do membro
-      return t.scope === 'FAMILY' || t.ownerId === currentMemberId;
+      // Para um membro específico:
+      if (hasFamilySharedAccess) {
+        return t.scope === 'FAMILY' || t.ownerId === currentMemberId;
+      }
+      // Sem acesso familiar: apenas os lançamentos próprios do membro selecionado
+      return t.ownerId === currentMemberId;
     });
 
     return filtered.map(maskTransactionForViewer);
-  }, [transactions, currentMemberId, maskTransactionForViewer]);
+  }, [transactions, currentMemberId, maskTransactionForViewer, userHiddenAccountIds, hasFamilySharedAccess, userVisibleEntities, currentUser]);
 
   // Recálculo do Saldo Atual por Conta (filtrado)
   const accountBalances = useMemo(() => {
@@ -945,32 +1108,58 @@ export function FinanceProvider({ children }) {
     return balances;
   }, [accounts, visibleTransactions]);
 
-  // Contas filtradas pelo titular selecionado
+  // Contas filtradas pelo titular selecionado e contas ocultas (Fase 7)
   const visibleAccounts = useMemo(() => {
     return accounts.filter((acc) => {
-      if (currentMemberId === 'user-all') return true; // Admin vê todas as contas
+      // 1. Ocultar contas presentes em hidden_account_ids
+      if (userHiddenAccountIds.includes(acc.id)) return false;
+
+      // 2. Se o membro não tem acesso a family-shared:
+      if (!hasFamilySharedAccess) {
+        // Contas conjuntas ('user-all' ou sem titular) ficam invisíveis
+        if (acc.ownerId === 'user-all' || !acc.ownerId) return false;
+        // Contas cujo titular não está em userVisibleEntities ficam invisíveis
+        if (!userVisibleEntities.includes(acc.ownerId)) return false;
+      }
+
+      // 3. Filtrar pela visão atual
+      if (currentMemberId === 'user-all') return true;
       if (currentMemberId === 'family-shared') return acc.ownerId === 'user-all' || !acc.ownerId;
       return acc.ownerId === 'user-all' || acc.ownerId === currentMemberId;
     });
-  }, [accounts, currentMemberId]);
+  }, [accounts, currentMemberId, userHiddenAccountIds, hasFamilySharedAccess, userVisibleEntities]);
 
-  // Cartões filtrados pelo titular selecionado
+  // Cartões filtrados pelo titular selecionado e contas ocultas (Fase 7)
   const visibleCards = useMemo(() => {
     return cards.filter((c) => {
-      if (currentMemberId === 'user-all') return true; // Admin vê todos os cartões
+      if (c.accountId && userHiddenAccountIds.includes(c.accountId)) return false;
+
+      if (!hasFamilySharedAccess) {
+        if (c.ownerId === 'user-all' || !c.ownerId) return false;
+        if (!userVisibleEntities.includes(c.ownerId)) return false;
+      }
+
+      if (currentMemberId === 'user-all') return true;
       if (currentMemberId === 'family-shared') return c.ownerId === 'user-all' || !c.ownerId;
       return c.ownerId === 'user-all' || c.ownerId === currentMemberId;
     });
-  }, [cards, currentMemberId]);
+  }, [cards, currentMemberId, userHiddenAccountIds, hasFamilySharedAccess, userVisibleEntities]);
 
-  // Cofrinhos e Metas de Reserva filtrados pelo titular selecionado
+  // Cofrinhos e Metas de Reserva filtrados pelo titular selecionado (Fase 7)
   const visibleSavingsGoals = useMemo(() => {
     return savingsGoals.filter((g) => {
-      if (currentMemberId === 'user-all') return true; // Admin vê todos os cofrinhos
+      if (g.accountId && userHiddenAccountIds.includes(g.accountId)) return false;
+
+      if (!hasFamilySharedAccess) {
+        if (g.ownerId === 'user-all' || !g.ownerId) return false;
+        if (!userVisibleEntities.includes(g.ownerId)) return false;
+      }
+
+      if (currentMemberId === 'user-all') return true;
       if (currentMemberId === 'family-shared') return g.ownerId === 'user-all' || !g.ownerId;
       return g.ownerId === 'user-all' || g.ownerId === currentMemberId;
     });
-  }, [savingsGoals, currentMemberId]);
+  }, [savingsGoals, currentMemberId, userHiddenAccountIds, hasFamilySharedAccess, userVisibleEntities]);
 
   // Recálculo do Saldo Atual por Cofrinho / Reserva (dinâmico e preciso)
   const savingsGoalBalances = useMemo(() => {
@@ -1003,14 +1192,20 @@ export function FinanceProvider({ children }) {
     return balances;
   }, [savingsGoals, visibleTransactions]);
 
-  // Ativos de Carteira & Renda Variável filtrados pelo titular selecionado
+  // Ativos de Carteira & Renda Variável filtrados pelo titular selecionado (Fase 7)
   const visiblePortfolioAssets = useMemo(() => {
     return portfolioAssets.filter((a) => {
-      if (currentMemberId === 'user-all') return true; // Admin vê todos os ativos
+      if (!hasFamilySharedAccess) {
+        if (a.ownerId === 'user-all' || a.ownerId === 'family-shared' || !a.ownerId) return false;
+        if (!userVisibleEntities.includes(a.ownerId)) return false;
+      }
+
+      if (currentMemberId === 'user-all') return true;
       if (currentMemberId === 'family-shared') return a.ownerId === 'user-all' || a.ownerId === 'family-shared' || !a.ownerId;
       return a.ownerId === 'user-all' || a.ownerId === 'family-shared' || a.ownerId === currentMemberId;
     });
-  }, [portfolioAssets, currentMemberId]);
+  }, [portfolioAssets, currentMemberId, hasFamilySharedAccess, userVisibleEntities]);
+
 
   // Resumo Financeiro da Carteira de Ativos
   const portfolioSummary = useMemo(() => {
@@ -1975,9 +2170,11 @@ export function FinanceProvider({ children }) {
     const expensePending = bankExpensePending + cardInvoicesPending;
     const expenseTotal = expenseRealized + expensePending;
 
-    const totalBankBalance = Object.values(accountBalances).reduce((a, b) => a + b, 0);
+    const totalBankBalance = visibleAccounts
+      .filter((a) => !a.archived)
+      .reduce((sum, a) => sum + (accountBalances[a.id] || 0), 0);
     // Saldo Operacional Livre (Contas correntes e dinheiro físico para o dia a dia)
-    const totalOperationalBalance = accounts
+    const totalOperationalBalance = visibleAccounts
       .filter((a) => !a.archived && (a.type === 'corrente' || a.type === 'dinheiro' || !a.type))
       .reduce((sum, a) => sum + (accountBalances[a.id] || 0), 0);
     // Patrimônio Guardado / Cofrinhos (reserva protegida e de alta liquidez)
@@ -1987,7 +2184,7 @@ export function FinanceProvider({ children }) {
     const totalPortfolioBalance = visiblePortfolioAssets
       .reduce((sum, a) => sum + Math.round(Number(a.quantity || 0) * Number(a.currentPriceCents || 0)), 0);
     // Contas de Investimento Tradicional (XP, etc.)
-    const totalInvestmentsBalance = accounts
+    const totalInvestmentsBalance = visibleAccounts
       .filter((a) => !a.archived && a.type === 'investimento')
       .reduce((sum, a) => sum + (accountBalances[a.id] || 0), 0);
     // Patrimônio Total Consolidado da Família (Contas Correntes + Cofrinhos/Reservas + Carteira de Ativos/Cripto)
@@ -2020,7 +2217,8 @@ export function FinanceProvider({ children }) {
       totalCardsAvailable,
       projectedEndBalance,
     };
-  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes, accounts, visibleSavingsGoals, savingsGoalBalances, visiblePortfolioAssets]);
+  }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes, visibleAccounts, visibleSavingsGoals, savingsGoalBalances, visiblePortfolioAssets]);
+
 
   // Maiores Gastos por Categoria no Mês do Dashboard
   const dashboardCategoryChartData = useMemo(() => {
@@ -5078,7 +5276,154 @@ export function FinanceProvider({ children }) {
   };
 
 
+  // Gestão de Membros e Permissões (Fase 7)
+  const handleSaveMemberPermissions = async (memberId, { visibleEntities, hiddenAccountIds }) => {
+    let updatedMember = null;
+    setHouseholdMembers((prev) => {
+      const updated = prev.map((m) => {
+        if (m.id === memberId) {
+          updatedMember = {
+            ...m,
+            visibleEntities,
+            hiddenAccountIds,
+            updatedAt: new Date().toISOString(),
+          };
+          return updatedMember;
+        }
+        return m;
+      });
+      saveToLocalStorage(STORAGE_KEYS.householdMembers, updated);
+      return updated;
+    });
+
+    // Se o membro alterado for o usuário logado atualmente, atualiza currentUser
+    if (currentUser && (currentUser.id === memberId || currentUser.memberKey === updatedMember?.memberKey)) {
+      setCurrentUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, visibleEntities, hiddenAccountIds };
+        saveToLocalStorage('financas_session', updated);
+        return updated;
+      });
+    }
+
+    if (updatedMember) {
+      await saveHouseholdMemberCloud(updatedMember);
+    }
+  };
+
+  const handleToggleMemberStatus = async (memberId) => {
+    let targetMember = null;
+    setHouseholdMembers((prev) => {
+      const updated = prev.map((m) => {
+        if (m.id === memberId) {
+          const newStatus = m.status === 'suspended' ? 'active' : 'suspended';
+          targetMember = { ...m, status: newStatus, updatedAt: new Date().toISOString() };
+          return targetMember;
+        }
+        return m;
+      });
+      saveToLocalStorage(STORAGE_KEYS.householdMembers, updated);
+      return updated;
+    });
+
+    if (currentUser && (currentUser.id === memberId || currentUser.memberKey === targetMember?.memberKey)) {
+      setCurrentUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, status: targetMember.status };
+        saveToLocalStorage('financas_session', updated);
+        return updated;
+      });
+    }
+
+    if (targetMember) {
+      await saveHouseholdMemberCloud(targetMember);
+    }
+  };
+
+  const handleRemoveMember = async (memberId) => {
+    setHouseholdMembers((prev) => {
+      const updated = prev.filter((m) => m.id !== memberId);
+      saveToLocalStorage(STORAGE_KEYS.householdMembers, updated);
+      return updated;
+    });
+    await deleteHouseholdMemberCloud(memberId);
+  };
+
+  const handleAddMember = async (memberData) => {
+    const newMember = {
+      id: `hm-${Date.now()}`,
+      householdId: '00000000-0000-0000-0000-000000000001',
+      userId: null,
+      ...memberData,
+      createdAt: new Date().toISOString(),
+    };
+    setHouseholdMembers((prev) => {
+      const updated = [...prev, newMember];
+      saveToLocalStorage(STORAGE_KEYS.householdMembers, updated);
+      return updated;
+    });
+    await saveHouseholdMemberCloud(newMember);
+  };
+
+  const handleSwitchDemoUser = (memberKey) => {
+    if (memberKey === 'user-1' || memberKey === 'admin') {
+      setCurrentUser({
+        id: 'demo-user-1',
+        name: 'Rafael (Admin)',
+        email: 'rafael@familia.com',
+        role: 'admin',
+        memberKey: 'user-1',
+        status: 'active',
+        visibleEntities: ['family-shared', 'user-all', 'user-1', 'user-2', 'user-3'],
+        hiddenAccountIds: [],
+      });
+      setCurrentMemberId('user-all');
+    } else if (memberKey === 'user-2') {
+      const ana = householdMembers.find((m) => m.memberKey === 'user-2') || {};
+      setCurrentUser({
+        id: 'demo-user-2',
+        name: 'Ana Débora',
+        email: 'anadebora@familia.com',
+        role: ana.role || 'member',
+        memberKey: 'user-2',
+        status: ana.status || 'active',
+        visibleEntities: ana.visibleEntities || ['family-shared', 'user-1', 'user-2', 'user-3'],
+        hiddenAccountIds: ana.hiddenAccountIds || [],
+      });
+      setCurrentMemberId('user-2');
+    } else if (memberKey === 'user-3') {
+      const camila = householdMembers.find((m) => m.memberKey === 'user-3') || {};
+      setCurrentUser({
+        id: 'demo-user-3',
+        name: 'Camila - Filha',
+        email: 'camila@familia.com',
+        role: camila.role || 'member',
+        memberKey: 'user-3',
+        status: camila.status || 'active',
+        visibleEntities: camila.visibleEntities || ['user-3'],
+        hiddenAccountIds: camila.hiddenAccountIds || ['demo-acc-3'],
+      });
+      setCurrentMemberId('user-3');
+    }
+  };
+
   const value = {
+    householdMembers,
+    setHouseholdMembers,
+    isFamilyManagementOpen,
+    setIsFamilyManagementOpen,
+    currentMemberConfig,
+    isUserSuspended,
+    userVisibleEntities,
+    userHiddenAccountIds,
+    hasFamilySharedAccess,
+    familyMembersList,
+    allowedViewMembers,
+    handleSaveMemberPermissions,
+    handleToggleMemberStatus,
+    handleRemoveMember,
+    handleAddMember,
+    handleSwitchDemoUser,
     maskTransactionForViewer,
     accounts,
     setAccounts,
@@ -5106,6 +5451,7 @@ export function FinanceProvider({ children }) {
     togglePrivacyMode,
     activeTab,
     setActiveTab,
+
     dashboardMonth,
     setDashboardMonth,
     changeDashboardMonth,

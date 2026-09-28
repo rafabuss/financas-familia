@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from './supabase.js';
 import { calculateCardDueDate, addMonthsToIso } from '../utils/formatters.js';
 import {
   DEMO_ACCOUNTS,
+  DEMO_HOUSEHOLD_MEMBERS,
   DEMO_SAVINGS_GOALS,
   DEMO_PORTFOLIO_ASSETS,
   DEMO_CARDS,
@@ -35,6 +36,7 @@ export const STORAGE_KEYS = {
   monthlyEnvelopes: 'financas_monthly_envelopes_v1',
   savingsGoals: 'financas_savings_goals_v1',
   portfolioAssets: 'financas_portfolio_assets_v1',
+  householdMembers: 'financas_household_members_v1',
 };
 
 export const markCategoryPending = (catId) => {
@@ -453,6 +455,48 @@ export const portfolioAssetToDb = (asset) => {
   return obj;
 };
 
+export const householdMemberToClient = (row) => ({
+  id: row.id,
+  householdId: row.household_id || row.householdId || null,
+  userId: row.user_id || row.userId || null,
+  role: row.role || 'member',
+  status: row.status || 'active',
+  displayName: row.display_name || row.displayName || 'Membro',
+  email: row.email || '',
+  color: row.color || '#2563eb',
+  memberKey: row.member_key || row.memberKey || 'user-1',
+  visibleEntities: Array.isArray(row.visible_entities)
+    ? row.visible_entities
+    : Array.isArray(row.visibleEntities)
+    ? row.visibleEntities
+    : ['family-shared', 'user-all'],
+  hiddenAccountIds: Array.isArray(row.hidden_account_ids)
+    ? row.hidden_account_ids
+    : Array.isArray(row.hiddenAccountIds)
+    ? row.hiddenAccountIds
+    : [],
+  createdAt: row.created_at || row.createdAt || null,
+  updatedAt: row.updated_at || row.updatedAt || null,
+});
+
+export const householdMemberToDb = (hm) => {
+  const obj = {
+    id: hm.id,
+    household_id: hm.householdId || hm.household_id || '00000000-0000-0000-0000-000000000001',
+    user_id: hm.userId || hm.user_id || null,
+    role: hm.role || 'member',
+    status: hm.status || 'active',
+    display_name: hm.displayName || hm.display_name || 'Membro',
+    email: hm.email || null,
+    color: hm.color || '#2563eb',
+    member_key: hm.memberKey || hm.member_key || 'user-1',
+    visible_entities: hm.visibleEntities || hm.visible_entities || ['family-shared', 'user-all'],
+    hidden_account_ids: hm.hiddenAccountIds || hm.hidden_account_ids || [],
+    updated_at: new Date().toISOString(),
+  };
+  return obj;
+};
+
 // ==========================================
 // CARREGAMENTO INICIAL UNIFICADO
 // ==========================================
@@ -483,6 +527,7 @@ export const loadInitialAppData = async (defaults = {}) => {
       transactions: getDemoSession(STORAGE_KEYS.transactions, defaults.transactions || DEMO_TRANSACTIONS).map(transactionToClient),
       scenarios: getDemoSession(STORAGE_KEYS.scenarios, defaults.scenarios || DEMO_SCENARIOS),
       monthlyEnvelopes: getDemoSession(STORAGE_KEYS.monthlyEnvelopes, defaults.monthlyEnvelopes || DEMO_MONTHLY_ENVELOPES).map(monthlyEnvelopeToClient),
+      householdMembers: getDemoSession(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEMO_HOUSEHOLD_MEMBERS).map(householdMemberToClient),
     };
   }
 
@@ -501,7 +546,7 @@ export const loadInitialAppData = async (defaults = {}) => {
 
   if (isCloud) {
     try {
-      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes] = await Promise.all([
+      const [accRes, cardRes, catRes, txRes, scenRes, envRes, goalRes, assetRes, hmRes] = await Promise.all([
         supabase.from('accounts').select('*').order('created_at', { ascending: true }),
         supabase.from('cards').select('*').order('created_at', { ascending: true }),
         supabase.from('categories').select('*').order('name', { ascending: true }),
@@ -510,7 +555,9 @@ export const loadInitialAppData = async (defaults = {}) => {
         supabase.from('monthly_envelopes').select('*'),
         supabase.from('savings_goals').select('*').order('created_at', { ascending: true }),
         supabase.from('portfolio_assets').select('*').order('created_at', { ascending: true }),
+        supabase.from('household_members').select('*').order('created_at', { ascending: true }),
       ]);
+
 
       const localCats = getLocal(STORAGE_KEYS.categories, defaults.categories || []);
       const localCatsMap = new Map((localCats || []).map((c) => [c.id, c]));
@@ -671,6 +718,15 @@ export const loadInitialAppData = async (defaults = {}) => {
         localStorage.setItem(STORAGE_KEYS.portfolioAssets, JSON.stringify(portfolioAssets));
       }
 
+      const isHmSuccess = !hmRes?.error && Array.isArray(hmRes?.data);
+      const localHms = getLocal(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEMO_HOUSEHOLD_MEMBERS);
+      const householdMembers = isHmSuccess && hmRes.data.length > 0
+        ? hmRes.data.map(householdMemberToClient)
+        : (localHms || []).map(householdMemberToClient);
+      if (isHmSuccess && hmRes.data.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.householdMembers, JSON.stringify(householdMembers));
+      }
+
       // Retorna exatamente os dados reais do banco (SEM injetar transações ou simulações fictícias)
       return {
         isCloud: true,
@@ -682,6 +738,7 @@ export const loadInitialAppData = async (defaults = {}) => {
         monthlyEnvelopes: mergedEnvelopes,
         savingsGoals,
         portfolioAssets,
+        householdMembers,
       };
     } catch (err) {
       console.warn('Falha ao conectar no Supabase. Usando armazenamento local:', err);
@@ -698,6 +755,7 @@ export const loadInitialAppData = async (defaults = {}) => {
     monthlyEnvelopes: getLocal(STORAGE_KEYS.monthlyEnvelopes, []).map(monthlyEnvelopeToClient),
     savingsGoals: getLocal(STORAGE_KEYS.savingsGoals, []).map(savingsGoalToClient),
     portfolioAssets: getLocal(STORAGE_KEYS.portfolioAssets, []).map(portfolioAssetToClient),
+    householdMembers: getLocal(STORAGE_KEYS.householdMembers, defaults.householdMembers || DEMO_HOUSEHOLD_MEMBERS).map(householdMemberToClient),
   };
 };
 
@@ -711,6 +769,7 @@ export const loadDemoPresentationData = async (demo) => {
     saveToLocalStorage(STORAGE_KEYS.transactions, demo.transactions || []);
     saveToLocalStorage(STORAGE_KEYS.scenarios, demo.scenarios || []);
     saveToLocalStorage(STORAGE_KEYS.monthlyEnvelopes, demo.monthlyEnvelopes || []);
+    saveToLocalStorage(STORAGE_KEYS.householdMembers, demo.householdMembers || DEMO_HOUSEHOLD_MEMBERS);
     sessionStorage.setItem('financas_demo_loaded', 'true');
 
     return {
@@ -722,6 +781,7 @@ export const loadDemoPresentationData = async (demo) => {
       transactions: demo.transactions || [],
       scenarios: demo.scenarios || [],
       monthlyEnvelopes: demo.monthlyEnvelopes || [],
+      householdMembers: demo.householdMembers || DEMO_HOUSEHOLD_MEMBERS,
     };
   }
 
@@ -736,6 +796,7 @@ export const loadDemoPresentationData = async (demo) => {
       if (demo.cards?.length) await supabase.from('cards').upsert(demo.cards.map(cardToDb));
       if (demo.transactions?.length) await supabase.from('transactions').upsert(demo.transactions.map(transactionToDb));
       if (demo.scenarios?.length) await supabase.from('scenarios').upsert(demo.scenarios.map(scenarioToDb));
+      if (demo.householdMembers?.length) await supabase.from('household_members').upsert(demo.householdMembers.map(householdMemberToDb));
     } catch (e) {
       console.error('Erro ao carregar demo no Supabase:', e);
     }
@@ -748,6 +809,7 @@ export const loadDemoPresentationData = async (demo) => {
   localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(demo.categories || []));
   localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(demo.transactions || []));
   localStorage.setItem(STORAGE_KEYS.scenarios, JSON.stringify(demo.scenarios || []));
+  localStorage.setItem(STORAGE_KEYS.householdMembers, JSON.stringify(demo.householdMembers || DEMO_HOUSEHOLD_MEMBERS));
   localStorage.setItem('financas_demo_loaded', 'true');
 
   return {
@@ -758,8 +820,46 @@ export const loadDemoPresentationData = async (demo) => {
     categories: demo.categories || [],
     transactions: demo.transactions || [],
     scenarios: demo.scenarios || [],
+    householdMembers: demo.householdMembers || DEMO_HOUSEHOLD_MEMBERS,
   };
 };
+
+export const saveHouseholdMemberCloud = async (member) => {
+  if (isDemoMode() || !isSupabaseConfigured() || !supabase) {
+    return { data: member, error: null };
+  }
+  try {
+    const dbPayload = householdMemberToDb(member);
+    const { data, error } = await supabase
+      .from('household_members')
+      .upsert(dbPayload)
+      .select()
+      .single();
+    if (error) throw error;
+    return { data: householdMemberToClient(data), error: null };
+  } catch (err) {
+    console.warn('Erro ao salvar membro no Supabase:', err);
+    return { data: null, error: err };
+  }
+};
+
+export const deleteHouseholdMemberCloud = async (memberId) => {
+  if (isDemoMode() || !isSupabaseConfigured() || !supabase) {
+    return { error: null };
+  }
+  try {
+    const { error } = await supabase
+      .from('household_members')
+      .delete()
+      .eq('id', memberId);
+    if (error) throw error;
+    return { error: null };
+  } catch (err) {
+    console.warn('Erro ao remover membro no Supabase:', err);
+    return { error: err };
+  }
+};
+
 
 // Limpeza estrita e segura APENAS de dados de exemplo (prefixo demo-)
 export const clearDemoDataOnly = async ({

@@ -18,8 +18,11 @@ import {
   UploadCloud,
   Download,
   TrendingUp,
+  Shield,
+  ShieldCheck,
 } from 'lucide-react';
 import { FAMILY_MEMBERS } from '../../data/constants';
+import { useFinance } from '../../contexts/FinanceContext';
 
 export default function Navbar({
   isDemoModeState,
@@ -77,6 +80,11 @@ export default function Navbar({
     : currentUser?.role === 'admin'
     ? 'Administrador'
     : 'Membro';
+
+  const finance = useFinance ? useFinance() : {};
+  const allowedViewMembers = finance.allowedViewMembers || FAMILY_MEMBERS;
+  const setIsFamilyManagementOpen = finance.setIsFamilyManagementOpen;
+  const handleSwitchDemoUser = finance.handleSwitchDemoUser;
 
   return (
     <div className="sticky top-0 z-30 shadow-md">
@@ -174,7 +182,7 @@ export default function Navbar({
 
           {/* Lado Direito: Agrupamento Limpo e Funcional dos Controles */}
           <div className="flex items-center space-x-2 sm:space-x-2.5 shrink-0">
-            {/* Seletor de Visão Familiar: Pílula Compacta */}
+            {/* Seletor de Visão Familiar: Pílula Compacta (com Visibilidade Granular Fase 7) */}
             <div className="flex items-center bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 rounded-full px-2.5 sm:px-3 py-1.5 shadow-xs transition-colors focus-within:ring-2 focus-within:ring-blue-500/50">
               <Users className="w-3.5 h-3.5 text-blue-400 mr-1.5 shrink-0" />
               <select
@@ -184,16 +192,26 @@ export default function Navbar({
                 title="Filtrar visão por membro da família"
                 aria-label="Filtrar visão por membro da família"
               >
-                {FAMILY_MEMBERS.filter((m) => {
-                  if (isDemoModeState || currentUser?.role === 'admin') return true;
-                  return m.id === 'family-shared' || m.id === currentUser?.memberKey;
-                }).map((m) => (
+                {allowedViewMembers.map((m) => (
                   <option key={m.id} value={m.id} className="bg-slate-900 text-white">
                     {m.name}
                   </option>
                 ))}
               </select>
             </div>
+
+            {/* Botão de Acesso Exclusivo para Administrador: Gestão da Família & Permissões */}
+            {currentUser?.role === 'admin' && (
+              <button
+                type="button"
+                onClick={() => setIsFamilyManagementOpen && setIsFamilyManagementOpen(true)}
+                title="Painel de Gestão da Família & Matriz de Permissões (Exclusivo Administrador)"
+                aria-label="Gestão da Família & Matriz de Permissões"
+                className="w-9 h-9 rounded-lg border border-slate-700 bg-slate-800 text-blue-400 hover:text-white hover:bg-slate-700 hover:border-slate-600 flex items-center justify-center transition active:scale-95 cursor-pointer shrink-0"
+              >
+                <ShieldCheck className="w-4 h-4 stroke-[2.2]" />
+              </button>
+            )}
 
             {/* Botão Utilitário: Olho Mágico (IconButton Minimalista) */}
             <button
@@ -251,7 +269,7 @@ export default function Navbar({
               </button>
 
               {isUserMenuOpen && (
-                <div className="absolute right-0 top-full mt-2 w-60 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <div className="absolute right-0 top-full mt-2 w-64 bg-slate-900 border border-slate-700/80 rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-3.5 py-2">
                     <p className="text-xs font-bold text-white truncate leading-tight">
                       {currentUser?.name || 'Usuário'}
@@ -261,7 +279,7 @@ export default function Navbar({
                         {currentUser.email}
                       </p>
                     )}
-                    <div className="mt-2">
+                    <div className="mt-2 flex items-center gap-1.5">
                       <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-950/70 text-blue-300 border border-blue-800/60 inline-block">
                         {userRoleLabel}
                       </span>
@@ -269,6 +287,87 @@ export default function Navbar({
                   </div>
 
                   <div className="border-t border-slate-800 my-1.5" />
+
+                  {/* Gestão da Família para Administradores */}
+                  {currentUser?.role === 'admin' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          if (setIsFamilyManagementOpen) setIsFamilyManagementOpen(true);
+                        }}
+                        className="w-full flex items-center space-x-2 px-3.5 py-2 text-xs font-semibold text-blue-300 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                        <span>Gestão da Família & Permissões</span>
+                      </button>
+                      <div className="border-t border-slate-800 my-1" />
+                    </>
+                  )}
+
+                  {/* Alternador de Membros no Modo Demonstração */}
+                  {(isDemoModeState || isDemoMode()) && handleSwitchDemoUser && (
+                    <div className="px-3.5 py-2 bg-slate-950/60 border-y border-slate-800 my-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1.5 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                        Simular Visão de Membro:
+                      </p>
+                      <div className="grid grid-cols-1 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSwitchDemoUser('user-1');
+                            setIsUserMenuOpen(false);
+                          }}
+                          className={`text-left px-2 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer flex items-center justify-between ${
+                            currentUser?.memberKey === 'user-1' || currentUser?.memberKey === 'user-all'
+                              ? 'bg-blue-900/60 text-blue-200 font-bold border border-blue-700/50'
+                              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <span>👑 Rafael (Admin)</span>
+                          {(currentUser?.memberKey === 'user-1' || currentUser?.memberKey === 'user-all') && (
+                            <span className="text-[10px] text-blue-400 font-bold">Ativo</span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSwitchDemoUser('user-2');
+                            setIsUserMenuOpen(false);
+                          }}
+                          className={`text-left px-2 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer flex items-center justify-between ${
+                            currentUser?.memberKey === 'user-2'
+                              ? 'bg-purple-900/60 text-purple-200 font-bold border border-purple-700/50'
+                              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <span>👤 Ana Débora (Membro)</span>
+                          {currentUser?.memberKey === 'user-2' && (
+                            <span className="text-[10px] text-purple-400 font-bold">Ativo</span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSwitchDemoUser('user-3');
+                            setIsUserMenuOpen(false);
+                          }}
+                          className={`text-left px-2 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer flex items-center justify-between ${
+                            currentUser?.memberKey === 'user-3'
+                              ? 'bg-pink-900/60 text-pink-200 font-bold border border-pink-700/50'
+                              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <span>👧 Camila - Filha (Restrito)</span>
+                          {currentUser?.memberKey === 'user-3' && (
+                            <span className="text-[10px] text-pink-400 font-bold">Ativo</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -288,6 +387,7 @@ export default function Navbar({
                 </div>
               )}
             </div>
+
 
             {/* Ação Principal em Destaque: Novo Lançamento */}
             <button

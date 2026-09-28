@@ -109,13 +109,36 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
   };
 
   const handleQuickDemoLogin = (memberKey) => {
-    const isRafael = memberKey === 'user-1';
+    let email = 'rafael@familia.com';
+    let name = 'Rafael';
+    let role = 'admin';
+    let status = 'active';
+    let visibleEntities = ['family-shared', 'user-1', 'user-2', 'user-3'];
+    let hiddenAccountIds = [];
+
+    if (memberKey === 'user-2') {
+      email = 'anadebora@familia.com';
+      name = 'Ana Débora';
+      role = 'member';
+      visibleEntities = ['family-shared', 'user-2'];
+      hiddenAccountIds = [];
+    } else if (memberKey === 'user-3') {
+      email = 'camila@familia.com';
+      name = 'Camila (Filha)';
+      role = 'member';
+      visibleEntities = ['user-3'];
+      hiddenAccountIds = ['demo-acc-3'];
+    }
+
     onLoginSuccess({
       id: memberKey,
-      email: isRafael ? 'rafael@familia.com' : 'anadebora@familia.com',
-      name: isRafael ? 'Rafael' : 'Ana Débora',
-      role: isRafael ? 'admin' : 'member',
+      email,
+      name,
+      role,
       memberKey,
+      status,
+      visibleEntities,
+      hiddenAccountIds,
     });
     if (onClose) onClose();
   };
@@ -319,22 +342,33 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, isMandatory
           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
             {isCloud ? 'Ou acesse em Modo Local (Demonstração / Teste):' : 'Acesso Local / Demonstração:'}
           </span>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => handleQuickDemoLogin('user-1')}
-              className="px-3 py-2 bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition shadow-sm"
+              className="px-2 py-2 bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-lg text-xs font-semibold text-slate-700 flex flex-col sm:flex-row items-center justify-center space-x-1 transition shadow-sm text-center"
+              title="Acesso completo como Administrador da Família"
             >
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-              <span>Rafael (Admin)</span>
+              <Sparkles className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="truncate">Rafael (Admin)</span>
             </button>
             <button
               type="button"
               onClick={() => handleQuickDemoLogin('user-2')}
-              className="px-3 py-2 bg-white border border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition shadow-sm"
+              className="px-2 py-2 bg-white border border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-lg text-xs font-semibold text-slate-700 flex flex-col sm:flex-row items-center justify-center space-x-1 transition shadow-sm text-center"
+              title="Acesso como Membro da Família"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-              <span>Ana Débora</span>
+              <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+              <span className="truncate">Ana Débora</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickDemoLogin('user-3')}
+              className="px-2 py-2 bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/50 rounded-lg text-xs font-semibold text-slate-700 flex flex-col sm:flex-row items-center justify-center space-x-1 transition shadow-sm text-center"
+              title="Acesso com permissões restritas (apenas gastos próprios)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="truncate">Camila (Filha)</span>
             </button>
           </div>
         </div>

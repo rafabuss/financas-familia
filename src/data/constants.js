@@ -4,6 +4,7 @@ export const FAMILY_MEMBERS = [
   { id: 'family-shared', name: '🏠 Gastos Compartilhados (Família)', isFamily: true },
   { id: 'user-1', name: '👤 Rafael (Apenas Pessoal / Membro)', isFamily: false },
   { id: 'user-2', name: '👤 Ana Débora (Apenas Pessoal / Membro)', isFamily: false },
+  { id: 'user-3', name: '👤 Camila (Filha / Dependente)', isFamily: false },
 ];
 
 // Categoria Técnica Padrão para Transferências entre Contas

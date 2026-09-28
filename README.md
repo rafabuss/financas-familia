@@ -315,10 +315,13 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Persistência em nuvem multi-tenancy no Supabase (`portfolio_assets`), migração SQL com RLS e dados de demonstração realistas.
 
 - [ ] **Fase 7: Gestão da Família & Controle Granular de Permissões e Visibilidade**
-  - [ ] **Painel Administrativo da Família (`FamilyManagementModal` / Configurações):** Gestão de membros do household com visualização de papéis (Administrador vs Membro) e status (Ativo vs Bloqueado/Suspenso).
+  - [ ] **Painel Administrativo da Família (`FamilyManagementModal` / Configurações):** Gestão de membros do household com visualização de papéis (Administrador vs Membro) e status (Ativo vs Bloqueado/Suspenso), acessível exclusivamente por administradores.
   - [ ] **Ações de Moderação:** Possibilidade do administrador suspender/bloquear temporariamente um usuário ou removê-lo definitivamente da família.
-  - [ ] **Controle de Acesso Compartilhado da Família (`canViewFamilyShared`):** Permissão de ligar/desligar o acesso de um membro às contas gerais e aos gastos globais da família (ex: permitir que filhos vejam apenas suas próprias despesas sem ter acesso às contas gerais dos pais).
-  - [ ] **Matriz de Visibilidade Cruzada entre Membros (`allowedMemberIds`):** Configuração granular permitindo que um membro veja apenas o seu próprio extrato, ou tenha acesso liberado aos lançamentos de membros específicos (ex: filha acessando despesas do Rafael ou da mãe conforme autorizado).
+  - [ ] **Matriz Visual de Permissões (Combobox de Membro + Tabela com Checkboxes):**
+    - Combobox no topo para selecionar qual membro da família está sendo configurado.
+    - Tabela interativa contendo todos os membros da família **e a entidade "Família (Gastos Compartilhados)"** como uma linha da lista.
+    - Checkbox em cada linha para conceder ou revogar visibilidade com um clique (ex: ao selecionar a filha, basta marcar/desmarcar os checks da Mãe, do Pai ou da Família).
+    - Atualização dinâmica da tabela ao alternar o usuário selecionado no combobox.
   - [ ] **Controle Granular por Conta Bancária e Cartão:** Permissão para ocultar contas sensíveis de investimentos ou cartões de certos membros da família.
   - [ ] **Tela de Bloqueio/Suspensão Amigável:** Interface informativa caso o acesso do membro esteja temporariamente suspenso pelo administrador.
 

@@ -126,6 +126,17 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 * **Extrato Cronológico do Cofrinho:** Linha do tempo com saldo progressivo, totais aportados, resgatados e rendimentos creditados.
 * **Barras de Progresso e Metas:** Acompanhamento visual da meta estipulada para cada objetivo (Reserva de Emergência, Viagem, IPVA, etc.).
 
+### 17. 👨‍👩‍👧‍👦 Identidade da Família, Gestão de Membros & Permissões Granulares
+* **Conceito de Família e Identidade Nominal:** Toda família possui um nome oficial no sistema (padrão *"Nicácio Ferreira"*), erradicando termos técnicos ou frios como *"Household"*.
+* **Edição Ágil e Direta no Painel:** O Administrador titular pode renomear a família a qualquer momento com um clique no ícone de edição (lápis) no painel administrativo, com persistência automática no Supabase e no cache local.
+* **Criação e Vinculação de Família no Cadastro (`AuthModal`):**
+  * **Novo Administrador / Nova Família:** Usuários que criam uma conta independente podem definir o nome da sua própria família já no cadastro.
+  * **Membro Vinculado:** Usuários que entram vinculados a uma família existente visualizam a filiação nominal clara (ex: *"Vinculando-se à Família: 'Nicácio Ferreira'"*).
+* **Matriz Visual de Permissões (Visibilidade por Membro & Família):**
+  * Configuração granular de quem pode enxergar os gastos compartilhados da família, as despesas individuais do pai, da mãe ou apenas os seus próprios lançamentos (ideal para filhos e dependentes).
+  * Controle de contas bancárias e cartões ocultos para membros específicos da casa.
+* **Moderação e Suspensão Temporária:** Possibilidade de suspender temporariamente o acesso de um membro ou desvinculá-lo da família com segurança.
+
 ---
 
 ## 🏗️ Arquitetura Modular & Estrutura de Componentes
@@ -316,12 +327,15 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] Persistência em nuvem multi-tenancy no Supabase (`portfolio_assets`), migração SQL com RLS e dados de demonstração realistas.
 
 - [x] **Fase 7: Gestão da Família & Controle Granular de Permissões e Visibilidade**
-  - [x] **Painel Administrativo da Família (`FamilyManagementModal` / Configurações):** Gestão de membros do household com visualização de papéis (Administrador vs Membro) e status (Ativo vs Bloqueado/Suspenso), acessível exclusivamente por administradores.
+  - [x] **Conceito de Família & Identidade Nominal:** Substituição completa do termo técnico de banco (*household*) por *"Família"*, exibindo o nome titular personalizado (ex: *"Participantes da família 'Nicácio Ferreira'"*).
+  - [x] **Edição Instantânea do Nome da Família:** Recurso inline com ícone de lápis (`Pencil`) no painel administrativo para renomear o núcleo familiar em 1 clique, sincronizando com o Supabase (`households`) e o cache local.
+  - [x] **Criação e Vinculação Familiar no Cadastro (`AuthModal`):** No primeiro acesso, novos administradores podem definir o nome de sua própria família; membros vinculados (cônjuge e dependentes) visualizam a família à qual estão ingressando.
+  - [x] **Painel Administrativo da Família (`FamilyManagementModal`):** Gestão centralizada de participantes da família com papéis (Administrador vs Membro) e status (Ativo vs Bloqueado/Suspenso), acessível exclusivamente por administradores.
   - [x] **Ações de Moderação:** Possibilidade do administrador suspender/bloquear temporariamente um usuário ou removê-lo definitivamente da família.
   - [x] **Matriz Visual de Permissões (Combobox de Membro + Tabela com Checkboxes):**
     - Combobox no topo para selecionar qual membro da família está sendo configurado.
     - Tabela interativa contendo todos os membros da família **e a entidade "Família (Gastos Compartilhados)"** como uma linha da lista.
-    - Checkbox em cada linha para conceder ou revogar visibilidade com um clique (ex: ao selecionar a filha, basta marcar/desmarcar os checks da Mãe, do Pai ou da Família).
+    - Checkbox em cada linha para conceder ou revogar visibilidade com um clique (ex: ao selecionar os filhos, basta marcar/desmarcar os checks da Mãe, do Pai ou da Família).
     - Atualização dinâmica da tabela ao alternar o usuário selecionado no combobox.
   - [x] **Controle Granular por Conta Bancária e Cartão:** Permissão para ocultar contas sensíveis de investimentos ou cartões de certos membros da família.
   - [x] **Tela de Bloqueio/Suspensão Amigável:** Interface informativa caso o acesso do membro esteja temporariamente suspenso pelo administrador.

@@ -356,7 +356,17 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
     - Botões rápidos *"Carregar Extrato OFX de Exemplo (BB)"* e *"Carregar Fatura OFX de Exemplo (Nubank)"* para testes instantâneos em 1 clique com os 3 estados de conciliação.
     - Persistência sem duplicações: itens conciliados atualizam a transação manual e itens novos são criados e sincronizados no Supabase e no cache local.
 
-- [ ] **Fase 9: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
+- [ ] **Fase 9: IA Financeira Omnipresente (360°) & Showcase de Dados Demo**
+  - [ ] **IA 360° em Todos os Módulos do Sistema (`src/services/aiService.js`):**
+    - **Lançamentos & Categorização:** Ferramenta `criar_categoria` e `sugerir_categorias` (análise preditiva de gastos existentes para detectar padrões e criar/sugerir novas categorias e subcategorias com 1 clique).
+    - **Transferências & Pix:** Ferramenta `criar_transferencia` para lançar movimentações entre contas por comandos de voz/texto sem distorcer o DRE.
+    - **Investimentos & Cofrinhos:** Injeção do patrimônio no contexto do prompt e ferramentas `atualizar_cotacao_ativo` e `aportar_cofrinho` (consultoria completa de rentabilidade, cotações de cripto/ações e metas de reserva).
+    - **Gestão da Família:** Leitura da estrutura familiar e matriz de permissões para responder dúvidas de acessos de dependentes e orientar a governança da família.
+    - **Importações & Conciliação:** Capacidade de analisar despesas importadas via OFX/PDF, detectando cobranças duplicadas, taxas bancárias ocultas e assinaturas recorrentes.
+  - [ ] **Showcase Completo dos Dados de Demonstração (`src/data/demoData.js`):**
+    - Sincronização e enriquecimento de 100% dos dados fictícios da *Família Silva* cobrindo todas as novidades recentes (faturas pagas e abertas, transferências Pix, Cofrinho do Inter, Cripto/Ações, arquivos OFX pré-carregados e filha Camila com matriz de permissões restritas).
+
+- [ ] **Fase 10: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
   - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).
   - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
   - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.

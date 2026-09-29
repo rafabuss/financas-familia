@@ -152,11 +152,11 @@ export const DEMO_ACCOUNTS = [
   },
   {
     id: 'demo-acc-6',
-    name: 'Conta Mesada & Gastos Alice',
+    name: 'Conta Mesada & Gastos Camila',
     bank: 'Inter Kids',
     type: 'corrente',
     initialBalanceCents: 42000,
-    holder: 'Alice',
+    holder: 'Camila',
     color: '#ec4899',
     archived: false,
     ownerId: 'user-3',
@@ -164,14 +164,14 @@ export const DEMO_ACCOUNTS = [
 ];
 
 // ==============================================================================
-// 2.0 MEMBROS DA FAMÍLIA & MATRIZ DE PERMISSÕES (FASE 7)
+// 2.0 MEMBROS DA FAMÍLIA SILVA & MATRIZ DE PERMISSÕES (FASE 7 & FASE 9)
 // ==============================================================================
 export const DEMO_HOUSEHOLD_MEMBERS = [
   {
     id: 'demo-hm-1',
     householdId: 'demo-household-1',
     userId: 'demo-user-1',
-    displayName: 'Rafael',
+    displayName: 'Rafael Silva',
     email: 'rafael@familia.com',
     role: 'admin',
     status: 'active',
@@ -184,7 +184,7 @@ export const DEMO_HOUSEHOLD_MEMBERS = [
     id: 'demo-hm-2',
     householdId: 'demo-household-1',
     userId: 'demo-user-2',
-    displayName: 'Ana Débora',
+    displayName: 'Ana Débora Silva',
     email: 'anadebora@familia.com',
     role: 'member',
     status: 'active',
@@ -197,19 +197,19 @@ export const DEMO_HOUSEHOLD_MEMBERS = [
     id: 'demo-hm-3',
     householdId: 'demo-household-1',
     userId: 'demo-user-3',
-    displayName: 'Alice - Filha (13 anos)',
-    email: 'alice@familia.com',
+    displayName: 'Camila Silva - Filha (14 anos)',
+    email: 'camila@familia.com',
     role: 'member',
     status: 'active',
     memberKey: 'user-3',
     color: '#ec4899',
-    visibleEntities: ['user-3'], // Configuração inicial restrita: apenas os próprios gastos!
-    hiddenAccountIds: ['demo-acc-3'], // Investimentos XP oculto
+    visibleEntities: ['user-3'], // Configuração restrita: apenas os próprios gastos da filha Camila!
+    hiddenAccountIds: ['demo-acc-3'], // Investimentos XP oculto para Camila
   },
 ];
 
 // ==============================================================================
-// 2.1 COFRINHOS, CAIXINHAS & RESERVA DE EMERGÊNCIA (FASE 6.1)
+// 2.1 COFRINHOS, CAIXINHAS & RESERVA DE EMERGÊNCIA (FASE 6.1 & FASE 9)
 // ==============================================================================
 export const DEMO_SAVINGS_GOALS = [
   {
@@ -247,10 +247,10 @@ export const DEMO_SAVINGS_GOALS = [
   },
   {
     id: 'demo-goal-4',
-    name: 'Caixinha Pós-Graduação Ana',
+    name: 'Caixinha Intercâmbio Camila',
     linkedAccountId: 'demo-acc-5', // C6 Bank
-    targetCents: 800000, // Meta: R$ 8.000,00
-    currentBalanceCents: 560000, // Saldo inicial: R$ 5.600,00
+    targetCents: 1500000, // Meta: R$ 15.000,00
+    currentBalanceCents: 640000, // Saldo inicial: R$ 6.400,00
     yieldRate: '100% CDI',
     color: '#8b5cf6',
     icon: 'GraduationCap',
@@ -259,7 +259,7 @@ export const DEMO_SAVINGS_GOALS = [
 ];
 
 // ==============================================================================
-// 2.2 CARTEIRA DE ATIVOS & RENDA VARIÁVEL (FASE 6.2)
+// 2.2 CARTEIRA DE ATIVOS & RENDA VARIÁVEL (FASE 6.2 & FASE 9)
 // ==============================================================================
 export const DEMO_PORTFOLIO_ASSETS = [
   {
@@ -296,6 +296,30 @@ export const DEMO_PORTFOLIO_ASSETS = [
     averagePriceCents: 3250, // R$ 32,50
     currentPriceCents: 3780, // R$ 37,80
     notes: 'Empresa de energia com elevado histórico de proventos e dividendos',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-asset-vale',
+    name: 'Vale S.A.',
+    ticker: 'VALE3',
+    assetType: 'STOCK',
+    institution: 'XP Investimentos',
+    quantity: 120,
+    averagePriceCents: 5850, // R$ 58,50
+    currentPriceCents: 6240, // R$ 62,40
+    notes: 'Líder global em mineração de ferro com geração de caixa robusta',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-asset-mxrf',
+    name: 'Maxi Renda FII',
+    ticker: 'MXRF11',
+    assetType: 'FII',
+    institution: 'Inter DTVM',
+    quantity: 600,
+    averagePriceCents: 1010, // R$ 10,10
+    currentPriceCents: 1045, // R$ 10,45
+    notes: 'Fundo Imobiliário de papel com proventos mensais isentos de IR',
     ownerId: 'user-all',
   },
   {
@@ -1312,7 +1336,7 @@ export const DEMO_TRANSACTIONS = [
   },
   {
     id: 'demo-tx-camila-inc-1',
-    description: 'Mesada Jovem Alice',
+    description: 'Mesada Jovem Camila',
     amountCents: 25000,
     type: 'INCOME',
     status: 'REALIZADO',
@@ -1326,7 +1350,7 @@ export const DEMO_TRANSACTIONS = [
   },
   {
     id: 'demo-tx-camila-exp-1',
-    description: 'Livros de Estudo & Papelaria Alice',
+    description: 'Livros de Estudo & Papelaria Camila',
     amountCents: 6500,
     type: 'EXPENSE',
     status: 'REALIZADO',
@@ -1354,7 +1378,7 @@ export const DEMO_TRANSACTIONS = [
   },
   {
     id: 'demo-tx-camila-exp-3',
-    description: 'Recarga Celular & Internet Móvel Alice',
+    description: 'Recarga Celular & Internet Móvel Camila',
     amountCents: 3500,
     type: 'EXPENSE',
     status: 'PREVISTO',
@@ -1365,6 +1389,130 @@ export const DEMO_TRANSACTIONS = [
     scope: 'PERSONAL',
     ownerId: 'user-3',
     visibility: 'PERSONAL_PRIVATE',
+  },
+
+  // --- PADRÕES DE GASTOS RECENTES PARA SUGESTÃO PROATIVA DE CATEGORIAS PELA IA (FASE 9) ---
+  // Padrão 1: Serviços de Streaming (atualmente dispersos em compras)
+  {
+    id: 'demo-tx-stream-1',
+    description: 'Netflix Assinatura Familiar 4K',
+    amountCents: 5590,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 8),
+    dueDate: getRelativeDate(0, 8),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-compras',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-tx-stream-2',
+    description: 'Spotify Família Premium',
+    amountCents: 3490,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 12),
+    dueDate: getRelativeDate(0, 12),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-compras',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-tx-stream-3',
+    description: 'Disney+ e Star+ Combo Anual',
+    amountCents: 4590,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 16),
+    dueDate: getRelativeDate(0, 16),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-compras',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
+  },
+
+  // Padrão 2: Aplicativos de Transporte (Uber / 99)
+  {
+    id: 'demo-tx-ride-1',
+    description: 'Uber Viagem Aeroporto Trabalho',
+    amountCents: 6850,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 7),
+    dueDate: getRelativeDate(0, 7),
+    accountId: 'demo-acc-4',
+    categoryId: 'cat-transporte',
+    scope: 'PERSONAL',
+    ownerId: 'user-1',
+  },
+  {
+    id: 'demo-tx-ride-2',
+    description: '99 Pop Reunião Centro',
+    amountCents: 3280,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 11),
+    dueDate: getRelativeDate(0, 11),
+    accountId: 'demo-acc-4',
+    categoryId: 'cat-transporte',
+    scope: 'PERSONAL',
+    ownerId: 'user-1',
+  },
+  {
+    id: 'demo-tx-ride-3',
+    description: 'Uber Corrida Shopping Família',
+    amountCents: 4200,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 15),
+    dueDate: getRelativeDate(0, 15),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-transporte',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
+  },
+
+  // Padrão 3: Pets & Veterinário (Petz, Cobasi, Consulta Veterinária)
+  {
+    id: 'demo-tx-pet-1',
+    description: 'Cobasi Ração Golden Especial Cães',
+    amountCents: 18990,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 6),
+    dueDate: getRelativeDate(0, 6),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-compras',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-tx-pet-2',
+    description: 'Petz Banho, Tosa e Higiene Rex',
+    amountCents: 9500,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 13),
+    dueDate: getRelativeDate(0, 13),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-compras',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
+  },
+  {
+    id: 'demo-tx-pet-3',
+    description: 'Clínica Veterinária Vacina Anual Rex',
+    amountCents: 16000,
+    type: 'EXPENSE',
+    status: 'REALIZADO',
+    date: getRelativeDate(0, 18),
+    dueDate: getRelativeDate(0, 18),
+    accountId: 'demo-acc-1',
+    categoryId: 'cat-saude',
+    scope: 'FAMILY',
+    ownerId: 'user-all',
   },
 
   // --- DESPESAS FIXAS EM CONTA CORRENTE (MÊS ATUAL) ---

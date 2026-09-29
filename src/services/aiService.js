@@ -178,6 +178,13 @@ export const buildSystemPrompt = ({
   monthSummary = {},
   dashboardEnvelopes = {},
   isDemo = false,
+  savingsGoals = [],
+  savingsGoalBalances = {},
+  portfolioAssets = [],
+  portfolioSummary = {},
+  householdMembers = [],
+  familyName = '',
+  recentTransactions = [],
 }) => {
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -194,11 +201,13 @@ export const buildSystemPrompt = ({
 
   // 2. Faturas de Cartões
   const activeCards = cards.filter((c) => !c.archived);
+  let totalOpenInvoicesCents = 0;
   const cardsText = activeCards.length > 0
     ? activeCards
         .map((c) => {
           const stats = cardStats[c.id] || {};
           const invTotal = stats.invoiceTotalCents || 0;
+          totalOpenInvoicesCents += invTotal;
           const status = stats.invoiceStatus || 'ABERTA';
           const due = stats.dueDateIso || `Dia ${c.dueDay}`;
           const available = stats.availableCents ?? Math.max(0, (c.limitCents || 0) - (stats.committedCents || 0));
@@ -234,13 +243,92 @@ export const buildSystemPrompt = ({
   const accountNames = activeAccounts.map((a) => a.name);
   const cardNames = activeCards.map((c) => c.name);
 
+  // 6. Cofrinhos & Metas de Reserva
+  let totalSavingsBalanceCents = 0;
+  const goalsText = savingsGoals.length > 0
+    ? savingsGoals
+        .map((g) => {
+          const bal = savingsGoalBalances[g.id] ?? g.currentBalanceCents ?? 0;
+          totalSavingsBalanceCents += bal;
+          const target = g.targetCents || 0;
+          const pct = target > 0 ? ((bal / target) * 100).toFixed(0) : '0';
+          const yieldStr = g.yieldRate ? ` [Rendimento: ${g.yieldRate}]` : '';
+          return `- ${g.name}: Saldo Acumulado ${formatMoney(bal)} de Meta ${formatMoney(target)} (${pct}% atingido)${yieldStr}`;
+        })
+        .join('\n')
+    : '- Nenhum cofrinho ou meta de reserva cadastrado';
+
+  // 7. Carteira de Ativos & Renda Variável
+  let totalPortfolioValueCents = 0;
+  let totalPortfolioInvestedCents = 0;
+  const assetsText = portfolioAssets.length > 0
+    ? portfolioAssets
+        .map((a) => {
+          const qty = Number(a.quantity || 0);
+          const avg = Number(a.averagePriceCents || 0);
+          const cur = Number(a.currentPriceCents || 0);
+          const invested = Math.round(qty * avg);
+          const current = Math.round(qty * cur);
+          totalPortfolioInvestedCents += invested;
+          totalPortfolioValueCents += current;
+          const diff = current - invested;
+          const pct = invested > 0 ? ((diff / invested) * 100).toFixed(1) : '0.0';
+          const sign = diff >= 0 ? '+' : '';
+          return `- ${a.ticker} (${a.name}) [${a.assetType}]: ${qty} un | Cotação Atual ${formatMoney(cur)} (Médio ${formatMoney(avg)}) | Posição: ${formatMoney(current)} | Retorno: ${sign}${formatMoney(diff)} (${sign}${pct}%)`;
+        })
+        .join('\n')
+    : '- Nenhum ativo de investimento cadastrado na carteira';
+
+  // 8. Estrutura e Membros da Família
+  const membersText = householdMembers.length > 0
+    ? householdMembers
+        .map((m) => {
+          const roleLabel = m.role === 'admin' ? 'Administrador(a)' : 'Membro';
+          const accessLabel = m.visibleEntities && m.visibleEntities.length === 1 && m.visibleEntities[0] === m.memberKey
+            ? 'Acesso restrito apenas aos próprios lançamentos'
+            : 'Acesso total compartilhado familiar';
+          return `- ${m.displayName || m.name || m.memberKey}: Papel: ${roleLabel} | Permissão: ${accessLabel}`;
+        })
+        .join('\n')
+    : '- Rafael (Admin), Ana Débora (Membro), Camila (Membro - Filha)';
+
+  // 9. Amostra de Lançamentos Recentes (Últimas Despesas para análise de padrões)
+  const recentExpenses = (recentTransactions || [])
+    .filter((t) => t.type === 'EXPENSE')
+    .slice(0, 16);
+  const recentExpensesText = recentExpenses.length > 0
+    ? recentExpenses
+        .map((t) => {
+          const catName = categories.find((c) => c.id === t.categoryId)?.name || 'Geral';
+          const source = t.cardId
+            ? (cards.find((c) => c.id === t.cardId)?.name || 'Cartão')
+            : (accounts.find((a) => a.id === t.accountId)?.name || 'Conta');
+          return `- ${t.date}: ${t.description} | ${formatMoney(t.amountCents)} [Cat: ${catName} | Pagto: ${source}]`;
+        })
+        .join('\n')
+    : '- Nenhuma despesa recente registrada';
+
+  // 10. Métrica de Patrimônio Líquido Consolidado 360°
+  const totalBankBalCents = monthSummary.totalBankBalance ?? 0;
+  const portfolioCurrentValCents = portfolioSummary?.currentValueCents ?? totalPortfolioValueCents;
+  const totalNetWorthCents = totalBankBalCents + totalSavingsBalanceCents + portfolioCurrentValCents;
+
   return `Você é o Assistente de IA Financeiro oficial do aplicativo "Finanças da Família".
 Você é um consultor pessoal e familiar de finanças de altíssimo nível: altamente preciso, amigável, acolhedor, objetivo e pragmático.
+Você possui visão 360° completa de todos os módulos do sistema: Contas, Cartões, Envelopes, Cofrinhos de Reserva, Carteira de Investimentos e Membros da Família.
 
 INFORMAÇÕES TEMPORAIS & DE CONTEXTO:
 - Data de hoje: ${todayStr}
 - Mês de referência em análise: ${monthLabel || dashboardMonth} (${dashboardMonth})
+- Família: ${familyName || 'Família Silva'}
 - Modo da aplicação: ${isDemo ? 'MODO DEMONSTRAÇÃO (Dados simulados em memória)' : 'MODO REAL (Dados da família)'}
+
+=== PATRIMÔNIO LÍQUIDO CONSOLIDADO DA FAMÍLIA (360°) ===
+- Saldo Bancário em Contas Correntes: ${formatMoney(totalBankBalCents)}
+- Reserva Acumulada em Cofrinhos / Caixinhas: ${formatMoney(totalSavingsBalanceCents)}
+- Carteira de Ativos & Renda Variável (Valor Atual): ${formatMoney(portfolioCurrentValCents)}
+- 💎 PATRIMÔNIO LÍQUIDO TOTAL CONSOLIDADO: ${formatMoney(totalNetWorthCents)}
+- Total de Faturas de Cartão em Aberto (Passivo do Mês): ${formatMoney(totalOpenInvoicesCents)}
 
 === PAINEL FINANCEIRO DO MÊS (${monthLabel || dashboardMonth}) ===
 - Saldo Bancário Consolidado: ${formatMoney(monthSummary.totalBankBalance ?? 0)}
@@ -257,8 +345,20 @@ ${accountsText}
 === FATURAS DE CARTÃO DE CRÉDITO (${monthLabel || dashboardMonth}) ===
 ${cardsText}
 
+=== COFRINHOS & METAS DE RESERVA ===
+${goalsText}
+
+=== CARTEIRA DE ATIVOS & INVESTIMENTOS ===
+${assetsText}
+
 === STATUS DOS ENVELOPES ORÇAMENTÁRIOS ===
 ${envelopesText}
+
+=== ESTRUTURA DA FAMÍLIA & PERMISSÕES ===
+${membersText}
+
+=== AMOSTRA DE LANÇAMENTOS RECENTES (ÚLTIMAS DESPESAS) ===
+${recentExpensesText}
 
 === CATEGORIAS DISPONÍVEIS ===
 - Despesas: ${expenseCats.join(', ') || 'Nenhuma'}
@@ -269,14 +369,22 @@ ${envelopesText}
 - Cartões: ${cardNames.join(', ') || 'Nenhum'}
 
 === SUAS DIRETRIZES DE ATUAÇÃO ===
-1. Utilize português brasileiro natural e cordial. Formate sua resposta com markdown claro (negrito, listas, destaques monetários).
-2. Se o usuário fizer perguntas sobre finanças, saldo, faturas ou envelopes, responda com base estrita nos dados do painel acima.
-3. Se o usuário pedir para anotar, registrar, lançar, criar ou descontar uma transação (despesa ou receita), USE OBRIGATORIAMENTE A FERRAMENTA \`criar_transacao\`.
-   - Escolha a categoria ativa que melhor se encaixe na descrição informada.
-   - Identifique a conta bancária ou cartão correto. Se o usuário não disser onde gastou, deduza se é cartão ou conta (se mencionou "cartão", escolha um cartão disponível; caso contrário, use a primeira conta ou cartão mais coerente).
-   - Se a data não for informada, use a data de hoje (${todayStr}).
-4. Se o usuário pedir para simular um cenário (ex: "e se eu comprar um carro?", "simule um corte de R$ 200 no aluguel", "e se eu fizer um curso de 500 por mês"), USE OBRIGATORIAMENTE A FERRAMENTA \`simular_cenario\`.
-5. Quando uma ferramenta for executada com sucesso, finalize sua resposta confirmando os dados que foram cadastrados e como isso impacta as finanças da família.`;
+1. Utilize português brasileiro natural, acolhedor e cordial. Formate sua resposta com markdown claro (negrito, listas, destaques monetários).
+2. Se o usuário fizer perguntas sobre finanças, saldo, faturas, cofrinhos, patrimônio total ou carteira, responda com base estrita nos dados do painel acima.
+3. Se o usuário perguntar o Patrimônio Líquido Total, apresente o valor consolidado (${formatMoney(totalNetWorthCents)}) detalhando a composição: Contas Correntes (${formatMoney(totalBankBalCents)}), Cofrinhos (${formatMoney(totalSavingsBalanceCents)}) e Carteira de Investimentos (${formatMoney(portfolioCurrentValCents)}).
+4. CONSULTORIA PREDITIVA & SUGESTÃO DE CATEGORIAS:
+   - Quando o usuário solicitar ("Sugira novas categorias com base nos meus gastos" ou similar), analise as despesas recentes e as categorias existentes.
+   - Identifique padrões de gastos recorrentes agrupados em categorias muito amplas ou genéricas (ex: assinaturas de streaming como Netflix/Spotify, transporte por aplicativo como Uber/99, cuidados pet/veterinário, delivery, etc.).
+   - Sugira proativamente a criação de categorias especializadas adequadas com cor e teto mensal sugerido, e já acione ou ofereça-se para acionar a ferramenta \`criar_categoria\`.
+5. Se o usuário pedir para cadastrar, criar ou adicionar uma categoria ou subcategoria, USE OBRIGATORIAMENTE A FERRAMENTA \`criar_categoria\`.
+6. Se o usuário informar que fez um Pix, TED ou transferência entre contas correntes (ex: "Fiz um Pix de R$ 300 do Itaú para o Nubank"), USE OBRIGATORIAMENTE A FERRAMENTA \`criar_transferencia\`.
+7. Se o usuário pedir para anotar, registrar, lançar, criar ou descontar uma transação (despesa ou receita comum), USE OBRIGATORIAMENTE A FERRAMENTA \`criar_transacao\`.
+   - Escolha a categoria ativa mais adequada.
+   - Deduza a conta ou cartão correto. Se a data não for dita, use ${todayStr}.
+8. Se o usuário informar nova cotação ou preço de mercado de uma ação, FII, criptomoeda ou título (ex: "O Bitcoin subiu para R$ 390.000", "Atualize PETR4 para 38.50"), USE OBRIGATORIAMENTE A FERRAMENTA \`atualizar_cotacao_ativo\`.
+9. Se o usuário pedir para guardar dinheiro, transferir para a reserva ou aportar num cofrinho (ex: "Aporte R$ 500 no cofrinho Reserva de Emergência"), USE OBRIGATORIAMENTE A FERRAMENTA \`aportar_cofrinho\`.
+10. Se o usuário pedir para simular um cenário (ex: "e se eu comprar um carro?", "simule um corte de R$ 200 no aluguel"), USE OBRIGATORIAMENTE A FERRAMENTA \`simular_cenario\`.
+11. Quando uma ferramenta for executada com sucesso, finalize sua resposta confirmando com clareza o que foi cadastrado e o impacto no ecossistema familiar.`;
 };
 
 /**
@@ -318,6 +426,107 @@ export const GEMINI_TOOLS = [
             },
           },
           required: ['descricao', 'valor_reais', 'tipo'],
+        },
+      },
+      {
+        name: 'criar_categoria',
+        description: 'Cria uma nova categoria ou subcategoria de receitas ou despesas no sistema financeiro da família.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            nome: {
+              type: 'STRING',
+              description: 'Nome da categoria a ser criada (ex: Pets & Veterinário, Serviços de Streaming, Aplicativos de Transporte).',
+            },
+            tipo: {
+              type: 'STRING',
+              enum: ['DESPESA', 'RECEITA'],
+              description: 'Tipo da categoria: DESPESA para gastos ou RECEITA para fontes de renda.',
+            },
+            cor: {
+              type: 'STRING',
+              description: 'Código de cor hexadecimal para identificação visual (ex: #10b981, #f59e0b, #6366f1, #ec4899).',
+            },
+            parentId: {
+              type: 'STRING',
+              description: 'ID ou nome aproximado da categoria pai caso seja uma subcategoria (opcional).',
+            },
+            teto_mensal_reais: {
+              type: 'NUMBER',
+              description: 'Teto ou limite orçamentário mensal sugerido em reais para esta categoria (opcional).',
+            },
+          },
+          required: ['nome', 'tipo'],
+        },
+      },
+      {
+        name: 'criar_transferencia',
+        description: 'Lança uma transferência ou Pix nativo entre duas contas bancárias da família, movimentando saldos sem afetar receitas ou despesas do mês.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            conta_origem_nome: {
+              type: 'STRING',
+              description: 'Nome da conta bancária de origem onde o dinheiro sairá (ex: Conta Corrente Principal, Inter, Nubank).',
+            },
+            conta_destino_nome: {
+              type: 'STRING',
+              description: 'Nome da conta bancária de destino onde o dinheiro entrará (ex: Nubank, Inter, Banco do Brasil).',
+            },
+            valor_reais: {
+              type: 'NUMBER',
+              description: 'Valor numérico positivo em reais a transferir (ex: 300.00).',
+            },
+            data: {
+              type: 'STRING',
+              description: 'Data no formato ISO YYYY-MM-DD em que a transferência ocorreu ou ocorrerá (opcional, hoje por padrão).',
+            },
+            descricao: {
+              type: 'STRING',
+              description: 'Descrição ou motivo da transferência / Pix (ex: Pix para compras da semana, Transferência de reserva).',
+            },
+          },
+          required: ['conta_origem_nome', 'conta_destino_nome', 'valor_reais'],
+        },
+      },
+      {
+        name: 'atualizar_cotacao_ativo',
+        description: 'Atualiza a cotação/preço unitário atual de um ativo da carteira de investimentos (cripto, ação, FII ou título do Tesouro), recalculando o saldo e rentabilidade imediatamente.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            ticker_ou_nome: {
+              type: 'STRING',
+              description: 'Ticker (ex: BTC, ETH, PETR4, VALE3, MXRF11, TESOURO_SELIC_2029) ou nome do ativo cadastrado na carteira.',
+            },
+            novo_preco_reais: {
+              type: 'NUMBER',
+              description: 'Novo preço unitário de mercado do ativo em reais (ex: 390000.00 para Bitcoin, 38.50 para Petrobras, 10.45 para MXRF11).',
+            },
+          },
+          required: ['ticker_ou_nome', 'novo_preco_reais'],
+        },
+      },
+      {
+        name: 'aportar_cofrinho',
+        description: 'Realiza um aporte financeiro da conta corrente para um cofrinho ou meta de reserva de emergência da família via transferência nativa.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            cofrinho_nome: {
+              type: 'STRING',
+              description: 'Nome exato ou aproximado do cofrinho ou meta de reserva (ex: Reserva de Emergência Familiar, Caixinha Viagem de Férias).',
+            },
+            conta_origem_nome: {
+              type: 'STRING',
+              description: 'Nome da conta bancária de origem onde o dinheiro sairá (opcional, utiliza a conta vinculada ou principal por padrão).',
+            },
+            valor_reais: {
+              type: 'NUMBER',
+              description: 'Valor numérico positivo em reais a ser aportado no cofrinho (ex: 500.00).',
+            },
+          },
+          required: ['cofrinho_nome', 'valor_reais'],
         },
       },
       {
@@ -614,6 +823,15 @@ export const sendMessageToGemini = async ({
     const lastTool = toolExecutions[0];
     if (lastTool.name === 'criar_transacao') {
       textReply = `Pronto! Registrei o lançamento de **${lastTool.args.descricao}** no valor de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** com sucesso.`;
+    } else if (lastTool.name === 'criar_categoria') {
+      const tipoLabel = lastTool.args.tipo === 'INCOME' ? 'Receitas' : 'Despesas';
+      textReply = `Pronto! Criei a categoria **${lastTool.args.nome}** em **${tipoLabel}** com sucesso.`;
+    } else if (lastTool.name === 'criar_transferencia') {
+      textReply = `Pronto! Registrei a transferência de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** de **${lastTool.args.conta_origem_nome}** para **${lastTool.args.conta_destino_nome}** com sucesso.`;
+    } else if (lastTool.name === 'atualizar_cotacao_ativo') {
+      textReply = `Pronto! Atualizei a cotação do ativo **${lastTool.args.ticker_ou_nome}** para **${formatMoney(Math.round(lastTool.args.novo_preco_reais * 100))}** com sucesso.`;
+    } else if (lastTool.name === 'aportar_cofrinho') {
+      textReply = `Pronto! Realizei o aporte de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** no cofrinho **${lastTool.args.cofrinho_nome}** com sucesso.`;
     } else if (lastTool.name === 'simular_cenario') {
       textReply = `Pronto! Criei a simulação do cenário **${lastTool.args.titulo}** com impacto de **${formatMoney(Math.round(lastTool.args.valor_mensal * 100))}/mês** por **${lastTool.args.duracao_meses} meses**.`;
     }

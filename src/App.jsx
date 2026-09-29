@@ -261,6 +261,14 @@ function AppContent() {
     setIsAuthModalOpen,
     handleAICreateTransaction,
     handleAICreateScenario,
+    handleAICreateCategory,
+    handleAICreateTransfer,
+    handleAIUpdateAssetPrice,
+    handleAIAporteSavingsGoal,
+    householdMembers,
+    familyName,
+    savingsGoals,
+    portfolioAssets,
     isFamilyManagementOpen,
     setIsFamilyManagementOpen,
     isUserSuspended,
@@ -897,8 +905,18 @@ function AppContent() {
         monthSummary={monthSummary}
         dashboardEnvelopes={dashboardEnvelopes}
         isDemo={Boolean(isDemoModeState)}
+        savingsGoals={savingsGoals}
+        savingsGoalBalances={savingsGoalBalances}
+        portfolioAssets={portfolioAssets}
+        portfolioSummary={portfolioSummary}
+        householdMembers={householdMembers}
+        familyName={familyName}
         onCreateTransaction={handleAICreateTransaction}
         onCreateScenario={handleAICreateScenario}
+        onCreateCategory={handleAICreateCategory}
+        onCreateTransfer={handleAICreateTransfer}
+        onUpdateAssetPrice={handleAIUpdateAssetPrice}
+        onAporteSavingsGoal={handleAIAporteSavingsGoal}
         onNavigateTab={(tab) => setActiveTab(tab)}
       />
     </div>

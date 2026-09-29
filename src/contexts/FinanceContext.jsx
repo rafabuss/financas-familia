@@ -4165,6 +4165,283 @@ export function FinanceProvider({ children }) {
     };
   };
 
+  // Criação autônoma de categoria ou subcategoria pelo Assistente IA (Fase 9)
+  const handleAICreateCategory = async ({
+    nome,
+    tipo = 'EXPENSE',
+    cor,
+    parentId,
+    teto_mensal_reais,
+  }) => {
+    if (!nome || !nome.trim()) {
+      throw new Error('O nome da categoria é obrigatório.');
+    }
+
+    const normalizedType = String(tipo || 'EXPENSE').toUpperCase().includes('INC') ? 'INCOME' : 'EXPENSE';
+
+    // Se parentId foi fornecido, tenta resolver por ID exato ou por nome
+    let resolvedParentId = null;
+    let parentCatObj = null;
+    if (parentId) {
+      const pQuery = String(parentId).trim().toLowerCase();
+      parentCatObj = categories.find((c) => c.id === parentId || c.name.toLowerCase() === pQuery || c.name.toLowerCase().includes(pQuery));
+      if (parentCatObj) {
+        resolvedParentId = parentCatObj.id;
+      }
+    }
+
+    const budgetLimitCents = teto_mensal_reais ? Math.max(0, Math.round(Number(teto_mensal_reais) * 100)) : 0;
+    const id = `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const defaultColor = normalizedType === 'INCOME' ? '#16a34a' : '#2563eb';
+
+    const newCat = {
+      id,
+      name: nome.trim(),
+      type: normalizedType,
+      color: cor || defaultColor,
+      archived: false,
+      budgetLimitCents,
+      parentId: resolvedParentId,
+    };
+
+    const isDemo = isDemoModeState || isDemoMode();
+    if (isDemo) {
+      setCategories((prev) => {
+        const updated = [...prev, newCat];
+        saveToLocalStorage(STORAGE_KEYS.categories, updated);
+        return updated;
+      });
+    } else {
+      markCategoryPending(newCat.id);
+      setCategories((prev) => {
+        const updated = [...prev, newCat];
+        saveToLocalStorage(STORAGE_KEYS.categories, updated);
+        return updated;
+      });
+      await syncItem('categories', newCat);
+    }
+
+    return {
+      success: true,
+      category: newCat,
+      parentCategoryName: parentCatObj ? parentCatObj.name : null,
+    };
+  };
+
+  // Criação autônoma de transferência/Pix entre contas pelo Assistente IA (Fase 9)
+  const handleAICreateTransfer = async ({
+    conta_origem_nome,
+    conta_destino_nome,
+    valor_reais,
+    data,
+    descricao,
+  }) => {
+    const amountCents = Math.round(Math.abs(Number(valor_reais || 0)) * 100);
+    if (amountCents <= 0) {
+      throw new Error('O valor da transferência deve ser maior que zero.');
+    }
+
+    const activeAccounts = accounts.filter((a) => !a.archived);
+    if (activeAccounts.length < 2) {
+      throw new Error('É necessário ter ao menos duas contas cadastradas para realizar transferências.');
+    }
+
+    const origQuery = String(conta_origem_nome || '').trim().toLowerCase();
+    const destQuery = String(conta_destino_nome || '').trim().toLowerCase();
+
+    const findAccount = (query) => {
+      if (!query) return null;
+      return (
+        activeAccounts.find((a) => a.name.toLowerCase() === query) ||
+        activeAccounts.find((a) => a.name.toLowerCase().includes(query) || query.includes(a.name.toLowerCase())) ||
+        activeAccounts.find((a) => a.bank && (a.bank.toLowerCase().includes(query) || query.includes(a.bank.toLowerCase())))
+      );
+    };
+
+    let origAcc = findAccount(origQuery);
+    let destAcc = findAccount(destQuery);
+
+    if (!origAcc) {
+      throw new Error(
+        `Conta de origem "${conta_origem_nome}" não encontrada. Contas disponíveis: ${activeAccounts.map((a) => a.name).join(', ')}`
+      );
+    }
+    if (!destAcc) {
+      throw new Error(
+        `Conta de destino "${conta_destino_nome}" não encontrada. Contas disponíveis: ${activeAccounts.map((a) => a.name).join(', ')}`
+      );
+    }
+    if (origAcc.id === destAcc.id) {
+      throw new Error('A conta de origem e de destino não podem ser iguais.');
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const txDate = data && /^\d{4}-\d{2}-\d{2}$/.test(data) ? data : todayStr;
+    const transferCat = categories.find((c) => c.id === 'cat-transferencia' || c.type === 'TRANSFER');
+
+    const tx = {
+      id: `tx-transf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      description: descricao?.trim() || `Transferência: ${origAcc.name} ➔ ${destAcc.name}`,
+      amountCents,
+      type: 'TRANSFER',
+      status: 'REALIZADO',
+      date: txDate,
+      dueDate: txDate,
+      purchaseDate: txDate,
+      accountId: origAcc.id,
+      destinationAccountId: destAcc.id,
+      savingsGoalId: null,
+      cardId: null,
+      categoryId: transferCat?.id || 'cat-transferencia',
+      scope: 'FAMILY',
+      ownerId: (currentMemberId && currentMemberId !== 'user-all') ? currentMemberId : 'user-all',
+      _localUpdatedAt: Date.now(),
+    };
+
+    const isDemo = isDemoModeState || isDemoMode();
+    if (isDemo) {
+      setTransactions((prev) => {
+        const next = [tx, ...prev];
+        saveToLocalStorage(STORAGE_KEYS.transactions, next);
+        return next;
+      });
+    } else {
+      markTransactionPending(tx.id);
+      setTransactions((prev) => {
+        const next = [tx, ...prev];
+        saveToLocalStorage(STORAGE_KEYS.transactions, next);
+        return next;
+      });
+      await syncItem('transactions', tx);
+    }
+
+    return {
+      success: true,
+      transfer: tx,
+      originAccountName: origAcc.name,
+      destinationAccountName: destAcc.name,
+      amountCents,
+    };
+  };
+
+  // Atualização autônoma de cotação de ativo na carteira pelo Assistente IA (Fase 9)
+  const handleAIUpdateAssetPrice = async ({
+    ticker_ou_nome,
+    novo_preco_reais,
+  }) => {
+    const newPrice = Number(novo_preco_reais);
+    if (isNaN(newPrice) || newPrice <= 0) {
+      throw new Error('O novo preço do ativo deve ser um valor numérico positivo.');
+    }
+
+    const query = String(ticker_ou_nome || '').trim().toLowerCase();
+    if (!query) {
+      throw new Error('Informe o ticker ou nome do ativo.');
+    }
+
+    const asset = portfolioAssets.find(
+      (a) =>
+        a.ticker.toLowerCase() === query ||
+        a.name.toLowerCase() === query ||
+        a.ticker.toLowerCase().includes(query) ||
+        a.name.toLowerCase().includes(query) ||
+        query.includes(a.ticker.toLowerCase())
+    );
+
+    if (!asset) {
+      const available = portfolioAssets.map((a) => `${a.ticker} (${a.name})`).join(', ');
+      throw new Error(`Ativo "${ticker_ou_nome}" não encontrado na carteira. Ativos cadastrados: ${available}`);
+    }
+
+    const newPriceCents = Math.round(newPrice * 100);
+    const previousPriceCents = asset.currentPriceCents;
+    const updated = await handleUpdateAssetPrice(asset.id, newPriceCents);
+
+    const totalCurrentValueCents = Math.round(asset.quantity * newPriceCents);
+    const totalCostCents = Math.round(asset.quantity * asset.averagePriceCents);
+    const profitCents = totalCurrentValueCents - totalCostCents;
+    const profitPercent = totalCostCents > 0 ? (profitCents / totalCostCents) * 100 : 0;
+
+    return {
+      success: true,
+      asset: updated || { ...asset, currentPriceCents: newPriceCents },
+      previousPriceCents,
+      newPriceCents,
+      quantity: asset.quantity,
+      totalCurrentValueCents,
+      profitCents,
+      profitPercent,
+    };
+  };
+
+  // Aporte autônomo em cofrinho de reserva pelo Assistente IA (Fase 9)
+  const handleAIAporteSavingsGoal = async ({
+    cofrinho_nome,
+    conta_origem_nome,
+    valor_reais,
+  }) => {
+    const amountCents = Math.round(Math.abs(Number(valor_reais || 0)) * 100);
+    if (amountCents <= 0) {
+      throw new Error('O valor do aporte deve ser maior que zero.');
+    }
+
+    const query = String(cofrinho_nome || '').trim().toLowerCase();
+    const goal = savingsGoals.find(
+      (g) =>
+        g.name.toLowerCase() === query ||
+        g.name.toLowerCase().includes(query) ||
+        query.includes(g.name.toLowerCase())
+    );
+
+    if (!goal) {
+      const available = savingsGoals.map((g) => g.name).join(', ');
+      throw new Error(`Cofrinho "${cofrinho_nome}" não encontrado. Cofrinhos disponíveis: ${available}`);
+    }
+
+    let origAcc = null;
+    if (conta_origem_nome) {
+      const accQuery = String(conta_origem_nome).trim().toLowerCase();
+      origAcc = accounts.find(
+        (a) =>
+          !a.archived &&
+          (a.name.toLowerCase() === accQuery ||
+            a.name.toLowerCase().includes(accQuery) ||
+            accQuery.includes(a.name.toLowerCase()) ||
+            (a.bank && a.bank.toLowerCase().includes(accQuery)))
+      );
+    }
+
+    if (!origAcc && goal.linkedAccountId) {
+      origAcc = accounts.find((a) => a.id === goal.linkedAccountId && !a.archived);
+    }
+    if (!origAcc) {
+      origAcc = accounts.find((a) => !a.archived && a.type === 'corrente') || accounts.find((a) => !a.archived);
+    }
+    if (!origAcc) {
+      throw new Error('Nenhuma conta bancária de origem encontrada para realizar o aporte.');
+    }
+
+    const tx = await handleSavingsGoalAporte({
+      goalId: goal.id,
+      originAccountId: origAcc.id,
+      amountCents,
+      description: `Aporte Cofrinho: ${origAcc.name} ➔ ${goal.name}`,
+    });
+
+    const currentGoalBalance = (savingsGoalBalances[goal.id] ?? goal.currentBalanceCents ?? 0) + amountCents;
+    const targetPercent = goal.targetCents > 0 ? (currentGoalBalance / goal.targetCents) * 100 : 0;
+
+    return {
+      success: true,
+      transaction: tx,
+      goalName: goal.name,
+      originAccountName: origAcc.name,
+      amountCents,
+      newGoalBalanceCents: currentGoalBalance,
+      targetPercent,
+    };
+  };
+
   // Abre o modal de pagamento da fatura consolidada de um cartão para um determinado mês
   const openInvoicePaymentModal = (card, monthKey, requestedMode = null) => {
     if (!card) return;
@@ -5681,16 +5958,16 @@ export function FinanceProvider({ children }) {
       });
       setCurrentMemberId('user-2');
     } else if (memberKey === 'user-3') {
-      const alice = householdMembers.find((m) => m.memberKey === 'user-3') || {};
+      const camila = householdMembers.find((m) => m.memberKey === 'user-3') || {};
       setCurrentUser({
         id: 'demo-user-3',
-        name: 'Alice - Filha (13 anos)',
-        email: 'alice@familia.com',
-        role: alice.role || 'member',
+        name: camila.displayName || 'Camila Silva - Filha (14 anos)',
+        email: camila.email || 'camila@familia.com',
+        role: camila.role || 'member',
         memberKey: 'user-3',
-        status: alice.status || 'active',
-        visibleEntities: alice.visibleEntities || ['user-3'],
-        hiddenAccountIds: alice.hiddenAccountIds || ['demo-acc-3'],
+        status: camila.status || 'active',
+        visibleEntities: camila.visibleEntities || ['user-3'],
+        hiddenAccountIds: camila.hiddenAccountIds || ['demo-acc-3'],
       });
       setCurrentMemberId('user-3');
     }
@@ -5963,6 +6240,10 @@ export function FinanceProvider({ children }) {
     handleResolveCategoryConflict,
     handleAICreateTransaction,
     handleAICreateScenario,
+    handleAICreateCategory,
+    handleAICreateTransfer,
+    handleAIUpdateAssetPrice,
+    handleAIAporteSavingsGoal,
   };
 
   return (

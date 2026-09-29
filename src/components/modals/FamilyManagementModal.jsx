@@ -350,7 +350,7 @@ export default function FamilyManagementModal({
                         required
                         value={newMemberName}
                         onChange={(e) => setNewMemberName(e.target.value)}
-                        placeholder="Ex: Alice (Filha) ou Pedro"
+                        placeholder="Ex: Camila (Filha) ou Pedro"
                         className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
                       />
                     </div>

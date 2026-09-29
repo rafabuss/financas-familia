@@ -356,15 +356,15 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
     - Botões rápidos *"Carregar Extrato OFX de Exemplo (BB)"* e *"Carregar Fatura OFX de Exemplo (Nubank)"* para testes instantâneos em 1 clique com os 3 estados de conciliação.
     - Persistência sem duplicações: itens conciliados atualizam a transação manual e itens novos são criados e sincronizados no Supabase e no cache local.
 
-- [ ] **Fase 9: IA Financeira Omnipresente (360°) & Showcase de Dados Demo**
-  - [ ] **IA 360° em Todos os Módulos do Sistema (`src/services/aiService.js`):**
-    - **Lançamentos & Categorização:** Ferramenta `criar_categoria` e `sugerir_categorias` (análise preditiva de gastos existentes para detectar padrões e criar/sugerir novas categorias e subcategorias com 1 clique).
-    - **Transferências & Pix:** Ferramenta `criar_transferencia` para lançar movimentações entre contas por comandos de voz/texto sem distorcer o DRE.
-    - **Investimentos & Cofrinhos:** Injeção do patrimônio no contexto do prompt e ferramentas `atualizar_cotacao_ativo` e `aportar_cofrinho` (consultoria completa de rentabilidade, cotações de cripto/ações e metas de reserva).
-    - **Gestão da Família:** Leitura da estrutura familiar e matriz de permissões para responder dúvidas de acessos de dependentes e orientar a governança da família.
-    - **Importações & Conciliação:** Capacidade de analisar despesas importadas via OFX/PDF, detectando cobranças duplicadas, taxas bancárias ocultas e assinaturas recorrentes.
-  - [ ] **Showcase Completo dos Dados de Demonstração (`src/data/demoData.js`):**
-    - Sincronização e enriquecimento de 100% dos dados fictícios da *Família Silva* cobrindo todas as novidades recentes (faturas pagas e abertas, transferências Pix, Cofrinho do Inter, Cripto/Ações, arquivos OFX pré-carregados e filha Camila com matriz de permissões restritas).
+- [x] **Fase 9: IA Financeira Omnipresente (360°) & Showcase de Dados Demo**
+  - [x] **IA 360° em Todos os Módulos do Sistema (`src/services/aiService.js` & `AIChatDrawer.jsx`):**
+    - **Lançamentos & Categorização:** Ferramenta `criar_categoria` e consultoria preditiva (análise de padrões de despesas recorrentes como streaming, pets e transporte por app, sugerindo e criando categorias e subcategorias com 1 clique).
+    - **Transferências & Pix:** Ferramenta `criar_transferencia` para lançar movimentações e Pix entre contas por comandos em linguagem natural sem distorcer o DRE.
+    - **Investimentos & Cofrinhos:** Injeção do patrimônio líquido consolidado no System Prompt e ferramentas `atualizar_cotacao_ativo` e `aportar_cofrinho` (consultoria completa de rentabilidade, cotações e metas de reserva).
+    - **Gestão da Família:** Leitura da estrutura familiar e matriz de permissões para governança completa.
+    - **Cards Visuais de Ação:** Cards modernos de feedback no chat para cada ação executada (categorias criadas, Pix lançados, cotações atualizadas e aportes com atalhos de navegação).
+  - [x] **Showcase Completo dos Dados de Demonstração (`src/data/demoData.js`):**
+    - Sincronização e harmonização de 100% dos dados fictícios da *Família Silva* cobrindo todas as novidades recentes (faturas pagas e abertas, transferências Pix, Cofrinhos com rendimento CDI e metas realistas, Cripto/Ações com BTC, ETH, PETR4, VALE3, MXRF11 e Tesouro Selic, botões de teste OFX em 1 clique e filha Camila com matriz de permissões restritas aos próprios gastos).
 
 - [ ] **Fase 10: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
   - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).

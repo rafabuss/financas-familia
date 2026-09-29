@@ -360,7 +360,7 @@ export default function Navbar({
                               : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                           }`}
                         >
-                          <span>👧 Alice - Filha (13 anos)</span>
+                          <span>👧 Camila - Filha (14 anos)</span>
                           {currentUser?.memberKey === 'user-3' && (
                             <span className="text-[10px] text-pink-400 font-bold">Ativo</span>
                           )}

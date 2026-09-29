@@ -7,7 +7,14 @@ import {
   Key,
   CheckCircle2,
   TrendingUp,
+  TrendingDown,
   ArrowRight,
+  ArrowRightLeft,
+  Tag,
+  FolderPlus,
+  PiggyBank,
+  Coins,
+  Wallet,
   ExternalLink,
   Eye,
   EyeOff,
@@ -124,8 +131,18 @@ export default function AIChatDrawer({
   monthSummary = {},
   dashboardEnvelopes = {},
   isDemo = false,
+  savingsGoals = [],
+  savingsGoalBalances = {},
+  portfolioAssets = [],
+  portfolioSummary = {},
+  householdMembers = [],
+  familyName = '',
   onCreateTransaction,
   onCreateScenario,
+  onCreateCategory,
+  onCreateTransfer,
+  onUpdateAssetPrice,
+  onAporteSavingsGoal,
   onNavigateTab,
 }) {
   const [internalIsOpen, setInternalIsOpen] = useState(false);
@@ -210,7 +227,7 @@ export default function AIChatDrawer({
     }
   }, [dashboardMonth]);
 
-  // Contexto financeiro atualizado para envio ao Gemini
+  // Contexto financeiro 360° atualizado para envio ao Gemini
   const financialContext = useMemo(() => {
     return {
       dashboardMonth,
@@ -223,6 +240,13 @@ export default function AIChatDrawer({
       monthSummary,
       dashboardEnvelopes,
       isDemo,
+      savingsGoals,
+      savingsGoalBalances,
+      portfolioAssets,
+      portfolioSummary,
+      householdMembers,
+      familyName,
+      recentTransactions: transactions,
     };
   }, [
     dashboardMonth,
@@ -235,15 +259,54 @@ export default function AIChatDrawer({
     monthSummary,
     dashboardEnvelopes,
     isDemo,
+    savingsGoals,
+    savingsGoalBalances,
+    portfolioAssets,
+    portfolioSummary,
+    householdMembers,
+    familyName,
+    transactions,
   ]);
 
-  // Manipulador de Tool Calling para execução de transações e simulações
+  // Manipulador de Tool Calling para execução de todas as ações pelo Gemini (Fase 9)
   const handleExecuteTool = async (name, args) => {
     if (name === 'criar_transacao') {
       if (!onCreateTransaction) {
         throw new Error('Função de criação de transação não disponível.');
       }
       const result = await onCreateTransaction(args);
+      return result;
+    }
+
+    if (name === 'criar_categoria') {
+      if (!onCreateCategory) {
+        throw new Error('Função de criação de categoria não disponível.');
+      }
+      const result = await onCreateCategory(args);
+      return result;
+    }
+
+    if (name === 'criar_transferencia') {
+      if (!onCreateTransfer) {
+        throw new Error('Função de transferência não disponível.');
+      }
+      const result = await onCreateTransfer(args);
+      return result;
+    }
+
+    if (name === 'atualizar_cotacao_ativo') {
+      if (!onUpdateAssetPrice) {
+        throw new Error('Função de atualização de cotação não disponível.');
+      }
+      const result = await onUpdateAssetPrice(args);
+      return result;
+    }
+
+    if (name === 'aportar_cofrinho') {
+      if (!onAporteSavingsGoal) {
+        throw new Error('Função de aporte em cofrinho não disponível.');
+      }
+      const result = await onAporteSavingsGoal(args);
       return result;
     }
 
@@ -287,7 +350,7 @@ export default function AIChatDrawer({
         model: activeModel,
       });
 
-      // Se executou alguma ferramenta, prepara os cards de ação
+      // Se executou alguma ferramenta, prepara os cards visuais de ação (Fase 9)
       let actionCards = [];
       if (response.toolExecutions?.length > 0) {
         actionCards = response.toolExecutions.map((exec) => {
@@ -297,6 +360,45 @@ export default function AIChatDrawer({
               data: exec.result.transaction,
               categoryName: exec.result.categoryName || exec.args.categoria_nome,
               sourceName: exec.result.sourceName || exec.args.conta_ou_cartao_nome,
+            };
+          }
+          if (exec.name === 'criar_categoria' && exec.result?.category) {
+            return {
+              type: 'CATEGORY_CREATED',
+              data: exec.result.category,
+              parentName: exec.result.parentCategoryName,
+            };
+          }
+          if (exec.name === 'criar_transferencia' && exec.result?.transfer) {
+            return {
+              type: 'TRANSFER_CREATED',
+              data: exec.result.transfer,
+              originName: exec.result.originAccountName,
+              destinationName: exec.result.destinationAccountName,
+              amountCents: exec.result.amountCents,
+            };
+          }
+          if (exec.name === 'atualizar_cotacao_ativo' && exec.result?.asset) {
+            return {
+              type: 'ASSET_PRICE_UPDATED',
+              data: exec.result.asset,
+              previousPriceCents: exec.result.previousPriceCents,
+              newPriceCents: exec.result.newPriceCents,
+              quantity: exec.result.quantity,
+              totalCurrentValueCents: exec.result.totalCurrentValueCents,
+              profitCents: exec.result.profitCents,
+              profitPercent: exec.result.profitPercent,
+            };
+          }
+          if (exec.name === 'aportar_cofrinho' && exec.result?.transaction) {
+            return {
+              type: 'SAVINGS_APORTE_CREATED',
+              data: exec.result.transaction,
+              goalName: exec.result.goalName,
+              originName: exec.result.originAccountName,
+              amountCents: exec.result.amountCents,
+              newGoalBalanceCents: exec.result.newGoalBalanceCents,
+              targetPercent: exec.result.targetPercent,
             };
           }
           if (exec.name === 'simular_cenario' && exec.result?.scenario) {
@@ -388,10 +490,13 @@ export default function AIChatDrawer({
   };
 
   const quickChips = [
-    { label: '📊 Resumo do mês', prompt: 'Faça um resumo geral da nossa situação financeira neste mês.' },
-    { label: '💳 Situação das faturas', prompt: 'Como estão as faturas dos meus cartões de crédito e limites disponíveis?' },
+    { label: '💡 Sugira novas categorias com base nos meus gastos', prompt: 'Sugira novas categorias com base nos meus gastos recentes e nos padrões de consumo.' },
+    { label: '💰 Qual é o nosso patrimônio líquido total?', prompt: 'Qual é o nosso patrimônio líquido total consolidado (contas correntes, cofrinhos e investimentos)?' },
+    { label: '🪙 Como está o rendimento das minhas criptos e ações?', prompt: 'Como está o rendimento e a rentabilidade da nossa carteira de investimentos (ações, FIIs, criptos e Tesouro)?' },
+    { label: '🔄 Fiz um Pix de R$ 300 do Itaú para o Nubank', prompt: 'Fiz um Pix de R$ 300 da Conta Corrente Principal para o Nubank.' },
+    { label: '📊 Resumo geral do mês', prompt: 'Faça um resumo geral da nossa situação financeira neste mês.' },
+    { label: '💳 Situação das faturas e limites', prompt: 'Como estão as faturas dos meus cartões de crédito e limites disponíveis?' },
     { label: '✉️ Como estão meus envelopes?', prompt: 'Quais envelopes orçamentários estão no limite ou estourados neste mês?' },
-    { label: '💡 Dicas para economizar', prompt: 'Analisando meus gastos deste mês, quais dicas práticas você me dá para economizar?' },
   ];
 
   return (
@@ -617,6 +722,194 @@ export default function AIChatDrawer({
                                     className="w-full text-center py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1 shadow-2xs"
                                   >
                                     <span>Ver no Extrato</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (card.type === 'CATEGORY_CREATED') {
+                            const cat = card.data;
+                            const isExpense = cat.type === 'EXPENSE';
+                            return (
+                              <div
+                                key={cIdx}
+                                className="p-3 bg-emerald-50/90 border border-emerald-200/90 rounded-xl space-y-2 shadow-2xs"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-1.5 text-emerald-800">
+                                    <FolderPlus className="w-4 h-4 text-emerald-600" />
+                                    <span className="text-[11px] font-bold uppercase tracking-wide">
+                                      Categoria Criada
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                      isExpense ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                                    }`}
+                                  >
+                                    {isExpense ? 'Despesa' : 'Receita'}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-700">
+                                  <div className="flex items-center space-x-2">
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
+                                      style={{ backgroundColor: cat.color || '#10b981' }}
+                                    />
+                                    <strong className="text-slate-900">{cat.name}</strong>
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-x-2">
+                                    {card.parentName && (
+                                      <span>Subcategoria de: <strong>{card.parentName}</strong></span>
+                                    )}
+                                    {cat.budgetLimitCents > 0 && (
+                                      <span>Teto planejado: <strong>{formatMoney(cat.budgetLimitCents)}/mês</strong></span>
+                                    )}
+                                  </div>
+                                </div>
+                                {onNavigateTab && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateTab('categories')}
+                                    className="w-full text-center py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1 shadow-2xs"
+                                  >
+                                    <span>Ver em Categorias</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (card.type === 'TRANSFER_CREATED') {
+                            const tx = card.data;
+                            return (
+                              <div
+                                key={cIdx}
+                                className="p-3 bg-blue-50/90 border border-blue-200/90 rounded-xl space-y-2 shadow-2xs"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-1.5 text-blue-900">
+                                    <ArrowRightLeft className="w-4 h-4 text-blue-600" />
+                                    <span className="text-[11px] font-bold uppercase tracking-wide">
+                                      Transferência / Pix Registrado
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-bold text-blue-700">
+                                    {formatMoney(card.amountCents)}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-700">
+                                  <div className="flex items-center space-x-1.5 font-medium text-slate-900">
+                                    <span>{card.originName}</span>
+                                    <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+                                    <span>{card.destinationName}</span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {tx.description} • {tx.date}
+                                  </p>
+                                  <p className="text-[10px] text-blue-600/90 mt-1 italic">
+                                    Saldos movimentados sem afetar receitas ou despesas do mês.
+                                  </p>
+                                </div>
+                                {onNavigateTab && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateTab('transactions')}
+                                    className="w-full text-center py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1 shadow-2xs"
+                                  >
+                                    <span>Ver no Extrato</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (card.type === 'ASSET_PRICE_UPDATED') {
+                            const asset = card.data;
+                            const isPositive = (card.profitCents ?? 0) >= 0;
+                            return (
+                              <div
+                                key={cIdx}
+                                className="p-3 bg-purple-50/90 border border-purple-200/90 rounded-xl space-y-2 shadow-2xs"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-1.5 text-purple-900">
+                                    <TrendingUp className="w-4 h-4 text-purple-600" />
+                                    <span className="text-[11px] font-bold uppercase tracking-wide">
+                                      Cotação de Ativo Atualizada
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-bold text-purple-800">
+                                    {formatMoney(card.newPriceCents)}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-700">
+                                  <strong className="text-slate-900">{asset.ticker} • {asset.name}</strong>
+                                  <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
+                                    <div>
+                                      Preço anterior: <span className="line-through">{formatMoney(card.previousPriceCents)}</span> ➔ Novo: <strong>{formatMoney(card.newPriceCents)}</strong>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-0.5">
+                                      <span>Posição ({card.quantity} un): <strong>{formatMoney(card.totalCurrentValueCents)}</strong></span>
+                                      <span className={isPositive ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>
+                                        {isPositive ? '+' : ''}{(card.profitPercent || 0).toFixed(1)}%
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                {onNavigateTab && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateTab('portfolio')}
+                                    className="w-full text-center py-1.5 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1 shadow-2xs"
+                                  >
+                                    <span>Ver Carteira de Ativos</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (card.type === 'SAVINGS_APORTE_CREATED') {
+                            const tx = card.data;
+                            return (
+                              <div
+                                key={cIdx}
+                                className="p-3 bg-teal-50/90 border border-teal-200/90 rounded-xl space-y-2 shadow-2xs"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-1.5 text-teal-900">
+                                    <PiggyBank className="w-4 h-4 text-teal-600" />
+                                    <span className="text-[11px] font-bold uppercase tracking-wide">
+                                      Aporte em Cofrinho
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-bold text-teal-700">
+                                    +{formatMoney(card.amountCents)}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-700">
+                                  <strong className="text-slate-900">{card.goalName}</strong>
+                                  <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
+                                    <div>Origem: <strong>{card.originName}</strong></div>
+                                    <div className="flex items-center justify-between">
+                                      <span>Saldo da reserva: <strong>{formatMoney(card.newGoalBalanceCents)}</strong></span>
+                                      <span className="text-teal-700 font-semibold">{(card.targetPercent || 0).toFixed(0)}% da meta</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                {onNavigateTab && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateTab('savings')}
+                                    className="w-full text-center py-1.5 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1 shadow-2xs"
+                                  >
+                                    <span>Ver nos Cofrinhos</span>
                                     <ArrowRight className="w-3 h-3" />
                                   </button>
                                 )}

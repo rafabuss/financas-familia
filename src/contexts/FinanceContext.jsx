@@ -5264,6 +5264,57 @@ export function FinanceProvider({ children }) {
     );
   };
 
+  // Vinculação manual de conciliação com lançamento existente escolhido pelo usuário
+  const handleManualLinkReconciliation = (importItemId, existingTxId) => {
+    if (!importPreviewData) return;
+    const existing = transactions.find((t) => t.id === existingTxId);
+    if (!existing) return;
+
+    const isTransfer = existing.type === 'TRANSFER';
+    setImportPreviewData((prev) =>
+      prev
+        ? prev.map((item) => {
+            if (item.id !== importItemId) return item;
+            return {
+              ...item,
+              action: 'RECONCILE',
+              reconciliationStatus: 'SUGGEST_MATCH',
+              matchedTransactionId: existing.id,
+              matchedTransaction: existing,
+              reconcileBadge: isTransfer ? '🟡 Transferência Vinculada' : '🟡 Conciliação Manual',
+              reconcileMessage: `Vinculado manualmente a "${existing.description}" de ${formatDateBR(existing.purchaseDate || existing.date)} (${formatMoney(existing.amountCents)}).`,
+              categoryId: isTransfer ? existing.categoryId : (existing.categoryId || item.categoryId),
+              ownerId: existing.ownerId || item.ownerId,
+              scope: existing.scope || item.scope,
+              selected: true,
+            };
+          })
+        : prev
+    );
+  };
+
+  // Desvincula conciliação (volta para novo lançamento sem amarras)
+  const handleManualUnlinkReconciliation = (importItemId) => {
+    if (!importPreviewData) return;
+    setImportPreviewData((prev) =>
+      prev
+        ? prev.map((item) => {
+            if (item.id !== importItemId) return item;
+            return {
+              ...item,
+              action: 'IMPORT_NEW',
+              reconciliationStatus: 'NEW',
+              matchedTransactionId: null,
+              matchedTransaction: null,
+              reconcileBadge: '🟢 Novo Lançamento',
+              reconcileMessage: 'Importar como novo lançamento sem vínculo.',
+              selected: true,
+            };
+          })
+        : prev
+    );
+  };
+
   // Seleção e deseleção em massa
   const handleSelectAllImport = (select) => {
     setImportPreviewData((prev) => (prev ? prev.map((i) => ({ ...i, selected: select })) : prev));
@@ -6284,6 +6335,8 @@ export function FinanceProvider({ children }) {
     handleDeselectDuplicates,
     handleUpdateImportItem,
     handleConfirmImport,
+    handleManualLinkReconciliation,
+    handleManualUnlinkReconciliation,
     handleLoadSampleOfx,
     handleReconcileWithTarget,
     handleSplitImportItem,

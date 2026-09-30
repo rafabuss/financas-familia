@@ -237,14 +237,31 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
     defaultOwnerId = 'user-1',
   } = options;
 
-  // Filtra transações candidatas que pertencem ao mesmo destino ou não têm destino amarrado
+  // Filtra transações candidatas que pertencem ao mesmo destino ou envolvem esta conta em transferências
   const candidateTransactions = existingTransactions.filter((tx) => {
     if (targetType === 'CARD') {
       return !targetId || tx.cardId === targetId;
     } else {
-      return !targetId || tx.accountId === targetId;
+      // Conta bancária: transação própria da conta OU transferência recebida nesta conta (destinationAccountId)
+      return (
+        !targetId ||
+        tx.accountId === targetId ||
+        (tx.type === 'TRANSFER' && tx.destinationAccountId === targetId)
+      );
     }
   });
+
+  // Função auxiliar para verificar compatibilidade contábil entre tipo do extrato e transação existente
+  const isTypeCompatible = (t, itemType) => {
+    if (t.type === itemType) return true;
+    if (t.type === 'TRANSFER') {
+      // Transferência recebida nesta conta = crédito no extrato (INCOME)
+      if (itemType === 'INCOME' && (!targetId || t.destinationAccountId === targetId)) return true;
+      // Transferência enviada desta conta = débito no extrato (EXPENSE)
+      if (itemType === 'EXPENSE' && (!targetId || t.accountId === targetId)) return true;
+    }
+    return false;
+  };
 
   // Conjunto de IDs já casados para evitar casar dois itens importados na mesma transação manual
   const matchedExistingIds = new Set();
@@ -275,7 +292,7 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
         const tAmount = Math.abs(t.amountCents || 0);
         if (tAmount !== itemAmountCents) return false;
         if (tDate !== itemDate) return false;
-        if (t.type !== itemType) return false;
+        if (!isTypeCompatible(t, itemType)) return false;
 
         const normTDesc = normalizeString(t.description);
         // Descrição idêntica ou uma contém a outra
@@ -289,6 +306,7 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
 
     if (duplicateMatch) {
       matchedExistingIds.add(duplicateMatch.id);
+      const isTransfer = duplicateMatch.type === 'TRANSFER';
       const suggestedCatId =
         duplicateMatch.categoryId ||
         item.categoryId ||
@@ -301,7 +319,7 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
         action: 'IGNORE', // 'IGNORE' | 'IMPORT_NEW'
         matchedTransactionId: duplicateMatch.id,
         matchedTransaction: duplicateMatch,
-        reconcileBadge: '🔴 Já Registrado',
+        reconcileBadge: isTransfer ? '🔴 Transferência já Registrada' : '🔴 Já Registrado',
         reconcileMessage: `Identificado anteriormente como "${duplicateMatch.description}" em ${formatDateBR(duplicateMatch.purchaseDate || duplicateMatch.date)} (${duplicateMatch.fitId ? 'FITID ' + duplicateMatch.fitId : 'Dados exatos'}).`,
         categoryId: suggestedCatId,
         ownerId: duplicateMatch.ownerId || item.ownerId || defaultOwnerId,
@@ -318,7 +336,7 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
       if (matchedExistingIds.has(t.id)) return false;
       const tAmount = Math.abs(t.amountCents || 0);
       if (tAmount !== itemAmountCents) return false;
-      if (t.type !== itemType) return false;
+      if (!isTypeCompatible(t, itemType)) return false;
 
       const tDate = t.purchaseDate || t.date;
       const diffDays = calculateDateDiffDays(tDate, itemDate);
@@ -327,6 +345,7 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
 
     if (smartMatch) {
       matchedExistingIds.add(smartMatch.id);
+      const isTransfer = smartMatch.type === 'TRANSFER';
       const suggestedCatId =
         smartMatch.categoryId ||
         item.categoryId ||
@@ -339,8 +358,10 @@ export function reconcileTransactions(importedItems = [], existingTransactions =
         action: 'RECONCILE', // 'RECONCILE' (atualiza existente) | 'IMPORT_NEW' (cria nova)
         matchedTransactionId: smartMatch.id,
         matchedTransaction: smartMatch,
-        reconcileBadge: '🟡 Sugestão de Conciliação',
-        reconcileMessage: `Lançamento manual compatível: "${smartMatch.description}" de ${formatDateBR(smartMatch.purchaseDate || smartMatch.date)}. Escolha conciliar ou importar como novo.`,
+        reconcileBadge: isTransfer ? '🟡 Transferência/Resgate Identificado' : '🟡 Sugestão de Conciliação',
+        reconcileMessage: isTransfer
+          ? `Transferência/Resgate compatível: "${smartMatch.description}" de ${formatDateBR(smartMatch.purchaseDate || smartMatch.date)}. Escolha conciliar para evitar duplicação no saldo/DRE.`
+          : `Lançamento manual compatível: "${smartMatch.description}" de ${formatDateBR(smartMatch.purchaseDate || smartMatch.date)}. Escolha conciliar ou importar como novo.`,
         categoryId: suggestedCatId,
         ownerId: smartMatch.ownerId || item.ownerId || defaultOwnerId,
         scope: smartMatch.scope || item.scope || 'FAMILY',

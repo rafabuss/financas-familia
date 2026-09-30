@@ -19,6 +19,10 @@ import {
   ArrowRight,
   ShieldCheck,
   Edit3,
+  Search,
+  Link2,
+  Unlink,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { formatMoney, formatDateBR } from '../../utils/formatters';
 import { FAMILY_MEMBERS } from '../../data/constants';
@@ -73,6 +77,19 @@ export default function ImportTab(props) {
   const handleLoadSampleOfx = props.handleLoadSampleOfx || finance.handleLoadSampleOfx;
   const handleReconcileWithTarget = props.handleReconcileWithTarget || finance.handleReconcileWithTarget;
   const handleSplitImportItem = props.handleSplitImportItem || finance.handleSplitImportItem;
+  const handleManualLinkReconciliation = props.handleManualLinkReconciliation || finance.handleManualLinkReconciliation;
+  const handleManualUnlinkReconciliation = props.handleManualUnlinkReconciliation || finance.handleManualUnlinkReconciliation;
+
+  // Estado local para o Modal de Busca & Conciliação Manual
+  const [reconcileModalItem, setReconcileModalItem] = useState(null);
+  const [reconcileSearchTerm, setReconcileSearchTerm] = useState('');
+  const [reconcileFilterType, setReconcileFilterType] = useState('MATCHING_AMOUNT');
+
+  const openReconcileModal = (item) => {
+    setReconcileModalItem(item);
+    setReconcileSearchTerm('');
+    setReconcileFilterType('MATCHING_AMOUNT');
+  };
 
   // Estado local para o Modal de Split (Divisão de Lançamento)
   const [splitModalItem, setSplitModalItem] = useState(null);
@@ -676,11 +693,20 @@ export default function ImportTab(props) {
                               <div className="space-y-1">
                                 <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-red-100 text-red-800 px-2 py-0.5 rounded-full">
                                   <AlertTriangle className="w-3 h-3 text-red-600" />
-                                  <span>🔴 Já Registrado</span>
+                                  <span>{item.reconcileBadge || '🔴 Já Registrado'}</span>
                                 </span>
                                 <span className="text-[10px] text-slate-500 block truncate" title={item.reconcileMessage}>
                                   Duplicata evitada
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => openReconcileModal(item)}
+                                  className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center space-x-0.5"
+                                  title="Ver ou trocar o lançamento vinculado"
+                                >
+                                  <Search className="w-2.5 h-2.5" />
+                                  <span>Alterar vínculo</span>
+                                </button>
                               </div>
                             )}
 
@@ -688,10 +714,15 @@ export default function ImportTab(props) {
                               <div className="space-y-1.5">
                                 <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">
                                   <Sparkles className="w-3 h-3 text-amber-600" />
-                                  <span>🟡 Match Inteligente</span>
+                                  <span>{item.reconcileBadge || '🟡 Match Inteligente'}</span>
                                 </span>
                                 <div className="text-[10px] text-slate-600 bg-white p-1 rounded border border-amber-200">
-                                  <span>Lançamento manual: <strong>{item.matchedTransaction?.description}</strong></span>
+                                  <span className="block text-[9px] text-amber-700 font-bold uppercase">
+                                    {item.matchedTransaction?.type === 'TRANSFER' ? '⇄ Transferência:' : 'Lançamento manual:'}
+                                  </span>
+                                  <span className="font-semibold block truncate" title={item.matchedTransaction?.description}>
+                                    {item.matchedTransaction?.description}
+                                  </span>
                                 </div>
                                 <div className="flex items-center space-x-1">
                                   <button
@@ -718,15 +749,35 @@ export default function ImportTab(props) {
                                   >
                                     Como Novo
                                   </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openReconcileModal(item)}
+                                    className="px-1.5 py-0.5 rounded text-[10px] text-slate-500 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition flex items-center space-x-0.5"
+                                    title="Buscar outro lançamento ou transferência para conciliar"
+                                  >
+                                    <Search className="w-2.5 h-2.5" />
+                                    <span>Trocar</span>
+                                  </button>
                                 </div>
                               </div>
                             )}
 
                             {isNew && (
-                              <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                <span>🟢 Novo Lançamento</span>
-                              </span>
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>🟢 Novo Lançamento</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => openReconcileModal(item)}
+                                  className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center space-x-1 hover:underline"
+                                  title="Buscar um lançamento, transferência ou resgate existente para conciliar"
+                                >
+                                  <Search className="w-2.5 h-2.5" />
+                                  <span>Conciliar com...</span>
+                                </button>
+                              </div>
                             )}
                           </td>
 
@@ -865,16 +916,30 @@ export default function ImportTab(props) {
                             </span>
                           </td>
 
-                          {/* 9. Ações: Dividir (Split) */}
-                          <td className="py-3 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => openSplitModal(item)}
-                              className="p-1.5 rounded-lg border border-slate-200 hover:border-purple-300 hover:bg-purple-50 text-slate-600 hover:text-purple-700 transition"
-                              title="Dividir lançamento em duas ou mais categorias (Split)"
-                            >
-                              <Split className="w-3.5 h-3.5" />
-                            </button>
+                          {/* 9. Ações: Conciliar Manualmente & Dividir (Split) */}
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => openReconcileModal(item)}
+                                className={`p-1.5 rounded-lg border transition ${
+                                  item.action === 'RECONCILE' && item.matchedTransactionId
+                                    ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                    : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-600 hover:text-blue-700'
+                                }`}
+                                title={item.matchedTransactionId ? "Ver/alterar conciliação vinculada" : "Buscar lançamento ou transferência para conciliar"}
+                              >
+                                <Link2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openSplitModal(item)}
+                                className="p-1.5 rounded-lg border border-slate-200 hover:border-purple-300 hover:bg-purple-50 text-slate-600 hover:text-purple-700 transition"
+                                title="Dividir lançamento em duas ou mais categorias (Split)"
+                              >
+                                <Split className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1100,6 +1165,377 @@ export default function ImportTab(props) {
           </div>
         </div>
       )}
+
+      {/* ================= MODAL DE BUSCA & CONCILIAÇÃO MANUAL ================= */}
+      {reconcileModalItem && (() => {
+        const itemAmountCents = Math.abs(reconcileModalItem.amountCents || 0);
+        const itemDate = reconcileModalItem.purchaseDate || reconcileModalItem.date;
+        const isIncome = reconcileModalItem.type === 'INCOME';
+
+        // Filtra transações existentes candidatas
+        const candidates = transactions.filter((t) => {
+          // Filtro por tipo
+          if (reconcileFilterType === 'MATCHING_AMOUNT') {
+            if (Math.abs(t.amountCents || 0) !== itemAmountCents) return false;
+          } else if (reconcileFilterType === 'TRANSFER') {
+            if (t.type !== 'TRANSFER') return false;
+          } else if (reconcileFilterType === 'EXPENSE') {
+            if (t.type !== 'EXPENSE') return false;
+          } else if (reconcileFilterType === 'INCOME') {
+            if (t.type !== 'INCOME') return false;
+          }
+
+          // Filtro por texto de busca
+          if (reconcileSearchTerm.trim()) {
+            const query = reconcileSearchTerm.toLowerCase().trim();
+            const desc = (t.description || '').toLowerCase();
+            const categoryName = (categories.find((c) => c.id === t.categoryId)?.name || '').toLowerCase();
+            const amountStr = ((t.amountCents || 0) / 100).toFixed(2);
+            const accName = (accounts.find((a) => a.id === t.accountId)?.name || '').toLowerCase();
+            const destAccName = (accounts.find((a) => a.id === t.destinationAccountId)?.name || '').toLowerCase();
+            const cardName = (cards.find((c) => c.id === t.cardId)?.name || '').toLowerCase();
+
+            const match =
+              desc.includes(query) ||
+              categoryName.includes(query) ||
+              amountStr.includes(query) ||
+              accName.includes(query) ||
+              destAccName.includes(query) ||
+              cardName.includes(query);
+
+            if (!match) return false;
+          }
+
+          return true;
+        });
+
+        // Ordenação inteligente:
+        // 1. Mesmo valor exato primeiro
+        // 2. Mais próximo em dias da data do item importado
+        const sortedCandidates = [...candidates].sort((a, b) => {
+          const aSameAmount = Math.abs(a.amountCents || 0) === itemAmountCents;
+          const bSameAmount = Math.abs(b.amountCents || 0) === itemAmountCents;
+          if (aSameAmount && !bSameAmount) return -1;
+          if (!aSameAmount && bSameAmount) return 1;
+
+          const aDate = a.purchaseDate || a.date;
+          const bDate = b.purchaseDate || b.date;
+          const diffA = Math.abs(new Date(aDate).getTime() - new Date(itemDate).getTime());
+          const diffB = Math.abs(new Date(bDate).getTime() - new Date(itemDate).getTime());
+          return diffA - diffB;
+        }).slice(0, 40);
+
+        const countSameAmount = transactions.filter((t) => Math.abs(t.amountCents || 0) === itemAmountCents).length;
+        const countTransfers = transactions.filter((t) => t.type === 'TRANSFER').length;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+              {/* Cabeçalho */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 flex items-center space-x-2">
+                    <Search className="w-5 h-5 text-blue-600" />
+                    <span>Buscar Lançamento para Conciliar</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Vincule esta linha do extrato bancário a uma transferência, resgate ou despesa manual já cadastrada para evitar duplicidades no saldo.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReconcileModalItem(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Ficha do Item do Extrato Bancário */}
+              <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider">
+                    Linha do Extrato Bancário a Conciliar
+                  </span>
+                  <span className={`text-sm font-bold ${isIncome ? 'text-emerald-700' : 'text-slate-900'}`}>
+                    {isIncome ? '+ ' : ''}{formatMoney(itemAmountCents)}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-500">Descrição: </span>
+                    <strong className="text-slate-800">{reconcileModalItem.description}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Data: </span>
+                    <strong className="text-slate-800">{formatDateBR(itemDate)}</strong>
+                  </div>
+                </div>
+
+                {reconcileModalItem.matchedTransaction && (
+                  <div className="pt-2 border-t border-blue-200/60 flex items-center justify-between text-xs">
+                    <span className="text-amber-800 font-semibold flex items-center space-x-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Atualmente vinculado a: <strong>{reconcileModalItem.matchedTransaction.description}</strong> ({formatMoney(reconcileModalItem.matchedTransaction.amountCents)})</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleManualUnlinkReconciliation(reconcileModalItem.id);
+                        setReconcileModalItem(null);
+                      }}
+                      className="text-red-600 hover:text-red-800 font-bold flex items-center space-x-1"
+                    >
+                      <Unlink className="w-3.5 h-3.5" />
+                      <span>Desvincular</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Barra de Pesquisa e Filtros Rápidos */}
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Digite para buscar por nome (ex: Inter, Dé, Nubank, Salário), conta ou valor..."
+                    value={reconcileSearchTerm}
+                    onChange={(e) => setReconcileSearchTerm(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                  />
+                  {reconcileSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setReconcileSearchTerm('')}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filtros em Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {countSameAmount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setReconcileFilterType('MATCHING_AMOUNT')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                        reconcileFilterType === 'MATCHING_AMOUNT'
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      🎯 Mesmo Valor ({formatMoney(itemAmountCents)})
+                    </button>
+                  )}
+
+                  {countTransfers > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setReconcileFilterType('TRANSFER')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition flex items-center space-x-1 ${
+                        reconcileFilterType === 'TRANSFER'
+                          ? 'bg-purple-600 text-white shadow-2xs'
+                          : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                      }`}
+                    >
+                      <ArrowLeftRight className="w-3 h-3" />
+                      <span>Transferências & Resgates ({countTransfers})</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setReconcileFilterType('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                      reconcileFilterType === 'ALL'
+                        ? 'bg-slate-800 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Todas as Transações
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReconcileFilterType('EXPENSE')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                      reconcileFilterType === 'EXPENSE'
+                        ? 'bg-red-600 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Despesas
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReconcileFilterType('INCOME')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                      reconcileFilterType === 'INCOME'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Receitas
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista de Resultados de Lançamentos Candidatos */}
+              <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+                {sortedCandidates.length === 0 ? (
+                  <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200 space-y-2">
+                    <p className="text-xs text-slate-500 font-medium">
+                      Nenhum lançamento manual compatível encontrado com este filtro.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReconcileFilterType('ALL');
+                        setReconcileSearchTerm('');
+                      }}
+                      className="text-xs text-blue-600 font-bold hover:underline"
+                    >
+                      Ver todas as transações cadastradas
+                    </button>
+                  </div>
+                ) : (
+                  sortedCandidates.map((tx) => {
+                    const isLinkedThis = reconcileModalItem.matchedTransactionId === tx.id;
+                    const isTransfer = tx.type === 'TRANSFER';
+                    const originAcc = accounts.find((a) => a.id === tx.accountId)?.name;
+                    const destAcc = accounts.find((a) => a.id === tx.destinationAccountId)?.name;
+                    const card = cards.find((c) => c.id === tx.cardId)?.name;
+                    const catName = categories.find((c) => c.id === tx.categoryId)?.name || 'Sem categoria';
+                    const txDate = tx.purchaseDate || tx.date;
+                    const isDiffAmount = Math.abs(tx.amountCents || 0) !== itemAmountCents;
+
+                    return (
+                      <div
+                        key={tx.id}
+                        className={`p-3 rounded-xl border transition flex items-center justify-between gap-3 ${
+                          isLinkedThis
+                            ? 'bg-amber-50/80 border-amber-300'
+                            : 'bg-white hover:bg-slate-50/80 border-slate-200'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">
+                              {formatDateBR(txDate)}
+                            </span>
+
+                            {isTransfer ? (
+                              <span className="inline-flex items-center space-x-1 text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
+                                <ArrowLeftRight className="w-2.5 h-2.5" />
+                                <span>Transferência / Resgate</span>
+                              </span>
+                            ) : tx.type === 'INCOME' ? (
+                              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                Receita
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                                Despesa
+                              </span>
+                            )}
+
+                            <span className="text-[10px] text-slate-400 truncate">
+                              {isTransfer
+                                ? `${originAcc || 'Conta'} ➔ ${destAcc || 'Conta'}`
+                                : (card ? `💳 ${card}` : (originAcc ? `🏦 ${originAcc}` : ''))}
+                            </span>
+                          </div>
+
+                          <div className="font-bold text-xs text-slate-800 truncate" title={tx.description}>
+                            {tx.description}
+                          </div>
+
+                          <div className="text-[10px] text-slate-400">
+                            Categoria: {catName} • Status: <strong className="text-slate-600">{tx.status || 'REALIZADO'}</strong>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0 space-y-1.5">
+                          <div className="font-bold text-xs text-slate-900">
+                            {formatMoney(tx.amountCents)}
+                            {isDiffAmount && (
+                              <span className="block text-[9px] font-normal text-amber-700">
+                                (Diferença de {formatMoney(Math.abs(tx.amountCents - itemAmountCents))})
+                              </span>
+                            )}
+                          </div>
+
+                          {isLinkedThis ? (
+                            <div className="flex items-center justify-end space-x-1.5">
+                              <span className="px-2.5 py-1 bg-amber-100 text-amber-900 text-xs font-bold rounded-lg flex items-center space-x-1 shadow-2xs">
+                                <Check className="w-3 h-3" />
+                                <span>Vinculado</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleManualUnlinkReconciliation(reconcileModalItem.id);
+                                  setReconcileModalItem(null);
+                                }}
+                                className="p-1 rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700"
+                                title="Desvincular"
+                              >
+                                <Unlink className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleManualLinkReconciliation(reconcileModalItem.id, tx.id);
+                                setReconcileModalItem(null);
+                              }}
+                              className="px-3 py-1 bg-blue-600 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-2xs transition flex items-center space-x-1"
+                            >
+                              <Link2 className="w-3.5 h-3.5" />
+                              <span>Conciliar</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Rodapé do Modal */}
+              <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
+                <div>
+                  {reconcileModalItem.matchedTransactionId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleManualUnlinkReconciliation(reconcileModalItem.id);
+                        setReconcileModalItem(null);
+                      }}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold flex items-center space-x-1"
+                    >
+                      <Unlink className="w-3.5 h-3.5" />
+                      <span>Desvincular e Importar como Novo Lançamento</span>
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReconcileModalItem(null)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold transition"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

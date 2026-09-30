@@ -93,7 +93,7 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 * **Extratos Bancários OFX:** Suporte universal a OFX 1.02/1.6 (SGML) e 2.0 (XML), detecção automática de charset UTF-8 e ISO-8859-1 para todos os principais bancos brasileiros (Itaú, Nubank, Banco do Brasil, Inter, C6, Bradesco, Santander, Caixa, XP).
 * **Faturas de Cartão Itaú em Planilhas Excel (.xlsx / .xls):** Parser especializado (`xlsxParser.js`) que processa faturas abertas e fechadas do Itaú (Uniclass Black, Infinite, etc.), com conversão exata de datas seriais do Excel, extração de parcelas (`Parcela X de Y`), identificação automática do cartão titular/adicional/virtual pelo final (`****8476`, `****8557`, `****3740`) e supressão de pagamentos de faturas anteriores.
 * **Faturas em PDF:** Leitura nativa de faturas Itaú e Mercado Pago via `pdfjs-dist`.
-* **Revisão Pré-Lançamento & Conciliação Inteligente:** Mesa de conferência com auto-categorização preditiva, edição inline de descrições, divisão de lançamentos (Split) e motor anti-duplicação (Novo, Match Inteligente e Já Importado).
+* **Revisão Pré-Lançamento & Conciliação Inteligente:** Mesa de conferência com auto-categorização preditiva, edição inline de descrições, divisão de lançamentos (Split), detecção automática de Transferências/Resgates (`TRANSFER`) e ferramenta de **Busca e Conciliação Manual** com qualquer transação existente em 1 clique.
 
 ### 11. 🤖 Assistente de IA Financeiro Conversacional (Google Gemini)
 * **Visão Contextual Dinâmica:** A IA recebe a cada mensagem o panorama financeiro em tempo real (saldo bancário, faturas de cartões, limites disponíveis, status dos envelopes e categorias ativas).
@@ -355,7 +355,11 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
     - 🟢 **NOVO:** Lançamento inexistente no sistema, aprovado automaticamente para importação.
     - 🟡 **SUGERIR CONCILIAÇÃO (Match Inteligente):** Detecta lançamentos manuais com mesmo valor e data próxima, permitindo conciliar com a transação existente sem duplicar ou importar como novo.
     - 🔴 **JÁ IMPORTADO (Anti-Duplicação Exata):** Identificação de FITID bancário único ou dados idênticos já registrados, desmarcando o item automaticamente para proteção do extrato.
+    - ⇄ **Suporte Contábil Nativo a Transferências & Resgates (`TRANSFER`):**
+      - Créditos no extrato (entradas de Pix ou resgates) casam automaticamente com transferências onde o destino é a conta atual (`destinationAccountId`).
+      - Débitos no extrato (saídas de Pix para outras contas ou pagamento de fatura) casam automaticamente com transferências enviadas pela conta atual (`accountId`), blindando o DRE contra receitas ou despesas artificiais duplicadas.
   - [x] **Mesa de Revisão & Edição Prévia Flexível (`src/components/import/ImportTab.jsx`):**
+    - **Ferramenta de Busca & Conciliação Manual (`ManualReconcileModal`):** Botão *"🔍 Conciliar com..."* em cada lançamento permitindo pesquisar em tempo real por transações existentes do período (com filtro rápido de *Mesmo Valor*, *Transferências*, *Despesas* ou *Receitas*) e vincular ou desvincular em 1 clique.
     - **Edição Inline de Descrição:** Renomeie livremente descrições truncadas do banco mantendo o texto original para auditoria.
     - **Auto-Categorização Inteligente:** Regras especializadas para despesas e receitas por palavras-chave nacionais (Supermercados, iFood, Postos, Enel, Farmácias, Netflix, Salários, etc.).
     - **Definição de Titular e Escopo:** Escolha de membro responsável e alternância entre Familiar e Pessoal Privado (`PERSONAL_PRIVATE`).

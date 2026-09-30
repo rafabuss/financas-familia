@@ -88,10 +88,12 @@ O sistema já conta com uma base robusta de recursos em produção, divididos no
 * **Balanço Mensal:** Comparativo entre Entradas vs. Saídas mês a mês.
 * **Participação por Membro:** Visibilidade do peso de cada pessoa nas despesas e receitas do núcleo familiar.
 
-### 10. 📄 Importador Inteligente de Faturas (PDF)
-* **Extração Direta via Navegador:** Utilização de `pdfjs-dist` para ler faturas sem precisar enviar arquivos para servidores externos.
-* **Suporte Inicial:** Faturas de instituições como Itaú e Mercado Pago.
-* **Revisão Pré-Lançamento:** Tela de conferência dos lançamentos extraídos, permitindo selecionar quais importar e associar categorias antes de salvar.
+### 10. 📄 Importador Inteligente Universal (OFX, XLSX/Excel e PDF)
+* **Extração 100% no Navegador (Privacidade Total):** Decodificação client-side direta no dispositivo do usuário sem envio de dados ou arquivos para servidores externos.
+* **Extratos Bancários OFX:** Suporte universal a OFX 1.02/1.6 (SGML) e 2.0 (XML), detecção automática de charset UTF-8 e ISO-8859-1 para todos os principais bancos brasileiros (Itaú, Nubank, Banco do Brasil, Inter, C6, Bradesco, Santander, Caixa, XP).
+* **Faturas de Cartão Itaú em Planilhas Excel (.xlsx / .xls):** Parser especializado (`xlsxParser.js`) que processa faturas abertas e fechadas do Itaú (Uniclass Black, Infinite, etc.), com conversão exata de datas seriais do Excel, extração de parcelas (`Parcela X de Y`), identificação automática do cartão titular/adicional/virtual pelo final (`****8476`, `****8557`, `****3740`) e supressão de pagamentos de faturas anteriores.
+* **Faturas em PDF:** Leitura nativa de faturas Itaú e Mercado Pago via `pdfjs-dist`.
+* **Revisão Pré-Lançamento & Conciliação Inteligente:** Mesa de conferência com auto-categorização preditiva, edição inline de descrições, divisão de lançamentos (Split) e motor anti-duplicação (Novo, Match Inteligente e Já Importado).
 
 ### 11. 🤖 Assistente de IA Financeiro Conversacional (Google Gemini)
 * **Visão Contextual Dinâmica:** A IA recebe a cada mensagem o panorama financeiro em tempo real (saldo bancário, faturas de cartões, limites disponíveis, status dos envelopes e categorias ativas).
@@ -340,8 +342,15 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
   - [x] **Controle Granular por Conta Bancária e Cartão:** Permissão para ocultar contas sensíveis de investimentos ou cartões de certos membros da família.
   - [x] **Tela de Bloqueio/Suspensão Amigável:** Interface informativa caso o acesso do membro esteja temporariamente suspenso pelo administrador.
 
-- [x] **Fase 8: Importações Flexíveis & Conciliação Inteligente**
+- [x] **Fase 8: Importações Flexíveis & Conciliação Inteligente (OFX, XLSX e PDF)**
   - [x] **Parser Universal Client-Side de Arquivos OFX (`src/services/ofxParser.js`):** Leitura e decodificação 100% no navegador (privacidade total) com suporte a OFX 1.02/1.6 (SGML) e OFX 2.0 (XML), detecção automática de charset (UTF-8 e ISO-8859-1) e compatibilidade com bancos brasileiros (Nubank, Inter, Itaú, Banco do Brasil, Bradesco, Santander, C6, Caixa, XP, etc.).
+  - [x] **Parser Especializado de Faturas Itaú em Planilhas Excel (.xlsx / .xls) (`src/services/xlsxParser.js`):**
+    - Processamento de faturas abertas e fechadas exportadas pelo Itaú no navegador via SheetJS (`xlsx`).
+    - Conversão automática de datas seriais numéricas do Excel (ex: `46293` ➔ `28/09/2026`).
+    - Detecção inteligente do cartão de crédito pelo final (`****8476`, `****8557`, `****3740`) e vínculo automático com o cartão cadastrado.
+    - Reconhecimento automático de compras parceladas (`Parcela X de Y` ou `X/Y`).
+    - Supressão inteligente de lançamentos de pagamento de fatura anterior para proteção da exatidão das compras do mês.
+    - Compatibilidade estendida com planilhas financeiras tabulares genéricas (Data, Descrição, Valor).
   - [x] **Motor de Conciliação Híbrida Inteligente (`src/services/reconciliationService.js`):** Detecção dos 3 estados de conciliação com margem configurável de +/- 3 dias:
     - 🟢 **NOVO:** Lançamento inexistente no sistema, aprovado automaticamente para importação.
     - 🟡 **SUGERIR CONCILIAÇÃO (Match Inteligente):** Detecta lançamentos manuais com mesmo valor e data próxima, permitindo conciliar com a transação existente sem duplicar ou importar como novo.

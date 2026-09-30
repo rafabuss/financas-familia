@@ -28,3 +28,8 @@ dist-ssr
 folha.txt
 *.pdf
 *.csv
+*.xlsx
+*.xls
+*.ofx
+Insumos/
+insumos/

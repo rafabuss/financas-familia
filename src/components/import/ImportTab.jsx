@@ -201,8 +201,8 @@ export default function ImportTab(props) {
               <span>Importação Universal de Extratos & Faturas</span>
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-1.5 leading-relaxed">
-              Importe extratos bancários no formato universal <strong>OFX</strong> (Itaú, Nubank, Banco do Brasil, Inter, C6, Santander, Caixa, XP)
-              ou faturas de cartão em <strong>PDF/CSV</strong> com processamento 100% no seu navegador (privacidade e segurança total).
+              Importe extratos bancários no formato universal <strong>OFX</strong> (Itaú, Nubank, Banco do Brasil, Inter, C6, Santander, Caixa, XP),
+              faturas abertas e fechadas do Itaú em <strong>Excel (.xlsx)</strong> ou faturas em <strong>PDF/CSV</strong> com processamento 100% no seu navegador (privacidade e segurança total).
             </p>
           </div>
 
@@ -270,7 +270,7 @@ export default function ImportTab(props) {
               </div>
             </div>
             <p className="text-[11px] text-slate-500">
-              * O sistema identifica automaticamente a conta ou cartão caso o arquivo OFX contenha metadados bancários.
+              * O sistema identifica automaticamente a conta ou cartão caso o arquivo OFX ou XLSX contenha metadados bancários.
             </p>
           </div>
 
@@ -281,9 +281,9 @@ export default function ImportTab(props) {
             </div>
 
             <div>
-              <h3 className="font-bold text-base text-slate-900">Selecione seu Extrato (.ofx, .csv) ou Fatura (.pdf)</h3>
+              <h3 className="font-bold text-base text-slate-900">Selecione seu Extrato (.ofx, .csv) ou Fatura (.xlsx, .pdf)</h3>
               <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                Decodificação direta no navegador com leitura de OFX 1.02/1.6 (SGML) e 2.0 (XML), detecção automática de acentos (UTF-8 e ISO-8859-1) e faturas PDF.
+                Decodificação direta no navegador com leitura de OFX 1.02/1.6 (SGML) e 2.0 (XML), Faturas Itaú em Excel (.xlsx), faturas em PDF e arquivos CSV.
               </p>
             </div>
 
@@ -293,7 +293,7 @@ export default function ImportTab(props) {
                 <span>Escolher Arquivo do Computador</span>
                 <input
                   type="file"
-                  accept=".ofx,.pdf,.csv,.txt"
+                  accept=".ofx,.pdf,.csv,.txt,.xlsx,.xls"
                   onChange={handleFileUpload}
                   className="hidden"
                   disabled={isImportLoading}
@@ -393,11 +393,23 @@ export default function ImportTab(props) {
                   {importMetadata?.institution && (
                     <span>Instituição: <strong className="text-slate-700">{importMetadata.institution}</strong></span>
                   )}
+                  {importMetadata?.cardName && (
+                    <span>• Cartão: <strong className="text-slate-700">{importMetadata.cardName}</strong></span>
+                  )}
                   {importMetadata?.acctId && (
                     <span>• Conta/Cartão: <strong className="text-slate-700">{importMetadata.acctId}</strong></span>
                   )}
+                  {importMetadata?.cardholder && (
+                    <span>• Titular: <strong className="text-slate-700">{importMetadata.cardholder}</strong></span>
+                  )}
+                  {importMetadata?.dueDate && (
+                    <span>• Vencimento: <strong className="text-slate-700">{importMetadata.dueDate}</strong></span>
+                  )}
                   {importMetadata?.startDate && importMetadata?.endDate && (
                     <span>• Período: <strong className="text-slate-700">{formatDateBR(importMetadata.startDate)} até {formatDateBR(importMetadata.endDate)}</strong></span>
+                  )}
+                  {importMetadata?.totalInvoiceCents > 0 && (
+                    <span>• Fatura Total: <strong className="text-slate-700">{formatMoney(importMetadata.totalInvoiceCents)}</strong></span>
                   )}
                   {importMetadata?.ledgerBalanceCents !== null && importMetadata?.ledgerBalanceCents !== undefined && (
                     <span>• Saldo Extrato: <strong className="text-slate-700">{formatMoney(importMetadata.ledgerBalanceCents)}</strong></span>

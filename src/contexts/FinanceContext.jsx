@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { parseInvoicePdf } from '../services/pdfParser';
 import { parseOfx } from '../services/ofxParser';
+import { parseInvoiceXlsx } from '../services/xlsxParser';
 import {
   reconcileTransactions,
   splitTransactionItem,
@@ -4885,6 +4886,11 @@ export function FinanceProvider({ children }) {
       const fileNameLower = file.name.toLowerCase();
       const isOfx = fileNameLower.endsWith('.ofx');
       const isPdf = fileNameLower.endsWith('.pdf') || file.type === 'application/pdf';
+      const isXlsx =
+        fileNameLower.endsWith('.xlsx') ||
+        fileNameLower.endsWith('.xls') ||
+        file.type.includes('spreadsheet') ||
+        file.type.includes('excel');
 
       if (isOfx) {
         // ==================== 1. PARSER UNIVERSAL OFX ====================
@@ -4948,6 +4954,69 @@ export function FinanceProvider({ children }) {
           totalExpensesCents: parsed.totalExpensesCents,
           totalIncomesCents: parsed.totalIncomesCents,
           totalTransactionsCount: parsed.transactions.length,
+          isReconciled: true,
+        });
+
+        setImportPreviewData(reconciled);
+      } else if (isXlsx) {
+        // ==================== 2. PARSER DE FATURAS EXCEL (.XLSX / .XLS) ====================
+        const parsed = await parseInvoiceXlsx(file, categories, FAMILY_MEMBERS);
+
+        if (!parsed.items || parsed.items.length === 0) {
+          alert('Não foi possível identificar lançamentos nesta planilha Excel. Verifique se o arquivo possui colunas com data, descrição e valor.');
+          setIsImportLoading(false);
+          return;
+        }
+
+        setImportDestinationType('CARD');
+
+        // Tenta associar automaticamente o cartão correto pelo final (ex: 8476, 8557, 3740) ou pelo banco Itaú
+        let targetCardId = importSelectedCard || cards[0]?.id;
+        if (parsed.cardLast4) {
+          const matchedCard = cards.find(
+            (c) =>
+              (c.name && c.name.includes(parsed.cardLast4)) ||
+              (c.bank && c.bank.toLowerCase().includes('itau') && c.name && c.name.includes(parsed.cardLast4))
+          );
+          if (matchedCard) {
+            targetCardId = matchedCard.id;
+            setImportSelectedCard(matchedCard.id);
+          } else {
+            const itauCard = cards.find(
+              (c) => (c.bank && c.bank.toLowerCase().includes('itau')) || (c.name && c.name.toLowerCase().includes('itau'))
+            );
+            if (itauCard) {
+              targetCardId = itauCard.id;
+              setImportSelectedCard(itauCard.id);
+            }
+          }
+        }
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const suggestedStatus = (parsed.dueDateIso && parsed.dueDateIso >= todayStr) ? 'COMPROMETIDO' : 'REALIZADO';
+        setImportDefaultStatus(suggestedStatus);
+
+        const reconciled = reconcileTransactions(parsed.items, transactions, {
+          targetId: targetCardId,
+          targetType: 'CARD',
+          dateMarginDays: 3,
+          categories,
+          defaultOwnerId: currentMemberId === 'user-all' ? 'user-1' : currentMemberId,
+        });
+
+        setImportMetadata({
+          fileName: file.name,
+          fileType: 'XLSX',
+          sourceType: 'CARD',
+          institution: parsed.institution,
+          cardholder: parsed.cardholder,
+          cardName: parsed.cardName,
+          cardLast4: parsed.cardLast4,
+          agency: parsed.agency,
+          account: parsed.account,
+          dueDate: parsed.dueDate,
+          dueDateIso: parsed.dueDateIso,
+          totalInvoiceCents: parsed.totalInvoiceCents,
           isReconciled: true,
         });
 

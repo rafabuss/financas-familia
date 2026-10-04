@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
   AlertCircle,
   ArrowRight,
+  Sparkles,
 } from 'lucide-react';
 import { formatMoney } from '../../utils/formatters';
 
@@ -37,6 +38,7 @@ export default function TransactionModal({
   accounts = [],
   cards = [],
   categories = [],
+  scenarios = [],
   currentUser,
   currentMemberId = 'user-all',
 }) {
@@ -70,6 +72,7 @@ export default function TransactionModal({
           accounts={accounts}
           cards={cards}
           categories={categories}
+          scenarios={scenarios}
           currentUser={currentUser}
           currentMemberId={currentMemberId}
         />
@@ -103,10 +106,23 @@ function TransactionModalForm({
   accounts = [],
   cards = [],
   categories = [],
+  scenarios = [],
   currentMemberId = 'user-all',
 }) {
   const initialType = modalState.data?.type || 'EXPENSE';
   const [currentType, setCurrentType] = useState(initialType);
+
+  const convertedScenario = modalState.scenarioIdToConvert
+    ? scenarios.find((s) => s.id === modalState.scenarioIdToConvert)
+    : null;
+
+  const [deleteScenarioAfterConvert, setDeleteScenarioAfterConvert] = useState(true);
+
+  useEffect(() => {
+    if (modalState.scenarioIdToConvert) {
+      setDeleteScenarioAfterConvert(true);
+    }
+  }, [modalState.scenarioIdToConvert]);
 
   // Contas de Origem e Destino para Transferência
   const [originAccountId, setOriginAccountId] = useState(() => {
@@ -167,18 +183,23 @@ function TransactionModalForm({
       <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
         <div>
           <h3 className="font-bold text-base text-slate-900">
-            {modalState.mode === 'edit' ? 'Editar' : 'Cadastrar'}{' '}
-            {isTransfer ? 'Transferência entre Contas' : 'Lançamento'}
+            {modalState.scenarioIdToConvert
+              ? 'Tornar Cenário em Lançamento Real'
+              : modalState.mode === 'edit'
+              ? 'Editar ' + (isTransfer ? 'Transferência entre Contas' : 'Lançamento')
+              : 'Cadastrar ' + (isTransfer ? 'Transferência entre Contas' : 'Lançamento')}
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            {isTransfer
+            {modalState.scenarioIdToConvert
+              ? `Efetivando o cenário "${convertedScenario?.title || modalState.data?.description || 'Simulação'}" como lançamento real`
+              : isTransfer
               ? 'Movimente recursos entre contas (Pix ou TED) sem distorcer o DRE familiar'
               : 'Registre despesas ou receitas financeiras'}
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null })}
+          onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null })}
           className="text-slate-400 hover:text-slate-700 p-1 rounded-md cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -190,6 +211,40 @@ function TransactionModalForm({
         onSubmit={handleSaveTransaction}
         className="p-6 space-y-4 overflow-y-auto"
       >
+        {/* Banner de Conversão de Cenário em Lançamento Real */}
+        {modalState.scenarioIdToConvert && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3.5 space-y-2.5">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-blue-900">
+              <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>
+                Convertendo simulação: <strong>"{convertedScenario?.title || modalState.data?.description || 'Cenário'}"</strong>
+              </span>
+            </div>
+
+            <input type="hidden" name="isConvertingScenario" value="true" />
+
+            <label className="flex items-start space-x-2.5 pt-2 border-t border-blue-200/60 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                name="deleteScenarioAfterConvert"
+                value="true"
+                checked={deleteScenarioAfterConvert}
+                onChange={(e) => setDeleteScenarioAfterConvert(e.target.checked)}
+                className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+              />
+              <div className="text-xs">
+                <span className="font-semibold text-slate-800">
+                  Excluir o cenário original ao confirmar (recomendado)
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                  {deleteScenarioAfterConvert
+                    ? 'O cenário de simulação será removido definitivamente do sistema para evitar duplicidade com este lançamento real.'
+                    : 'O cenário será mantido na aba de Cenários, porém desativado da projeção de fluxo de caixa.'}
+                </p>
+              </div>
+            </label>
+          </div>
+        )}
         {/* ==================================================================== */}
         {/* SELETOR DE TIPO (ABAS): DESPESA x RECEITA x TRANSFERÊNCIA            */}
         {/* ==================================================================== */}
@@ -929,7 +984,7 @@ function TransactionModalForm({
             <button
               type="button"
               disabled={isSubmittingTx}
-              onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null })}
+              onClick={() => setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null })}
               className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               Cancelar
@@ -950,7 +1005,9 @@ function TransactionModalForm({
                 </>
               ) : (
                 <span>
-                  {modalState.mode === 'create'
+                  {modalState.scenarioIdToConvert
+                    ? 'Confirmar Lançamento Real'
+                    : modalState.mode === 'create'
                     ? isTransfer
                       ? 'Salvar Transferência'
                       : 'Salvar Lançamento'

@@ -1,30 +1,38 @@
+import { supabase, isSupabaseConfigured } from './supabase.js';
+import { isDemoMode } from './financeService.js';
+
 /**
  * Camada de Serviço para o Assistente de IA Financeiro (Google Gemini)
  *
- * Arquitetura Desacoplada:
- * Toda a comunicação com a IA fica isolada neste módulo.
- * No futuro, a chamada para a API do Gemini pode ser redirecionada para
- * uma Edge Function no Supabase sem necessidade de alterar a interface.
+ * Arquitetura Híbrida & Segura (Fase 10.1):
+ * - Modo Produção / Autenticado: Invoca a Supabase Edge Function 'ai-assistant'
+ *   protegendo a chave mestra GEMINI_API_KEY no backend via Supabase Secrets.
+ * - Modo Demonstração / Fallback Local: Executa a chamada client-side direta
+ *   (callGeminiDirectly) usando a chave configurada no localStorage ou .env.local.
  */
 
 const STORAGE_API_KEY = 'financas_gemini_api_key';
 const STORAGE_SELECTED_MODEL = 'financas_gemini_model';
-const DEFAULT_MODEL = 'gemini-3.8-flash';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 export const isLegacyOrDiscontinuedModel = (modelId) => {
   if (!modelId) return true;
   const id = modelId.toLowerCase();
-  return id.includes('1.5') || id.includes('2.0') || id.includes('2.5');
+  return id === 'gemini-pro' || id === 'gemini-1.0-pro';
 };
 
 export const AVAILABLE_MODELS = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recomendado & Mais Inteligente)' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Recomendado & Alta Performance)' },
+  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Estável & Econômico)' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Nova Geração)' },
   { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Rápido e Preciso)' },
   { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Equilibrado)' },
   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite (Ultra Rápido)' },
 ];
 
 export const FALLBACK_CANDIDATE_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-1.5-flash',
   'gemini-3.8-flash',
   'gemini-3.6-flash',
   'gemini-3.5-flash',
@@ -61,8 +69,28 @@ export const removeGeminiApiKey = () => {
   localStorage.removeItem(STORAGE_API_KEY);
 };
 
+export const isProxyModeAvailable = () => {
+  if (isDemoMode() || !isSupabaseConfigured() || !supabase) return false;
+  if (typeof window === 'undefined') return false;
+  try {
+    const sessionStr = localStorage.getItem('financas_session');
+    if (sessionStr) {
+      const parsed = JSON.parse(sessionStr);
+      if (parsed && parsed.id && !String(parsed.id).startsWith('demo-')) return true;
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const item = localStorage.getItem(key);
+        if (item && item.includes('access_token')) return true;
+      }
+    }
+  } catch {}
+  return false;
+};
+
 export const hasGeminiApiKey = () => {
-  return Boolean(getGeminiApiKey());
+  return Boolean(getGeminiApiKey()) || isProxyModeAvailable();
 };
 
 let _cachedDiscoveredModels = null;
@@ -560,16 +588,192 @@ export const GEMINI_TOOLS = [
   },
 ];
 
+// Helper compartilhado para mensagens de feedback em fallback de ferramentas
+const generateToolFeedbackFallback = (lastTool) => {
+  if (!lastTool) return 'Ação executada com sucesso!';
+  if (lastTool.name === 'criar_transacao') {
+    return `Pronto! Registrei o lançamento de **${lastTool.args.descricao}** no valor de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** com sucesso.`;
+  }
+  if (lastTool.name === 'criar_categoria') {
+    const tipoLabel = lastTool.args.tipo === 'INCOME' ? 'Receitas' : 'Despesas';
+    return `Pronto! Criei a categoria **${lastTool.args.nome}** em **${tipoLabel}** com sucesso.`;
+  }
+  if (lastTool.name === 'criar_transferencia') {
+    return `Pronto! Registrei a transferência de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** de **${lastTool.args.conta_origem_nome}** para **${lastTool.args.conta_destino_nome}** com sucesso.`;
+  }
+  if (lastTool.name === 'atualizar_cotacao_ativo') {
+    return `Pronto! Atualizei a cotação do ativo **${lastTool.args.ticker_ou_nome}** para **${formatMoney(Math.round(lastTool.args.novo_preco_reais * 100))}** com sucesso.`;
+  }
+  if (lastTool.name === 'aportar_cofrinho') {
+    return `Pronto! Realizei o aporte de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** no cofrinho **${lastTool.args.cofrinho_nome}** com sucesso.`;
+  }
+  if (lastTool.name === 'simular_cenario') {
+    return `Pronto! Criei a simulação do cenário **${lastTool.args.titulo}** com impacto de **${formatMoney(Math.round(lastTool.args.valor_mensal * 100))}/mês** por **${lastTool.args.duracao_meses} meses**.`;
+  }
+  return 'Ação executada com sucesso!';
+};
+
 /**
- * Envia mensagem para a API REST do Google Gemini com suporte a Function Calling
- *
- * @param {Object} options
- * @param {Array} options.messages - Histórico de mensagens [{ role: 'user'|'assistant', content: string }]
- * @param {Object} options.financialContext - Dados financeiros para injeção de contexto
- * @param {Function} options.onExecuteTool - Callback assíncrono para executar a ferramenta solicitada
- * @param {string} [options.model] - Modelo do Gemini a ser usado
+ * Invoca a Supabase Edge Function 'ai-assistant' para processar a requisição de IA
+ * de forma segura no backend (com autenticação JWT e chave GEMINI_API_KEY oculta).
  */
-export const sendMessageToGemini = async ({
+export const callGeminiViaEdgeFunction = async ({
+  contents,
+  systemInstruction,
+  tools = GEMINI_TOOLS,
+  model,
+}) => {
+  if (!isSupabaseConfigured() || !supabase) {
+    throw new Error('Supabase não está configurado neste ambiente.');
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData?.session?.access_token) {
+    throw new Error('Usuário não autenticado no Supabase para invocar o assistente na nuvem.');
+  }
+
+  const payload = {
+    contents,
+    systemInstruction,
+    tools,
+    model,
+  };
+
+  const { data, error } = await supabase.functions.invoke('ai-assistant', {
+    body: payload,
+    headers: {
+      Authorization: `Bearer ${sessionData.session.access_token}`,
+    },
+  });
+
+  if (error) {
+    const errorMsg = data?.error || error.message || 'Erro ao executar a Edge Function ai-assistant';
+    const err = new Error(errorMsg);
+    err.code = data?.code || 'EDGE_FUNCTION_ERROR';
+    err.details = data;
+    throw err;
+  }
+
+  return data;
+};
+
+/**
+ * Fluxo completo de conversação via Edge Function (com suporte a Function Calling)
+ */
+export const executeWithEdgeFunction = async ({
+  messages = [],
+  financialContext = {},
+  onExecuteTool,
+  model,
+}) => {
+  const cleanModel = (m) => (m || '').replace(/^models\//, '').trim();
+  const rawModel = cleanModel(model) || getSelectedModel();
+  const activeModel = isLegacyOrDiscontinuedModel(rawModel) ? DEFAULT_MODEL : rawModel;
+  const systemPrompt = buildSystemPrompt(financialContext);
+
+  const contents = [];
+  messages.forEach((msg) => {
+    const role = msg.role === 'user' ? 'user' : 'model';
+    if (msg.content && msg.content.trim()) {
+      contents.push({
+        role,
+        parts: [{ text: msg.content }],
+      });
+    }
+  });
+
+  const edgeResponse = await callGeminiViaEdgeFunction({
+    contents,
+    systemInstruction: {
+      parts: [{ text: systemPrompt }],
+    },
+    tools: GEMINI_TOOLS,
+    model: activeModel,
+  });
+
+  let textReply = edgeResponse?.text || '';
+  const toolExecutions = [];
+
+  const functionCalls = edgeResponse?.functionCalls || [];
+  if (functionCalls.length > 0 && onExecuteTool) {
+    for (const call of functionCalls) {
+      const fnName = call.name;
+      const fnArgs = call.args || {};
+
+      try {
+        const executionResult = await onExecuteTool(fnName, fnArgs);
+        toolExecutions.push({
+          name: fnName,
+          args: fnArgs,
+          result: executionResult,
+        });
+
+        // Monta histórico de follow-up para feedback em linguagem natural da IA
+        const followUpContents = [
+          ...contents,
+          {
+            role: 'model',
+            parts: [{ functionCall: { name: fnName, args: fnArgs } }],
+          },
+          {
+            role: 'function',
+            parts: [
+              {
+                functionResponse: {
+                  name: fnName,
+                  response: {
+                    output: executionResult,
+                  },
+                },
+              },
+            ],
+          },
+        ];
+
+        try {
+          const followUpRes = await callGeminiViaEdgeFunction({
+            contents: followUpContents,
+            systemInstruction: {
+              parts: [{ text: systemPrompt }],
+            },
+            tools: GEMINI_TOOLS,
+            model: edgeResponse.model || activeModel,
+          });
+
+          if (followUpRes?.text) {
+            textReply = followUpRes.text;
+          }
+        } catch (followErr) {
+          console.warn('[AI Assistant] Aviso na resposta subsequente de tool calling via Edge Function:', followErr);
+        }
+      } catch (toolError) {
+        console.error(`Erro ao executar ferramenta ${fnName}:`, toolError);
+        toolExecutions.push({
+          name: fnName,
+          args: fnArgs,
+          error: toolError.message,
+        });
+      }
+    }
+  }
+
+  // Fallback amigável se executou ferramenta mas não obteve texto explicativo
+  if (!textReply && toolExecutions.length > 0) {
+    textReply = generateToolFeedbackFallback(toolExecutions[0]);
+  }
+
+  return {
+    text: textReply || 'Entendido! Estou à disposição para ajudar com suas finanças.',
+    toolExecutions,
+    source: 'edge-function',
+  };
+};
+
+/**
+ * Executa a chamada diretamente pelo navegador para a API do Google Gemini.
+ * Utilizado em Modo Demonstração, ambiente local ou como fallback resiliente.
+ */
+export const callGeminiDirectly = async ({
   messages = [],
   financialContext = {},
   onExecuteTool,
@@ -820,25 +1024,90 @@ export const sendMessageToGemini = async ({
   }
 
   if (!textReply && toolExecutions.length > 0) {
-    const lastTool = toolExecutions[0];
-    if (lastTool.name === 'criar_transacao') {
-      textReply = `Pronto! Registrei o lançamento de **${lastTool.args.descricao}** no valor de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** com sucesso.`;
-    } else if (lastTool.name === 'criar_categoria') {
-      const tipoLabel = lastTool.args.tipo === 'INCOME' ? 'Receitas' : 'Despesas';
-      textReply = `Pronto! Criei a categoria **${lastTool.args.nome}** em **${tipoLabel}** com sucesso.`;
-    } else if (lastTool.name === 'criar_transferencia') {
-      textReply = `Pronto! Registrei a transferência de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** de **${lastTool.args.conta_origem_nome}** para **${lastTool.args.conta_destino_nome}** com sucesso.`;
-    } else if (lastTool.name === 'atualizar_cotacao_ativo') {
-      textReply = `Pronto! Atualizei a cotação do ativo **${lastTool.args.ticker_ou_nome}** para **${formatMoney(Math.round(lastTool.args.novo_preco_reais * 100))}** com sucesso.`;
-    } else if (lastTool.name === 'aportar_cofrinho') {
-      textReply = `Pronto! Realizei o aporte de **${formatMoney(Math.round(lastTool.args.valor_reais * 100))}** no cofrinho **${lastTool.args.cofrinho_nome}** com sucesso.`;
-    } else if (lastTool.name === 'simular_cenario') {
-      textReply = `Pronto! Criei a simulação do cenário **${lastTool.args.titulo}** com impacto de **${formatMoney(Math.round(lastTool.args.valor_mensal * 100))}/mês** por **${lastTool.args.duracao_meses} meses**.`;
-    }
+    textReply = generateToolFeedbackFallback(toolExecutions[0]);
   }
 
   return {
     text: textReply || 'Entendido! Estou à disposição para ajudar com suas finanças.',
     toolExecutions,
+    source: 'direct-client',
   };
+};
+
+/**
+ * Envia mensagem para o Assistente de IA Financeiro (Google Gemini)
+ *
+ * Estratégia Híbrida Inteligente (Fase 10.1):
+ * - Modo Produção / Usuário Autenticado: Chamada via Supabase Edge Function (ai-assistant)
+ * - Modo Demonstração / Fallback Local: Chamada direta client-side (callGeminiDirectly)
+ *
+ * @param {Object} options
+ * @param {Array} options.messages - Histórico de mensagens [{ role: 'user'|'assistant', content: string }]
+ * @param {Object} options.financialContext - Dados financeiros para injeção de contexto
+ * @param {Function} options.onExecuteTool - Callback assíncrono para executar a ferramenta solicitada
+ * @param {string} [options.model] - Modelo do Gemini a ser usado
+ */
+export const sendMessageToGemini = async ({
+  messages = [],
+  financialContext = {},
+  onExecuteTool,
+  model,
+}) => {
+  const isDemo = Boolean(financialContext.isDemo) || isDemoMode();
+  const hasSupabase = isSupabaseConfigured() && Boolean(supabase);
+
+  // Verifica se o usuário possui sessão ativa autenticada no Supabase
+  let isAuthenticated = false;
+  if (hasSupabase && !isDemo) {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      isAuthenticated = Boolean(sessionData?.session?.user && sessionData?.session?.access_token);
+    } catch {
+      isAuthenticated = false;
+    }
+  }
+
+  const shouldUseEdgeFunction = hasSupabase && !isDemo && isAuthenticated;
+
+  // 1. Modo Produção / Autenticado: Invoca a Supabase Edge Function
+  if (shouldUseEdgeFunction) {
+    try {
+      return await executeWithEdgeFunction({
+        messages,
+        financialContext,
+        onExecuteTool,
+        model,
+      });
+    } catch (edgeErr) {
+      console.warn(
+        '[AI Service] Supabase Edge Function falhou ou não está implantada. Verificando fallback local...',
+        edgeErr
+      );
+
+      // Fallback gracioso transparente: se houver chave configurada no cliente, utiliza chamada direta
+      if (getGeminiApiKey()) {
+        console.log('[AI Service] Acionando fallback direto client-side (callGeminiDirectly)...');
+        return await callGeminiDirectly({
+          messages,
+          financialContext,
+          onExecuteTool,
+          model,
+        });
+      }
+
+      // Se não houver chave local nem Edge Function funcional, relata erro explicativo
+      throw new Error(
+        edgeErr.message ||
+        'Não foi possível conectar ao assistente de IA na nuvem. Verifique a implantação da Edge Function ou configure uma chave Gemini no painel.'
+      );
+    }
+  }
+
+  // 2. Modo Demonstração ou Não-Autenticado: Fallback direto client-side
+  return await callGeminiDirectly({
+    messages,
+    financialContext,
+    onExecuteTool,
+    model,
+  });
 };

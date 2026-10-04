@@ -2576,6 +2576,34 @@ export function FinanceProvider({ children }) {
     openTransactionModal('create', prefilledData, scen.id);
   };
 
+  // Processa o desfecho do cenário ao convertê-lo em lançamento real:
+  // Por padrão, exclui o cenário para evitar duplicidade e manter a lista limpa.
+  // Se o usuário optou por manter, apenas desativa o cenário e marca como convertido.
+  const processScenarioConversion = async (scenarioId, shouldDelete = true) => {
+    if (!scenarioId) return;
+    const convertedScen = scenarios.find((s) => s.id === scenarioId) || { id: scenarioId };
+
+    if (shouldDelete) {
+      const updatedScens = scenarios.filter((s) => s.id !== scenarioId);
+      setScenarios(updatedScens);
+      saveToLocalStorage(STORAGE_KEYS.scenarios, updatedScens);
+      if (convertedScen?.id) {
+        await syncItem('scenarios', convertedScen, true);
+      }
+      alert(`Cenário "${convertedScen?.title || 'Simulação'}" transformado em lançamento real e excluído com sucesso!`);
+    } else {
+      const updatedScens = scenarios.map((s) =>
+        s.id === scenarioId ? { ...s, active: false, convertedAt: new Date().toISOString() } : s
+      );
+      setScenarios(updatedScens);
+      saveToLocalStorage(STORAGE_KEYS.scenarios, updatedScens);
+      if (convertedScen) {
+        await syncItem('scenarios', { ...convertedScen, active: false, convertedAt: new Date().toISOString() });
+      }
+      alert(`Cenário "${convertedScen?.title || 'Simulação'}" transformado em lançamento real e mantido como desativado.`);
+    }
+  };
+
   // Salvar Contas
   const handleSaveAccount = (e) => {
     e.preventDefault();
@@ -3447,6 +3475,14 @@ export function FinanceProvider({ children }) {
         saveToLocalStorage(STORAGE_KEYS.transactions, updated);
         await syncItem('transactions', transferTx);
 
+        if (modalState.scenarioIdToConvert) {
+          const isFromForm = fd.has('isConvertingScenario');
+          const shouldDelete = isFromForm
+            ? fd.get('deleteScenarioAfterConvert') === 'on' || fd.get('deleteScenarioAfterConvert') === 'true'
+            : true;
+          await processScenarioConversion(modalState.scenarioIdToConvert, shouldDelete);
+        }
+
         setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null });
         setEditScope('single');
         setIsSubmittingTx(false);
@@ -3744,16 +3780,11 @@ export function FinanceProvider({ children }) {
       }
 
       if (modalState.scenarioIdToConvert) {
-        const updatedScens = scenarios.map((s) =>
-          s.id === modalState.scenarioIdToConvert ? { ...s, active: false } : s
-        );
-        setScenarios(updatedScens);
-        saveToLocalStorage('financas_scenarios_v1', updatedScens);
-        const convertedScen = scenarios.find((s) => s.id === modalState.scenarioIdToConvert);
-        if (convertedScen) {
-          await syncItem('scenarios', { ...convertedScen, active: false });
-        }
-        alert('Cenário convertido em lançamento real com sucesso!');
+        const isFromForm = fd.has('isConvertingScenario');
+        const shouldDelete = isFromForm
+          ? fd.get('deleteScenarioAfterConvert') === 'on' || fd.get('deleteScenarioAfterConvert') === 'true'
+          : true;
+        await processScenarioConversion(modalState.scenarioIdToConvert, shouldDelete);
       }
 
       setModalState({ isOpen: false, type: null, mode: 'create', data: null, scenarioIdToConvert: null });
@@ -3969,6 +4000,7 @@ export function FinanceProvider({ children }) {
   };
 
   const handleDeleteScenario = (scen) => {
+    if (!scen || !scen.id) return;
     if (confirm(`Deseja realmente excluir o cenário "${scen.title}"?`)) {
       const updated = scenarios.filter((s) => s.id !== scen.id);
       setScenarios(updated);

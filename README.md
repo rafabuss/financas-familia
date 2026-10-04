@@ -380,7 +380,12 @@ Abaixo está o cronograma estratégico de evolução do sistema. Conforme cada f
     - Sincronização e harmonização de 100% dos dados fictícios da *Família Silva* cobrindo todas as novidades recentes (faturas pagas e abertas, transferências Pix, Cofrinhos com rendimento CDI e metas realistas, Cripto/Ações com BTC, ETH, PETR4, VALE3, MXRF11 e Tesouro Selic, botões de teste OFX em 1 clique e filha Camila com matriz de permissões restritas aos próprios gastos).
 
 - [ ] **Fase 10: Empacotamento Mobile & Publicação em Lojas (Play Store / App Store)**
-  - [ ] **IA Comercial Segura (Backend Proxy):** Migração da chamada da IA para **Supabase Edge Functions** (chave centralizada e oculta, controle de quotas por usuário e zero atrito para o consumidor final).
+  - [x] **Fase 10.1: IA Comercial Segura & Proxy Backend (Supabase Edge Function `ai-assistant`):**
+    - Proteção total da chave mestra `GEMINI_API_KEY` isolada nos segredos do Supabase (`supabase secrets set`), eliminando exposição de credenciais no frontend client-side.
+    - Edge Function em Deno/TypeScript (`supabase/functions/ai-assistant/index.ts`) com validação de autenticação JWT via `supabase.auth.getUser()`.
+    - Tráfego CORS robusto para preflight (`OPTIONS`) liberando origens locais e de produção.
+    - Suporte nativo a Function Calling completo (`criar_transacao`, `criar_categoria`, `criar_transferencia`, `simular_cenario`, `atualizar_cotacao_ativo`, `aportar_cofrinho`).
+    - Estratégia híbrida resiliente em `src/services/aiService.js` com fallback automático e transparente para `callGeminiDirectly` no Modo Demonstração ou caso a Edge Function não esteja configurada.
   - [ ] Configuração do Capacitor para transformar o app web em aplicativo nativo iOS e Android.
   - [ ] Integração de autenticação nativa com *Sign in with Apple* e *Sign in with Google*.
   - [ ] Atalhos rápidos no celular para inclusão de gastos imediatos no dia a dia.
@@ -433,6 +438,27 @@ O assistente financeiro utiliza o **Google Gemini** (`gemini-3.8-flash` ou `gemi
      ```
    * **Opção 2 (Direto na interface do aplicativo):**
      Abra o aplicativo, clique no botão flutuante do **Assistente IA** (canto inferior direito), clique no ícone de chave (**🔑**) no topo do painel do chat, cole sua chave e clique em **"Salvar Chave"**. Ela ficará salva com segurança no seu navegador (`localStorage`).
+
+### ⚡ Como Implantar e Configurar a Supabase Edge Function (`ai-assistant`)
+
+Para ambientes em produção, distribuição mobile (Play Store / App Store) ou modelo comercial, a IA é executada pelo proxy backend seguro via Supabase Edge Function, sem necessidade de os usuários configurarem chaves individuais:
+
+1. **Configure o segredo da chave no Supabase (Supabase Secrets):**
+   ```bash
+   supabase secrets set GEMINI_API_KEY=sua-chave-aqui
+   ```
+
+2. **Implante a Edge Function:**
+   ```bash
+   supabase functions deploy ai-assistant
+   ```
+
+3. **(Opcional) Teste localmente com a Supabase CLI:**
+   ```bash
+   supabase functions serve ai-assistant --env-file supabase/functions/ai-assistant/.env.example
+   ```
+
+> **Nota:** Uma vez implantada, qualquer membro autenticado da família que utilize o aplicativo acionará o assistente com proteção de chave no backend e validação JWT automática. Caso o usuário esteja em Modo Demonstração ou sem Supabase, o sistema utiliza o fallback transparente client-side.
 
 ---
 

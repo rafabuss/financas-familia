@@ -30,6 +30,7 @@ import {
   setGeminiApiKey,
   removeGeminiApiKey,
   hasGeminiApiKey,
+  isProxyModeAvailable,
   getSelectedModel,
   setSelectedModel,
   AVAILABLE_MODELS,
@@ -1063,6 +1064,17 @@ export default function AIChatDrawer({
             </div>
 
             <form onSubmit={handleSaveApiKey} className="space-y-4">
+              {isProxyModeAvailable() && (
+                <div className="p-3 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-xl text-xs flex items-start space-x-2.5">
+                  <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">
+                    <span className="font-bold text-emerald-800">Modo Comercial Seguro Ativo:</span>{' '}
+                    Você está autenticado na nuvem da família. As consultas são processadas com segurança via{' '}
+                    <strong>Supabase Edge Function</strong> com a chave protegida no servidor. Esta chave local é opcional para testes ou fallback offline.
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 block">
                   Chave de API (API Key)

@@ -815,6 +815,7 @@ function AppContent() {
         accounts={accounts}
         cards={cards}
         categories={categories}
+        scenarios={scenarios}
         currentUser={currentUser}
         currentMemberId={currentMemberId}
       />

@@ -33,3 +33,6 @@ folha.txt
 *.ofx
 Insumos/
 insumos/
+
+# Supabase temp
+supabase/.temp/

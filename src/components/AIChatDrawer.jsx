@@ -425,14 +425,16 @@ export default function AIChatDrawer({
       console.error('Erro no chat da IA:', err);
       let errorText = err.message || 'Desculpe, ocorreu um erro ao processar sua mensagem.';
 
-      if (errorText.includes('CHAVE_NAO_CONFIGURADA') || errorText.includes('CHAVE_INVALIDA')) {
+      if (isDemo && (errorText.includes('CHAVE_NAO_CONFIGURADA') || errorText.includes('CHAVE_INVALIDA'))) {
         setShowKeyModal(true);
+      } else if (!isDemo && (errorText.includes('CHAVE_NAO_CONFIGURADA') || errorText.includes('CHAVE_INVALIDA'))) {
+        errorText = 'O assistente inteligente está temporariamente indisponível. Por favor, tente novamente em instantes.';
       }
 
       const errorMsg = {
         id: `msg-${Date.now()}-error`,
         role: 'assistant',
-        content: `⚠️ **Aviso**: ${errorText}`,
+        content: `⚠️ ${errorText}`,
         timestamp: new Date().toISOString(),
         isError: true,
       };
@@ -543,32 +545,35 @@ export default function AIChatDrawer({
                 <div className="flex items-center space-x-1.5">
                   <h3 className="text-sm font-bold tracking-tight text-white">Assistente Financeiro</h3>
                   <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30">
-                    Gemini
+                    IA
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 capitalize flex items-center space-x-1">
                   <span>{monthLabel}</span>
                   <span>•</span>
                   <span className={isDemo ? 'text-amber-300 font-medium' : 'text-emerald-300 font-medium'}>
-                    {isDemo ? 'Modo Demo' : 'Modo Real'}
+                    {isDemo ? 'Modo Demonstração' : 'Online'}
                   </span>
                 </p>
               </div>
             </div>
 
             <div className="flex items-center space-x-1">
-              <button
-                type="button"
-                onClick={handleOpenKeyModal}
-                title="Configurar chave da API Gemini"
-                className={`p-2 rounded-xl transition ${
-                  hasKey
-                    ? 'text-slate-300 hover:text-white hover:bg-white/10'
-                    : 'text-amber-400 bg-amber-400/20 hover:bg-amber-400/30 animate-pulse'
-                }`}
-              >
-                <Key className="w-4 h-4" />
-              </button>
+              {/* Opções de desenvolvedor apenas no Modo Demonstração */}
+              {isDemo && (
+                <button
+                  type="button"
+                  onClick={handleOpenKeyModal}
+                  title="Configurar chave de testes (Sandbox)"
+                  className={`p-2 rounded-xl transition ${
+                    hasKey
+                      ? 'text-slate-300 hover:text-white hover:bg-white/10'
+                      : 'text-amber-400 bg-amber-400/20 hover:bg-amber-400/30'
+                  }`}
+                >
+                  <Key className="w-4 h-4" />
+                </button>
+              )}
               {messages.length > 0 && (
                 <button
                   type="button"
@@ -590,12 +595,12 @@ export default function AIChatDrawer({
             </div>
           </div>
 
-          {/* Banner de Chave Ausente */}
-          {!hasKey && (
+          {/* Banner discreto exibido apenas no Modo Demonstração caso o dev não tenha chave */}
+          {isDemo && !hasKey && (
             <div className="p-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900 shrink-0">
               <div className="flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Chave do Google Gemini não configurada.</span>
+                <span>Modo Demonstração: Faça login na sua conta para usar a IA ou configure uma chave de testes.</span>
               </div>
               <button
                 type="button"
@@ -1014,7 +1019,7 @@ export default function AIChatDrawer({
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder={hasKey ? 'Pergunte ou peça para anotar algo...' : 'Configure sua chave Gemini para conversar'}
+                placeholder="Pergunte ou peça para anotar algo..."
                 disabled={isLoading}
                 className="flex-1 bg-slate-100 hover:bg-slate-50 focus:bg-white text-xs sm:text-sm text-slate-900 px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition placeholder:text-slate-400"
               />
@@ -1027,20 +1032,22 @@ export default function AIChatDrawer({
               </button>
             </form>
             <div className="flex items-center justify-between mt-2 px-1 text-[10px] text-slate-400">
-              <span>IA analisa dados locais de {monthLabel}</span>
-              <button
-                type="button"
-                onClick={handleOpenKeyModal}
-                className="text-blue-600 hover:underline flex items-center space-x-0.5"
-              >
-                <span>Chave Gemini</span>
-              </button>
+              <span>Assistente Financeiro • {monthLabel}</span>
+              {isDemo && (
+                <button
+                  type="button"
+                  onClick={handleOpenKeyModal}
+                  className="text-slate-400 hover:text-slate-600 underline flex items-center space-x-0.5"
+                >
+                  <span>Chave de Testes</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal Discreto de Configuração da Chave Gemini */}
+      {/* Modal de Configuração para Desenvolvedores (Modo Demo) */}
       {showKeyModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 p-6 space-y-4">
@@ -1050,8 +1057,8 @@ export default function AIChatDrawer({
                   <Key className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">Chave da API Google Gemini</h3>
-                  <p className="text-xs text-slate-500">Configuração de acesso para o assistente de IA</p>
+                  <h3 className="text-sm font-bold text-slate-900">Configurações de Testes</h3>
+                  <p className="text-xs text-slate-500">Chave personalizada para a demonstração local</p>
                 </div>
               </div>
               <button
@@ -1064,20 +1071,9 @@ export default function AIChatDrawer({
             </div>
 
             <form onSubmit={handleSaveApiKey} className="space-y-4">
-              {isProxyModeAvailable() && (
-                <div className="p-3 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-xl text-xs flex items-start space-x-2.5">
-                  <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <div className="leading-relaxed">
-                    <span className="font-bold text-emerald-800">Modo Comercial Seguro Ativo:</span>{' '}
-                    Você está autenticado na nuvem da família. As consultas são processadas com segurança via{' '}
-                    <strong>Supabase Edge Function</strong> com a chave protegida no servidor. Esta chave local é opcional para testes ou fallback offline.
-                  </div>
-                </div>
-              )}
-
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 block">
-                  Chave de API (API Key)
+                  Chave de API (Opcional para Sandbox)
                 </label>
                 <div className="relative">
                   <input

@@ -1095,10 +1095,9 @@ export const sendMessageToGemini = async ({
         });
       }
 
-      // Se não houver chave local nem Edge Function funcional, relata erro explicativo
+      // Se não houver chave local nem Edge Function funcional, exibe mensagem limpa ao usuário final
       throw new Error(
-        edgeErr.message ||
-        'Não foi possível conectar ao assistente de IA na nuvem. Verifique a implantação da Edge Function ou configure uma chave Gemini no painel.'
+        'O assistente inteligente está temporariamente indisponível. Por favor, tente novamente em instantes.'
       );
     }
   }

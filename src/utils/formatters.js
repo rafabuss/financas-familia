@@ -117,3 +117,28 @@ export const isTxOverdue = (tx, cards = [], todayStr = new Date().toISOString().
   const dueDate = getTxDueDate(tx, cards);
   return Boolean(dueDate && dueDate < todayStr);
 };
+
+// Converte _localUpdatedAt ou createdAt (número ou string ISO) para timestamp numérico seguro em ms
+export const getTxTimestampMs = (tx) => {
+  if (!tx) return 0;
+  const raw = tx._localUpdatedAt ?? tx.createdAt;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+// Comparador cronológico determinístico compartilhado entre a tabela e o saldo progressivo
+export const compareTransactionsChronologically = (a, b, cards = []) => {
+  const dateA = getTxDueDate(a, cards) || a?.date || '';
+  const dateB = getTxDueDate(b, cards) || b?.date || '';
+  if (dateA !== dateB) return dateA.localeCompare(dateB);
+
+  const timeA = getTxTimestampMs(a);
+  const timeB = getTxTimestampMs(b);
+  if (timeA !== timeB) return timeA - timeB;
+
+  return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+};

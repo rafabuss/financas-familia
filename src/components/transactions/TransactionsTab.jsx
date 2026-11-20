@@ -26,7 +26,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
 } from 'lucide-react';
-import { formatMoney, formatDateBR, getTxDueDate, isTxOverdue } from '../../utils/formatters';
+import { formatMoney, formatDateBR, getTxDueDate, isTxOverdue, compareTransactionsChronologically } from '../../utils/formatters';
 
 export default function TransactionsTab({
   searchTerm,
@@ -107,16 +107,10 @@ export default function TransactionsTab({
           (t.type === 'TRANSFER' && t.destinationAccountId === selectedAccount.id))
     );
 
-    // 2. Ordenação estritamente cronológica (do mais antigo para o mais recente)
-    const sortedChronological = [...accountTxs].sort((a, b) => {
-      const dateA = a.date || a.dueDate || '';
-      const dateB = b.date || b.dueDate || '';
-      if (dateA !== dateB) return dateA.localeCompare(dateB);
-      const timeA = a._localUpdatedAt || a.createdAt || 0;
-      const timeB = b._localUpdatedAt || b.createdAt || 0;
-      if (timeA !== timeB) return timeA - timeB;
-      return String(a.id).localeCompare(String(b.id));
-    });
+    // 2. Ordenação estritamente cronológica (mesma regra determinística da tabela)
+    const sortedChronological = [...accountTxs].sort((a, b) =>
+      compareTransactionsChronologically(a, b, cards)
+    );
 
     // 3. Acumula linha a linha a partir do saldo inicial da conta
     let running = selectedAccount.initialBalanceCents || 0;
@@ -138,7 +132,7 @@ export default function TransactionsTab({
     });
 
     return map;
-  }, [selectedAccount, allDisplayTransactions]);
+  }, [selectedAccount, allDisplayTransactions, cards]);
 
   return (
     <div className="space-y-4">

@@ -14,6 +14,7 @@ import {
   calculateCardDueDate,
   addMonthsToIso,
   setGlobalPrivacyActive,
+  compareTransactionsChronologically,
 } from '../utils/formatters';
 import { FAMILY_MEMBERS, DEFAULT_CATEGORIES, DEFAULT_HOUSEHOLD_MEMBERS, DEFAULT_FAMILY_NAME } from '../data/constants';
 import {
@@ -5577,6 +5578,7 @@ export function FinanceProvider({ children }) {
     setFilterDatePreset('ALL');
     setFilterStartDate('');
     setFilterEndDate('');
+    setTxSort({ field: 'date', direction: 'asc' });
     setActiveTab('transactions');
   }, []);
 
@@ -5591,6 +5593,7 @@ export function FinanceProvider({ children }) {
     setFilterDatePreset('ALL');
     setFilterStartDate('');
     setFilterEndDate('');
+    setTxSort({ field: 'date', direction: 'asc' });
     setActiveTab('transactions');
   }, []);
 
@@ -5605,6 +5608,7 @@ export function FinanceProvider({ children }) {
     setFilterDatePreset('ALL');
     setFilterStartDate('');
     setFilterEndDate('');
+    setTxSort({ field: 'date', direction: 'asc' });
     setActiveTab('transactions');
   }, []);
 
@@ -5817,13 +5821,13 @@ export function FinanceProvider({ children }) {
           const diffA = Math.abs(new Date(dateA + 'T12:00:00').getTime() - todayTime);
           const diffB = Math.abs(new Date(dateB + 'T12:00:00').getTime() - todayTime);
           if (diffA !== diffB) return diffA - diffB;
-          // Em caso de mesmo distanciamento, data futura tem precedência
-          return new Date(dateA + 'T12:00:00') - new Date(dateB + 'T12:00:00');
+          // Em caso de mesmo distanciamento, usa a mesma ordem cronológica determinística
+          return compareTransactionsChronologically(a, b, cards);
         }
         if (txSort.direction === 'asc') {
-          return new Date(dateA + 'T12:00:00') - new Date(dateB + 'T12:00:00');
+          return compareTransactionsChronologically(a, b, cards);
         }
-        return new Date(dateB + 'T12:00:00') - new Date(dateA + 'T12:00:00');
+        return compareTransactionsChronologically(b, a, cards);
       }
 
       if (txSort.field === 'description') {

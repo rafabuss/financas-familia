@@ -5365,7 +5365,7 @@ export function FinanceProvider({ children }) {
   };
 
   // Gravação Segura de Importação & Conciliação
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async () => {
     if (!importPreviewData || importPreviewData.length === 0) return;
     const toImport = importPreviewData.filter((i) => i.selected);
     if (toImport.length === 0) {
@@ -5504,9 +5504,10 @@ export function FinanceProvider({ children }) {
       return allUpdated;
     });
 
-    // Sincronização em nuvem / backend
+    // Sincronização em nuvem / backend (aguarda e valida retorno)
+    let syncRes = { success: true };
     if (newTxs.length > 0 || updatedExistingList.length > 0) {
-      syncBatchTransactions([...newTxs, ...updatedExistingList]).catch(console.warn);
+      syncRes = await syncBatchTransactions([...newTxs, ...updatedExistingList]);
     }
 
     const summaryParts = [];
@@ -5514,7 +5515,14 @@ export function FinanceProvider({ children }) {
     if (reconciledCount > 0) summaryParts.push(`${reconciledCount} lançamento(s) conciliado(s) sem duplicação`);
     if (futureInstallmentsCount > 0) summaryParts.push(`${futureInstallmentsCount} parcela(s) futura(s) agendada(s)`);
 
-    alert(`Sucesso na Importação!\n• ${summaryParts.join('\n• ')}`);
+    if (syncRes && syncRes.success === false) {
+      const errMsg = syncRes.error?.message || String(syncRes.error || 'Erro desconhecido');
+      alert(
+        `Atenção: os lançamentos foram salvos localmente neste navegador, mas FALHARAM ao sincronizar com o Supabase!\n\nDetalhes: ${errMsg}\n\n• ${summaryParts.join('\n• ')}`
+      );
+    } else {
+      alert(`Sucesso na Importação!\n• ${summaryParts.join('\n• ')}`);
+    }
     setImportPreviewData(null);
     setImportMetadata(null);
 

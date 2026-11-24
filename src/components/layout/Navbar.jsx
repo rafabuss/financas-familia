@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { FAMILY_MEMBERS } from '../../data/constants';
 import { useFinance } from '../../contexts/FinanceContext';
+import { isDemoMode } from '../../services/financeService';
 
 export default function Navbar({
   isDemoModeState,

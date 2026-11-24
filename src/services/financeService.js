@@ -239,7 +239,7 @@ export const transactionToClient = (row) => {
     savingsGoalId = recRule.replace('GOAL_TX:', '').trim();
   }
 
-  const txType = row.type || ((destinationAccountId || savingsGoalId) ? 'TRANSFER' : 'EXPENSE');
+  const txType = (destinationAccountId || savingsGoalId) ? 'TRANSFER' : (row.type || 'EXPENSE');
 
   return {
     id: row.id,

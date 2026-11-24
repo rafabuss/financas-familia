@@ -11,7 +11,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { formatMoney, formatMonthLabel } from '../../utils/formatters';
+import { formatMoney, formatMonthLabel, getTxDueDate } from '../../utils/formatters';
 
 export default function ProjectionsTab({
   scenarios = [],
@@ -507,18 +507,7 @@ export default function ProjectionsTab({
                     const startYear = now.getFullYear();
                     const startMonth = now.getMonth();
                     const currentYearMonth = `${startYear}-${String(startMonth + 1).padStart(2, '0')}`;
-
-                    // Despesas e receitas habituais base do mês atual (sem parcelamentos futuros embutidos)
-                    const baseIncomesCents = visibleTransactions
-                      .filter(
-                        (t) =>
-                          t.type === 'INCOME' &&
-                          t.status !== 'CANCELADO' &&
-                          !t.installmentGroupId &&
-                          t.date &&
-                          t.date.startsWith(currentYearMonth)
-                      )
-                      .reduce((acc, t) => acc + t.amountCents, 0);
+                    const getEffectiveDate = (t) => getTxDueDate(t) || t?.date || '';
 
                     for (let idx = 0; idx < projectionHorizon; idx++) {
                       const targetDate = new Date(startYear, startMonth + idx, 1);
@@ -615,11 +604,11 @@ export default function ProjectionsTab({
                         let month0ExpenseDeduction = 0;
                         if (isWhatIfActiveForMonth || activeScenariosThisMonth.length > 0) {
                           month0IncomeDeduction = visibleTransactions
-                            .filter((t) => t.type === 'INCOME' && t.status !== 'CANCELADO' && !t.installmentGroupId && t.date && t.date.startsWith(currentYearMonth) && isIgnoredIncomeTx(t))
+                            .filter((t) => t.type === 'INCOME' && t.status !== 'CANCELADO' && !t.installmentGroupId && getEffectiveDate(t).startsWith(currentYearMonth) && isIgnoredIncomeTx(t))
                             .reduce((acc, t) => acc + t.amountCents, 0);
 
                           month0ExpenseDeduction = visibleTransactions
-                            .filter((t) => t.type === 'EXPENSE' && t.status !== 'CANCELADO' && t.date && t.date.startsWith(currentYearMonth) && isIgnoredExpenseTx(t))
+                            .filter((t) => t.type === 'EXPENSE' && !t.isInvoicePayment && t.status !== 'CANCELADO' && getEffectiveDate(t).startsWith(currentYearMonth) && isIgnoredExpenseTx(t))
                             .reduce((acc, t) => acc + t.amountCents, 0);
 
                           Object.values(categoryReductionsMap).forEach((cents) => {
@@ -638,9 +627,9 @@ export default function ProjectionsTab({
                             (t) =>
                               t.status !== 'CANCELADO' &&
                               t.type === 'EXPENSE' &&
+                              !t.isInvoicePayment &&
                               t.installmentGroupId &&
-                              t.date &&
-                              t.date.startsWith(monthKey) &&
+                              getEffectiveDate(t).startsWith(monthKey) &&
                               !isIgnoredExpenseTx(t)
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
@@ -651,8 +640,7 @@ export default function ProjectionsTab({
                               t.status !== 'CANCELADO' &&
                               t.type === 'INCOME' &&
                               t.installmentGroupId &&
-                              t.date &&
-                              t.date.startsWith(monthKey) &&
+                              getEffectiveDate(t).startsWith(monthKey) &&
                               !isIgnoredIncomeTx(t)
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
@@ -664,9 +652,9 @@ export default function ProjectionsTab({
                             (t) =>
                               t.status !== 'CANCELADO' &&
                               t.type === 'EXPENSE' &&
+                              !t.isInvoicePayment &&
                               !t.installmentGroupId &&
-                              t.date &&
-                              t.date.startsWith(monthKey) &&
+                              getEffectiveDate(t).startsWith(monthKey) &&
                               !isIgnoredExpenseTx(t)
                           )
                           .forEach((t) => {
@@ -680,8 +668,7 @@ export default function ProjectionsTab({
                               t.status !== 'CANCELADO' &&
                               t.type === 'INCOME' &&
                               !t.installmentGroupId &&
-                              t.date &&
-                              t.date.startsWith(monthKey) &&
+                              getEffectiveDate(t).startsWith(monthKey) &&
                               !isIgnoredIncomeTx(t)
                           )
                           .reduce((a, t) => a + t.amountCents, 0);
@@ -748,15 +735,15 @@ export default function ProjectionsTab({
                         const uncatSched = scheduledExpensesByCat['__none__'] || 0;
                         finalBaseExpense += uncatSched;
 
-                        // Despesas e receitas habituais base deduzindo eventuais receitas suprimidas
+                        // Receitas recorrentes habituais do mês atual (usadas como base apenas se o mês futuro ainda não tiver receitas agendadas)
                         const activeBaseIncomesCents = visibleTransactions
                           .filter(
                             (t) =>
                               t.type === 'INCOME' &&
+                              t.isRecurring &&
                               t.status !== 'CANCELADO' &&
                               !t.installmentGroupId &&
-                              t.date &&
-                              t.date.startsWith(currentYearMonth) &&
+                              getEffectiveDate(t).startsWith(currentYearMonth) &&
                               !isIgnoredIncomeTx(t)
                           )
                           .reduce((acc, t) => acc + t.amountCents, 0);

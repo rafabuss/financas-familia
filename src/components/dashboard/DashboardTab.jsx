@@ -312,6 +312,72 @@ export default function DashboardTab({
             </div>
           </div>
         </div>
+
+        {/* Posição Agora (Tempo Real): Tenho em conta + Ainda receberei - Ainda pagarei = Final do mês */}
+        <div className="mt-4 pt-4 border-t border-slate-200/80">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2.5">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-blue-700">
+              Posição Agora (Tempo Real)
+            </h4>
+            <span className="text-[11px] text-slate-400">
+              Tenho hoje em conta + Ainda receberei − Ainda vou pagar = Quanto ficarei no fim do mês
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Tenho em conta agora */}
+            <div className="rounded-xl bg-blue-50/60 border border-blue-200/80 p-3">
+              <span className="text-[11px] font-semibold text-blue-800 uppercase tracking-wide block">
+                Tenho em conta agora
+              </span>
+              <div className={`text-base sm:text-lg font-extrabold mt-0.5 ${(monthSummary.totalBankBalance || 0) >= 0 ? 'text-blue-950' : 'text-rose-600'}`}>
+                {formatMoney(monthSummary.totalBankBalance || 0)}
+              </div>
+              <div className="text-[10px] text-blue-700/80 mt-0.5">
+                Saldo já realizado nas contas
+              </div>
+            </div>
+
+            {/* Ainda receberei */}
+            <div className="rounded-xl bg-emerald-50/40 border border-emerald-200/70 p-3">
+              <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide block">
+                (+) Ainda receberei
+              </span>
+              <div className="text-base sm:text-lg font-extrabold text-emerald-700 mt-0.5">
+                + {formatMoney(monthSummary.incomePending || 0)}
+              </div>
+              <div className="text-[10px] text-emerald-800/75 mt-0.5">
+                Entradas pendentes em {formatMonthLabel(dashboardMonth)}
+              </div>
+            </div>
+
+            {/* Ainda tenho que pagar */}
+            <div className="rounded-xl bg-rose-50/40 border border-rose-200/70 p-3">
+              <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wide block">
+                (−) Ainda tenho que pagar
+              </span>
+              <div className="text-base sm:text-lg font-extrabold text-rose-700 mt-0.5">
+                − {formatMoney(monthSummary.expensePending || 0)}
+              </div>
+              <div className="text-[10px] text-rose-800/75 mt-0.5">
+                Contas e faturas em aberto no mês
+              </div>
+            </div>
+
+            {/* Quanto ficarei no final do mês */}
+            <div className="rounded-xl bg-indigo-950 border border-indigo-900 p-3 text-white">
+              <span className="text-[11px] font-semibold text-indigo-300 uppercase tracking-wide block">
+                (=) Ficarei no final do mês
+              </span>
+              <div className={`text-base sm:text-lg font-black mt-0.5 ${(monthSummary.projectedEndBalance || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {formatMoney(monthSummary.projectedEndBalance || 0)}
+              </div>
+              <div className="text-[10px] text-indigo-200/80 mt-0.5">
+                Atualiza na hora ao dar baixa nos lançamentos
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 5 Cards de Métricas Principais */}

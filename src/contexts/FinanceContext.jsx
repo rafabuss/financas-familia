@@ -2253,6 +2253,42 @@ export function FinanceProvider({ children }) {
     const envelopesCommitted = dashboardEnvelopes.totalResidualCommittedCents;
     const freeProjectedBalance = projectedEndBalance - envelopesCommitted;
 
+    // Fluxo de Caixa Didático do Mês (Antes do Mês -> Entradas -> Saídas -> Fim do Mês)
+    const activeVisibleAccounts = visibleAccounts.filter((a) => !a.archived);
+    const visibleAccIds = new Set(activeVisibleAccounts.map((a) => a.id));
+    const monthStartStr = `${dashboardMonth}-01`;
+
+    let openingRealizedBalance = activeVisibleAccounts.reduce(
+      (sum, a) => sum + (a.initialBalanceCents || 0),
+      0
+    );
+    let priorPendingNet = 0;
+
+    visibleTransactions.forEach((tx) => {
+      if (tx.status === 'CANCELADO') return;
+      if (tx.cardId) return; // compras de cartão afetam o caixa via pagamento de fatura (isInvoicePayment)
+
+      const effectiveDate = getTxDueDate(tx) || tx.date;
+      if (!effectiveDate || effectiveDate >= monthStartStr) return;
+
+      let delta = 0;
+      if (tx.type === 'TRANSFER') {
+        if (tx.accountId && visibleAccIds.has(tx.accountId)) delta -= tx.amountCents;
+        if (tx.destinationAccountId && visibleAccIds.has(tx.destinationAccountId)) delta += tx.amountCents;
+      } else if (tx.accountId && visibleAccIds.has(tx.accountId)) {
+        delta = tx.type === 'INCOME' ? tx.amountCents : -tx.amountCents;
+      }
+
+      if (tx.status === 'REALIZADO') {
+        openingRealizedBalance += delta;
+      } else {
+        priorPendingNet += delta;
+      }
+    });
+
+    const monthClosingProjectedBalance =
+      openingRealizedBalance + priorPendingNet + incomeTotal - expenseTotal;
+
     return {
       income: incomeTotal,
       incomeTotal,
@@ -2274,6 +2310,9 @@ export function FinanceProvider({ children }) {
       totalInvestmentsBalance,
       totalCardsAvailable,
       projectedEndBalance,
+      openingRealizedBalance,
+      priorPendingNet,
+      monthClosingProjectedBalance,
     };
   }, [visibleTransactions, accountBalances, cardStats, cards, dashboardMonth, getTxDueDate, dashboardEnvelopes, visibleAccounts, visibleSavingsGoals, savingsGoalBalances, visiblePortfolioAssets]);
 

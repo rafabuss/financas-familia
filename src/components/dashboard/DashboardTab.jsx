@@ -236,6 +236,84 @@ export default function DashboardTab({
         </div>
       )}
 
+      {/* Resumo Didático do Fluxo do Mês (Antes -> Entradas -> Saídas -> Fim do Mês) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-3">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Resumo do Fluxo de Caixa — {formatMonthLabel(dashboardMonth)}
+          </h3>
+          <span className="text-[11px] text-slate-400">
+            Saldo antes do mês + Entradas − Saídas = Saldo previsto no fim do mês
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* 1. Antes do mês começar */}
+          <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block">
+              1. Antes do mês começar
+            </span>
+            <div className={`text-lg font-extrabold mt-1 ${(monthSummary.openingRealizedBalance || 0) >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+              {formatMoney(monthSummary.openingRealizedBalance || 0)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Saldo realizado até o fim do mês anterior
+              {monthSummary.priorPendingNet !== 0 && (
+                <span className="block text-amber-700 font-medium mt-0.5">
+                  Pendências de meses anteriores: {monthSummary.priorPendingNet >= 0 ? '+' : ''}
+                  {formatMoney(monthSummary.priorPendingNet)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 2. O que entrou */}
+          <div className="rounded-xl bg-emerald-50/60 border border-emerald-200/80 p-3.5">
+            <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide block">
+              2. (+) O que entrou no mês
+            </span>
+            <div className="text-lg font-extrabold text-emerald-700 mt-1">
+              + {formatMoney(monthSummary.incomeTotal || 0)}
+            </div>
+            <div className="text-[11px] text-emerald-800/80 mt-1">
+              Recebido: <strong>{formatMoney(monthSummary.incomeRealized || 0)}</strong> • A receber:{' '}
+              <strong>{formatMoney(monthSummary.incomePending || 0)}</strong>
+            </div>
+          </div>
+
+          {/* 3. O que saiu */}
+          <div className="rounded-xl bg-rose-50/60 border border-rose-200/80 p-3.5">
+            <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wide block">
+              3. (−) O que saiu no mês
+            </span>
+            <div className="text-lg font-extrabold text-rose-700 mt-1">
+              − {formatMoney(monthSummary.expenseTotal || 0)}
+            </div>
+            <div className="text-[11px] text-rose-800/80 mt-1">
+              Pago: <strong>{formatMoney(monthSummary.expenseRealized || 0)}</strong> • A pagar:{' '}
+              <strong>{formatMoney(monthSummary.expensePending || 0)}</strong>
+            </div>
+          </div>
+
+          {/* 4. O que terei no final do mês */}
+          <div className="rounded-xl bg-slate-900 border border-slate-800 p-3.5 text-white">
+            <span className="text-[11px] font-semibold text-blue-300 uppercase tracking-wide block">
+              4. (=) No final do mês
+            </span>
+            <div className={`text-lg font-black mt-1 ${(monthSummary.monthClosingProjectedBalance ?? monthSummary.projectedEndBalance ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {formatMoney(monthSummary.monthClosingProjectedBalance ?? monthSummary.projectedEndBalance ?? 0)}
+            </div>
+            <div className="text-[11px] text-slate-300 mt-1">
+              Resultado do mês:{' '}
+              <strong className={(monthSummary.balance || 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                {(monthSummary.balance || 0) >= 0 ? '+' : ''}
+                {formatMoney(monthSummary.balance || 0)}
+              </strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 5 Cards de Métricas Principais */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Card 1: Saldo Consolidado Projetado */}

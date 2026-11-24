@@ -1050,6 +1050,59 @@ export const clearAllDemoData = clearDemoDataOnly;
 // OPERAÇÕES DE PERSISTÊNCIA (SAVE / DELETE)
 // ==========================================
 
+const isTransactionSchemaCompatError = (error) => {
+  if (!error) return false;
+  const code = String(error.code || '');
+  const msg = String(error.message || '');
+  return (
+    code === '42703' ||
+    code === '23514' ||
+    code === 'PGRST204' ||
+    msg.includes('destination_account_id') ||
+    msg.includes('savings_goal_id') ||
+    msg.includes('schema cache') ||
+    msg.includes('transactions_type_check')
+  );
+};
+
+const buildTransactionSchemaFallback = (dbData, origItem, error) => {
+  const copy = { ...dbData };
+  const code = String(error?.code || '');
+  const msg = String(error?.message || '');
+
+  // Preserva metadados em recurrence_rule_id antes de remover colunas opcionais ausentes no schema
+  if (!copy.recurrence_rule_id && origItem?.destinationAccountId) {
+    copy.recurrence_rule_id = `TRANSFER_DEST:${origItem.destinationAccountId}`;
+  }
+  if (!copy.recurrence_rule_id && origItem?.savingsGoalId) {
+    copy.recurrence_rule_id = `GOAL_TX:${origItem.savingsGoalId}`;
+  }
+
+  // Remove colunas opcionais (mesmo quando null) se o schema não as possuir
+  if (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    msg.includes('destination_account_id') ||
+    msg.includes('savings_goal_id') ||
+    msg.includes('schema cache')
+  ) {
+    delete copy.destination_account_id;
+    delete copy.savings_goal_id;
+  }
+
+  // Se o PostgREST indicar outra coluna específica ausente no schema cache, remove-a também
+  const missingColMatch = msg.match(/Could not find the '([^']+)' column/);
+  if (missingColMatch?.[1] && missingColMatch[1] in copy) {
+    delete copy[missingColMatch[1]];
+  }
+
+  if (msg.includes('transactions_type_check') || (code === '23514' && copy.type === 'TRANSFER')) {
+    copy.type = 'EXPENSE';
+  }
+
+  return copy;
+};
+
 export const syncItem = async (entity, item, isDelete = false) => {
   if (isDemoMode()) return { success: true };
   const isCloud = isSupabaseConfigured() && supabase;
@@ -1204,28 +1257,10 @@ export const syncItem = async (entity, item, isDelete = false) => {
             }
           }
 
-          // 2.1 Fallback para destination_account_id ou restrição CHECK de tipo TRANSFER (caso a migration ainda não tenha sido rodada no Supabase)
-          if (
-            entity === 'transactions' &&
-            (res.error.code === '42703' ||
-              res.error.code === '23514' ||
-              String(res.error.message || '').includes('destination_account_id') ||
-              String(res.error.message || '').includes('transactions_type_check'))
-          ) {
+          // 2.1 Fallback para destination_account_id / savings_goal_id / restrição CHECK de tipo TRANSFER
+          if (entity === 'transactions' && isTransactionSchemaCompatError(res.error)) {
             try {
-              const fallbackTx = { ...dbData };
-              if (String(res.error.message || '').includes('destination_account_id') || res.error.code === '42703') {
-                delete fallbackTx.destination_account_id;
-                if (!fallbackTx.recurrence_rule_id && item.destinationAccountId) {
-                  fallbackTx.recurrence_rule_id = `TRANSFER_DEST:${item.destinationAccountId}`;
-                }
-              }
-              if (String(res.error.message || '').includes('transactions_type_check') || (res.error.code === '23514' && fallbackTx.type === 'TRANSFER')) {
-                fallbackTx.type = 'EXPENSE';
-                if (!fallbackTx.recurrence_rule_id && item.destinationAccountId) {
-                  fallbackTx.recurrence_rule_id = `TRANSFER_DEST:${item.destinationAccountId}`;
-                }
-              }
+              const fallbackTx = buildTransactionSchemaFallback(dbData, item, res.error);
               const retryRes = await supabase.from('transactions').upsert(fallbackTx);
               if (!retryRes?.error) {
                 clearTransactionPending(item.id);
@@ -1306,34 +1341,16 @@ export const syncBatchTransactions = async (txList, isDelete = false) => {
 
       let res = await supabase.from('transactions').upsert(dbList);
       if (res?.error) {
-        if (
-          res.error.code === '42703' ||
-          res.error.code === '23514' ||
-          String(res.error.message || '').includes('destination_account_id') ||
-          String(res.error.message || '').includes('transactions_type_check')
-        ) {
-          const fallbackList = dbList.map((dbData, idx) => {
-            const copy = { ...dbData };
-            const origItem = txList[idx];
-            if (copy.destination_account_id) {
-              if (!copy.recurrence_rule_id && origItem?.destinationAccountId) {
-                copy.recurrence_rule_id = `TRANSFER_DEST:${origItem.destinationAccountId}`;
-              }
-              delete copy.destination_account_id;
-            }
-            if (copy.type === 'TRANSFER') {
-              copy.type = 'EXPENSE';
-              if (!copy.recurrence_rule_id && origItem?.destinationAccountId) {
-                copy.recurrence_rule_id = `TRANSFER_DEST:${origItem.destinationAccountId}`;
-              }
-            }
-            return copy;
-          });
+        if (isTransactionSchemaCompatError(res.error)) {
+          const fallbackList = dbList.map((dbData, idx) =>
+            buildTransactionSchemaFallback(dbData, txList[idx], res.error)
+          );
           const retryRes = await supabase.from('transactions').upsert(fallbackList);
           if (!retryRes?.error) {
             txList.forEach((t) => clearTransactionPending(t.id));
             return { success: true };
           }
+          res = retryRes;
         }
         console.warn('Erro ao sincronizar lote de transações no Supabase:', res.error.message);
         return { success: false, error: res.error };
